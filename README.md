@@ -9,7 +9,7 @@ A command-line tool to remove Go binaries with ease
 [![Latest Version](https://img.shields.io/github/tag/nicholas-fedor/go-remove.svg)](https://github.com/nicholas-fedor/go-remove/releases)
 [![CircleCI](https://dl.circleci.com/status-badge/img/gh/nicholas-fedor/go-remove/tree/main.svg?style=shield)](https://dl.circleci.com/status-badge/redirect/gh/nicholas-fedor/go-remove/tree/main)
 [![Codecov](https://codecov.io/gh/nicholas-fedor/go-remove/branch/main/graph/badge.svg)](https://codecov.io/gh/nicholas-fedor/go-remove)
-[![Codacy Badge](https://app.codacy.com/project/badge/Grade/1c48cfb7646d4009aa8c6f71287670b8)](https://www.codacy.com/gh/nicholas-fedor/go-remove/dashboard?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=nicholas-fedor/go-remove&amp;utm_campaign=Badge_Grade)
+[![Codacy Badge](https://app.codacy.com/project/badge/Grade/ffbca83bd14d48669260bb9bb38668a8)](https://www.codacy.com/gh/nicholas-fedor/go-remove/dashboard?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=nicholas-fedor/go-remove&amp;utm_campaign=Badge_Grade)
 [![GoDoc](https://godoc.org/github.com/nicholas-fedor/go-remove?status.svg)](https://godoc.org/github.com/nicholas-fedor/go-remove)
 [![Go Report Card](https://goreportcard.com/badge/github.com/nicholas-fedor/go-remove)](https://goreportcard.com/report/github.com/nicholas-fedor/go-remove)
 ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/nicholas-fedor/go-remove)
