@@ -51,8 +51,19 @@ release:
 checksum:
   name_template: checksums.txt
 
-binary_signs:
-  - {}
-
 signs:
-  - artifacts: checksum
+  - id: default
+    artifacts: all
+    args:
+      - "--batch"
+      - "--local-user"
+      - "nick@nickfedor.com"
+      - "--yes"
+      - "--pinentry-mode"
+      - "loopback"
+      - "--passphrase"
+      - "${GPG_PASSPHRASE}"
+      - "--output"
+      - "{{ .ArtifactName }}.sig"
+      - "--detach-sign"
+      - "{{ .ArtifactPath }}"
