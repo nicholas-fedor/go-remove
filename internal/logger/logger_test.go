@@ -68,11 +68,9 @@ func TestZapLogger_Sync(t *testing.T) {
 	}{
 		{
 			name: "sync with valid logger",
-			z: func() *ZapLogger {
-				logger, _ := zap.NewProduction()
-
-				return &ZapLogger{logger}
-			}(),
+			z: &ZapLogger{
+				Logger: zap.NewNop(), // Use no-op logger to avoid real I/O
+			},
 			wantErr: false,
 		},
 		{

@@ -74,7 +74,12 @@ func (r *RealFS) DetermineBinDir(useGoroot bool) (string, error) {
 	if goBin == "" {
 		gopath := os.Getenv("GOPATH")
 		if gopath == "" {
-			gopath = filepath.Join(os.Getenv("HOME"), "go")
+			home := os.Getenv("HOME")
+			if runtime.GOOS == windowsOS && home == "" {
+				home = os.Getenv("USERPROFILE")
+			}
+
+			gopath = filepath.Join(home, "go")
 		}
 
 		goBin = filepath.Join(gopath, "bin")
