@@ -64,6 +64,6 @@ signs:
       - "--passphrase"
       - "${GPG_PASSPHRASE}"
       - "--output"
-      - "{{ .ArtifactName }}.sig"
+      - "$${signature}"
       - "--detach-sign"
-      - "{{ .ArtifactPath }}"
+      - "${artifact}"
