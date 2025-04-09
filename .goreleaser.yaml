@@ -64,6 +64,6 @@ signs:
       - "--passphrase"
       - "${GPG_PASSPHRASE}"
       - "--output"
-      - "$${signature}"
+      - "${signature}"
       - "--detach-sign"
       - "${artifact}"
