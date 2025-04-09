@@ -77,7 +77,7 @@ func TestRealFS_DetermineBinDir(t *testing.T) {
 			name:    "useGoroot with GOROOT unset",
 			r:       &RealFS{},
 			args:    args{useGoroot: true},
-			env:     map[string]string{},
+			env:     map[string]string{"GOROOT": ""}, // Explicitly unset GOROOT
 			want:    "",
 			wantErr: true,
 		},
@@ -93,7 +93,7 @@ func TestRealFS_DetermineBinDir(t *testing.T) {
 			name:    "use GOPATH/bin when GOBIN unset",
 			r:       &RealFS{},
 			args:    args{useGoroot: false},
-			env:     map[string]string{"GOPATH": "/gopath"},
+			env:     map[string]string{"GOPATH": "/gopath", "GOBIN": ""},
 			want:    filepath.Join("/gopath", "bin"),
 			wantErr: false,
 		},
@@ -101,19 +101,23 @@ func TestRealFS_DetermineBinDir(t *testing.T) {
 			name:    "use default ~/go/bin when GOBIN and GOPATH unset",
 			r:       &RealFS{},
 			args:    args{useGoroot: false},
-			env:     map[string]string{},
-			want:    filepath.Join(os.Getenv("HOME"), "go", "bin"), // Use actual HOME dynamically
+			env:     map[string]string{"GOBIN": "", "GOPATH": ""},
+			want:    filepath.Join(os.Getenv("HOME"), "go", "bin"),
 			wantErr: false,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Clear existing env vars that might interfere.
+			os.Unsetenv("GOROOT")
+			os.Unsetenv("GOBIN")
+			os.Unsetenv("GOPATH")
 			// Set environment variables for the test case.
 			for k, v := range tt.env {
 				t.Setenv(k, v)
 			}
 
-			// Adjust expected path only if HOME or USERPROFILE is explicitly set in env.
+			// Adjust expected path for the platform’s HOME directory.
 			if tt.name == "use default ~/go/bin when GOBIN and GOPATH unset" {
 				home := os.Getenv("HOME")
 
