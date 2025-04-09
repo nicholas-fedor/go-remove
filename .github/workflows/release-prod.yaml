@@ -1,0 +1,37 @@
+name: Release (Production)
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "**/v[0-9]+.[0-9]+.[0-9]+"
+
+jobs:
+  Lint:
+    uses: ./.github/workflows/lint.yaml
+
+  Test:
+    uses: ./.github/workflows/test.yaml
+    permissions:
+      contents: read
+
+  Build:
+    uses: ./.github/workflows/build.yaml
+    needs:
+      - Test
+      - Lint
+    secrets: inherit
+    permissions:
+      contents: write
+      packages: write
+      attestations: write
+      id-token: write
+
+  Update-Go-Docs:
+    uses: ./.github/workflows/update-go-docs.yaml
+    needs:
+      - Test
+      - Build
+    permissions:
+      contents: read

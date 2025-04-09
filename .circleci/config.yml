@@ -1,0 +1,33 @@
+version: 2.1
+
+jobs:
+  build:
+    docker:
+      - image: cimg/go:1.24.2@sha256:cd027ede83e11c7b1002dfff3f4975fbf0124c5028df4c63da571c30db88fb3c
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - go-mod-v4-{{ checksum "go.sum" }}
+      - run:
+          name: Install Dependencies
+          command: go mod download
+      - save_cache:
+          key: go-mod-v4-{{ checksum "go.sum" }}
+          paths:
+            - "/go/pkg/mod"
+      - run:
+          name: Run tests
+          command: |
+            mkdir -p /tmp/test-reports
+            gotestsum --junitfile /tmp/test-reports/unit-tests.xml -- -race -coverprofile=coverage.txt -covermode=atomic ./...
+      - run:
+          name: Upload coverage to Codecov
+          command: bash <(curl -s https://codecov.io/bash) -f coverage.txt
+      - store_test_results:
+          path: /tmp/test-reports
+
+workflows:
+  build-test:
+    jobs:
+      - build

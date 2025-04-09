@@ -1,0 +1,58 @@
+version: 2
+project_name: go-remove
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - main: ./main.go
+    binary: go-remove
+    goos:
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - "386"
+      - arm
+      - arm64
+
+archives:
+  - name_template: >-
+      {{- .ProjectName }}_
+      {{- if eq .Os "darwin" }}macOS
+      {{- else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}amd64
+      {{- else if eq .Arch "386" }}i386
+      {{- else if eq .Arch "arm" }}armhf
+      {{- else if eq .Arch "arm64" }}arm64v8
+      {{- else }}{{ .Arch }}{{ end }}_
+      {{- .Version -}}
+    formats: ["tar.gz"]
+    format_overrides:
+      - goos: windows
+        formats: ["zip"]
+    files:
+      - LICENSE.md
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+release:
+  github:
+    owner: nicholas-fedor
+    name: go-remove
+  draft: false
+  prerelease: auto
+
+checksum:
+  name_template: checksums.txt
+
+binary_signs:
+  - {}
+
+signs:
+  - artifacts: checksum
