@@ -101,8 +101,8 @@ func TestRealFS_DetermineBinDir(t *testing.T) {
 			name:    "use default ~/go/bin when GOBIN and GOPATH unset",
 			r:       &RealFS{},
 			args:    args{useGoroot: false},
-			env:     map[string]string{"HOME": "/home/user"},
-			want:    filepath.Join("/home/user", "go", "bin"),
+			env:     map[string]string{},
+			want:    filepath.Join(os.Getenv("HOME"), "go", "bin"), // Use actual HOME dynamically
 			wantErr: false,
 		},
 	}
@@ -113,11 +113,14 @@ func TestRealFS_DetermineBinDir(t *testing.T) {
 				t.Setenv(k, v)
 			}
 
-			// Adjust expected path for the platform’s HOME directory.
+			// Adjust expected path only if HOME or USERPROFILE is explicitly set in env.
 			if tt.name == "use default ~/go/bin when GOBIN and GOPATH unset" {
 				home := os.Getenv("HOME")
+
 				if runtime.GOOS == windowsOS {
-					home = os.Getenv("USERPROFILE")
+					if userProfile := os.Getenv("USERPROFILE"); userProfile != "" {
+						home = userProfile
+					}
 				}
 
 				tt.want = filepath.Join(home, "go", "bin")
