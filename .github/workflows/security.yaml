@@ -43,22 +43,12 @@ jobs:
     name: govulncheck
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@85e6279cec87321a52edac9c87bce653a07cf6c2
-        with:
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@dca8468d37b6d090cde2c7b97b738a37134f5ffb
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
       - id: govulncheck
-        uses: nicholas-fedor/govulncheck-action@fc0ddd3d8efb25d2fa9d3b3537c1dc3b980fd516
+        uses: nicholas-fedor/govulncheck-action@6a8d2de4ea206851920b33dd2e7058f9351556e7
         with:
           output-format: sarif
           output-file: ${{ env.OUTPUT_FILE }}
-          setup-go: false
+          go-version-input: ${{ env.GO_VERSION }}
           repo-checkout: false
 
       - name: Upload SARIF file
