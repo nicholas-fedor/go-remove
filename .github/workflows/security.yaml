@@ -49,7 +49,6 @@ jobs:
           output-format: sarif
           output-file: ${{ env.OUTPUT_FILE }}
           go-version-input: ${{ env.GO_VERSION }}
-          repo-checkout: false
 
       - name: Upload SARIF file
         uses: github/codeql-action/upload-sarif@45775bd8235c68ba998cffa5171334d58593da47 # v3
