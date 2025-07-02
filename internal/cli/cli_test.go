@@ -18,14 +18,20 @@ along with this program. If not, see <http://www.gnu.org/licenses/>.
 package cli
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	fsmocks "github.com/nicholas-fedor/go-remove/internal/fs/mocks"
+	"github.com/nicholas-fedor/go-remove/internal/logger"
 	logmocks "github.com/nicholas-fedor/go-remove/internal/logger/mocks"
 )
 
@@ -50,11 +56,12 @@ func mockNoOpRunner(tea.Model, ...tea.ProgramOption) (*tea.Program, error) {
 // TestRun verifies the Run function’s behavior under various conditions.
 func TestRun(t *testing.T) {
 	tests := []struct {
-		name    string
-		config  Config
-		deps    Dependencies
-		runner  ProgramRunner
-		wantErr bool
+		name       string
+		config     Config
+		deps       Dependencies
+		runner     ProgramRunner
+		wantErr    bool
+		wantOutput string // Expected stdout output for non-verbose success
 	}{
 		{
 			name:   "direct removal success",
@@ -75,7 +82,8 @@ func TestRun(t *testing.T) {
 					return m
 				}(),
 			},
-			wantErr: false,
+			wantErr:    false,
+			wantOutput: "Successfully removed vhs\n",
 		},
 		{
 			name:   "direct removal failure",
@@ -179,19 +187,64 @@ func TestRun(t *testing.T) {
 					return m
 				}(),
 			},
-			wantErr: true,
+			wantErr:    false, // Sync errors are ignored on all platforms
+			wantOutput: "Successfully removed vhs\n",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Redirect stdout to capture output for non-verbose success cases.
+			oldStdout := os.Stdout
+			r, w, _ := os.Pipe()
+			os.Stdout = w
+
+			defer func() {
+				os.Stdout = oldStdout
+
+				w.Close()
+			}()
+
 			// Define a local run function to test with a custom runner.
 			run := func(deps Dependencies, config Config, runner ProgramRunner) error {
 				log := deps.Logger
 
+				// Set log level based on config if verbose mode is enabled.
+				if config.Verbose {
+					zapLogger, ok := log.(*logger.ZapLogger)
+					if !ok {
+						return fmt.Errorf(
+							"failed to set log level: %w with type %T",
+							ErrInvalidLoggerType,
+							log,
+						)
+					}
+
+					switch config.LogLevel {
+					case "debug":
+						zapLogger.Logger = zapLogger.WithOptions(
+							zap.IncreaseLevel(zapcore.DebugLevel),
+						)
+					case "warn":
+						zapLogger.Logger = zapLogger.WithOptions(
+							zap.IncreaseLevel(zapcore.WarnLevel),
+						)
+					case "error":
+						zapLogger.Logger = zapLogger.WithOptions(
+							zap.IncreaseLevel(zapcore.ErrorLevel),
+						)
+					default:
+						zapLogger.Logger = zapLogger.WithOptions(
+							zap.IncreaseLevel(zapcore.InfoLevel),
+						)
+					}
+
+					log = zapLogger
+				}
+
 				binDir, err := deps.FS.DetermineBinDir(config.Goroot)
 				if err != nil {
-					_ = log.Sync()
+					_ = log.Sync() // Flush logs; errors are ignored
 
 					return err
 				}
@@ -200,16 +253,22 @@ func TestRun(t *testing.T) {
 					err = RunTUI(binDir, config, log, deps.FS, runner)
 				} else {
 					binaryPath := deps.FS.AdjustBinaryPath(binDir, config.Binary)
+
 					err = deps.FS.RemoveBinary(binaryPath, config.Binary, config.Verbose, log)
+					if err == nil && !config.Verbose {
+						fmt.Fprintf(os.Stdout, "Successfully removed %s\n", config.Binary)
+					}
 				}
 
 				if err != nil {
-					_ = log.Sync()
+					_ = log.Sync() // Flush logs; errors are ignored
 
 					return err
 				}
 
-				return log.Sync()
+				_ = log.Sync() // Errors are ignored
+
+				return nil
 			}
 
 			// Use DefaultRunner if no mock is provided.
@@ -218,11 +277,27 @@ func TestRun(t *testing.T) {
 				runner = DefaultRunner{}
 			}
 
+			// Execute the run function and capture any errors.
 			err := run(tt.deps, tt.config, runner)
+
+			// Capture stdout output after execution.
+			w.Close()
+
+			var buf bytes.Buffer
+			buf.ReadFrom(r)
+			gotOutput := buf.String()
+
+			// Verify error behavior matches expectations.
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Run() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
+			// Verify stdout output for non-verbose success cases.
+			if tt.wantOutput != "" && gotOutput != tt.wantOutput {
+				t.Errorf("Run() output = %q, want %q", gotOutput, tt.wantOutput)
+			}
+
+			// Assert that all mock expectations were met.
 			tt.deps.FS.(*fsmocks.MockFS).AssertExpectations(t)
 			tt.deps.Logger.(*logmocks.MockLogger).AssertExpectations(t)
 		})
