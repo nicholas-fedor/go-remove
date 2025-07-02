@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"runtime"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -77,7 +76,7 @@ func Run(deps Dependencies, config Config) error {
 	// Determine the binary directory based on GOROOT or GOPATH/GOBIN settings.
 	binDir, err := deps.FS.DetermineBinDir(config.Goroot)
 	if err != nil {
-		_ = log.Sync() // Ensure logs are flushed despite the error
+		_ = log.Sync() // Flush logs; errors are ignored
 
 		return fmt.Errorf("failed to determine binary directory: %w", err)
 	}
@@ -96,7 +95,7 @@ func Run(deps Dependencies, config Config) error {
 	}
 
 	if err != nil {
-		_ = log.Sync() // Flush logs before returning the error
+		_ = log.Sync() // Flush logs; errors are ignored
 
 		if config.Binary == "" {
 			return fmt.Errorf("failed to run TUI: %w", err)
@@ -106,9 +105,7 @@ func Run(deps Dependencies, config Config) error {
 	}
 
 	// Sync the logger to ensure all logs are written before exit.
-	if err := log.Sync(); err != nil && runtime.GOOS != "windows" {
-		return fmt.Errorf("failed to sync logger: %w", err)
-	}
+	_ = log.Sync() // Errors are ignored
 
 	return nil
 }

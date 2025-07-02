@@ -188,7 +188,7 @@ func TestRun(t *testing.T) {
 					return m
 				}(),
 			},
-			wantErr:    false, // Sync errors are ignored on Windows
+			wantErr:    false, // Sync errors are ignored on all platforms
 			wantOutput: "Successfully removed vhs\n",
 		},
 	}

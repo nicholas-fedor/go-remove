@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"runtime"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -100,9 +99,9 @@ func (z *ZapLogger) Sync() error {
 		return ErrLoggerNil
 	}
 
-	// On Windows, ignore sync errors that are benign (e.g., invalid handle).
-	if err := z.Logger.Sync(); err != nil && runtime.GOOS != "windows" {
-		return fmt.Errorf("failed to sync logger: %w", err)
+	// Attempt to sync, logging any errors in debug mode but not returning them.
+	if err := z.Logger.Sync(); err != nil {
+		z.Debug("Logger sync failed", zap.Error(err))
 	}
 
 	return nil
