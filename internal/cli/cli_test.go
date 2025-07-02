@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -212,29 +211,40 @@ func TestRun(t *testing.T) {
 
 				// Set log level based on config if verbose mode is enabled.
 				if config.Verbose {
+					zapLogger, ok := log.(*logger.ZapLogger)
+					if !ok {
+						return fmt.Errorf(
+							"failed to set log level: %w with type %T",
+							ErrInvalidLoggerType,
+							log,
+						)
+					}
+
 					switch config.LogLevel {
 					case "debug":
-						log.(*logger.ZapLogger).Logger = log.(*logger.ZapLogger).WithOptions(
+						zapLogger.Logger = zapLogger.WithOptions(
 							zap.IncreaseLevel(zapcore.DebugLevel),
 						)
 					case "warn":
-						log.(*logger.ZapLogger).Logger = log.(*logger.ZapLogger).WithOptions(
+						zapLogger.Logger = zapLogger.WithOptions(
 							zap.IncreaseLevel(zapcore.WarnLevel),
 						)
 					case "error":
-						log.(*logger.ZapLogger).Logger = log.(*logger.ZapLogger).WithOptions(
+						zapLogger.Logger = zapLogger.WithOptions(
 							zap.IncreaseLevel(zapcore.ErrorLevel),
 						)
 					default:
-						log.(*logger.ZapLogger).Logger = log.(*logger.ZapLogger).WithOptions(
+						zapLogger.Logger = zapLogger.WithOptions(
 							zap.IncreaseLevel(zapcore.InfoLevel),
 						)
 					}
+
+					log = zapLogger
 				}
 
 				binDir, err := deps.FS.DetermineBinDir(config.Goroot)
 				if err != nil {
-					_ = log.Sync()
+					_ = log.Sync() // Flush logs; errors are ignored
 
 					return err
 				}
@@ -251,15 +261,12 @@ func TestRun(t *testing.T) {
 				}
 
 				if err != nil {
-					_ = log.Sync()
+					_ = log.Sync() // Flush logs; errors are ignored
 
 					return err
 				}
 
-				// Sync the logger, ignoring errors on Windows.
-				if err := log.Sync(); err != nil && runtime.GOOS != "windows" {
-					return fmt.Errorf("failed to sync logger: %w", err)
-				}
+				_ = log.Sync() // Errors are ignored
 
 				return nil
 			}
