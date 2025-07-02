@@ -19,15 +19,21 @@ along with this program. If not, see <http://www.gnu.org/licenses/>.
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/nicholas-fedor/go-remove/internal/cli"
 	"github.com/nicholas-fedor/go-remove/internal/fs"
 	"github.com/nicholas-fedor/go-remove/internal/logger"
 )
+
+// ErrInvalidLoggerType indicates that the logger is not of the expected *ZapLogger type.
+var ErrInvalidLoggerType = errors.New("logger is not a *ZapLogger")
 
 // rootCmd defines the root command for go-remove.
 var rootCmd = &cobra.Command{
@@ -49,11 +55,45 @@ var rootCmd = &cobra.Command{
 		// Extract flag values to configure CLI behavior; defaults to TUI mode if no binary is given.
 		verbose, _ := cmd.Flags().GetBool("verbose")
 		goroot, _ := cmd.Flags().GetBool("goroot")
+		logLevel, _ := cmd.Flags().GetString("log-level")
 		config := cli.Config{
-			Binary:  "",
-			Verbose: verbose,
-			Goroot:  goroot,
-			Help:    false, // Cobra manages help output automatically
+			Binary:   "",
+			Verbose:  verbose,
+			Goroot:   goroot,
+			Help:     false, // Cobra manages help output automatically
+			LogLevel: logLevel,
+		}
+
+		// Set log level based on config if verbose mode is enabled.
+		if verbose {
+			zapLogger, ok := log.(*logger.ZapLogger)
+			if !ok {
+				return fmt.Errorf(
+					"failed to set log level: %w with type %T",
+					ErrInvalidLoggerType,
+					log,
+				)
+			}
+			switch logLevel {
+			case "debug":
+				zapLogger.Logger = zapLogger.WithOptions(
+					zap.IncreaseLevel(zapcore.DebugLevel),
+				)
+			case "warn":
+				zapLogger.Logger = zapLogger.WithOptions(
+					zap.IncreaseLevel(zapcore.WarnLevel),
+				)
+			case "error":
+				zapLogger.Logger = zapLogger.WithOptions(
+					zap.IncreaseLevel(zapcore.ErrorLevel),
+				)
+			default:
+				zapLogger.Logger = zapLogger.WithOptions(
+					zap.IncreaseLevel(zapcore.InfoLevel),
+				)
+			}
+			log = zapLogger // Update the logger in deps
+			deps.Logger = log
 		}
 
 		// If a binary name is provided as an argument, run in direct removal mode.
@@ -77,6 +117,7 @@ var rootCmd = &cobra.Command{
 func init() {
 	rootCmd.Flags().BoolP("verbose", "v", false, "Enable verbose output")
 	rootCmd.Flags().BoolP("goroot", "", false, "Target GOROOT/bin instead of GOBIN or GOPATH/bin")
+	rootCmd.Flags().StringP("log-level", "l", "info", "Set log level (debug, info, warn, error)")
 }
 
 // Execute runs the root command and handles any execution errors.

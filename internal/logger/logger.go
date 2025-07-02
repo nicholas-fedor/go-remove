@@ -21,8 +21,16 @@ package logger
 import (
 	"errors"
 	"fmt"
+	"os"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+)
+
+// Sampling constants for logger configuration.
+const (
+	samplingInitial    = 100 // Initial number of log entries before sampling
+	samplingThereafter = 100 // Number of log entries to sample after initial
 )
 
 // ErrLoggerNil indicates that the logger instance is nil when an operation is attempted.
@@ -41,13 +49,46 @@ type ZapLogger struct {
 
 // NewZapLogger creates a new production-ready Zap logger.
 func NewZapLogger() (Logger, error) {
-	// Initialize a production-configured Zap logger.
-	logger, err := zap.NewProduction()
+	// Define a custom configuration for the logger to ensure cross-platform compatibility.
+	config := zap.Config{
+		Level:       zap.NewAtomicLevelAt(zapcore.InfoLevel),
+		Development: false,
+		Sampling: &zap.SamplingConfig{
+			Initial:    samplingInitial,
+			Thereafter: samplingThereafter,
+		},
+		Encoding: "console", // Use console encoding for human-readable output
+		EncoderConfig: zapcore.EncoderConfig{
+			TimeKey:        "time",
+			LevelKey:       "level",
+			NameKey:        "logger",
+			CallerKey:      "caller",
+			MessageKey:     "msg",
+			StacktraceKey:  "stacktrace",
+			LineEnding:     zapcore.DefaultLineEnding,
+			EncodeLevel:    zapcore.CapitalLevelEncoder, // Use uppercase level names (e.g., INFO)
+			EncodeTime:     zapcore.ISO8601TimeEncoder,  // Use ISO 8601 format for timestamps
+			EncodeDuration: zapcore.StringDurationEncoder,
+			EncodeCaller:   zapcore.ShortCallerEncoder,
+		},
+		OutputPaths:      []string{"stderr"}, // Explicitly write to stderr
+		ErrorOutputPaths: []string{"stderr"},
+	}
+
+	// Build the logger with a locked writer to ensure thread-safe writes to stderr.
+	logger, err := config.Build(zap.WrapCore(func(_ zapcore.Core) zapcore.Core {
+		writer := zapcore.Lock(os.Stderr)
+
+		return zapcore.NewCore(
+			zapcore.NewConsoleEncoder(config.EncoderConfig),
+			writer,
+			config.Level,
+		)
+	}))
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize logger: %w", err)
 	}
 
-	// Wrap the Zap logger in ZapLogger to satisfy the Logger interface.
 	return &ZapLogger{logger}, nil
 }
 
@@ -58,9 +99,9 @@ func (z *ZapLogger) Sync() error {
 		return ErrLoggerNil
 	}
 
-	// Flush the logger and wrap any errors for context.
+	// Attempt to sync, logging any errors in debug mode but not returning them.
 	if err := z.Logger.Sync(); err != nil {
-		return fmt.Errorf("failed to sync logger: %w", err)
+		z.Debug("Logger sync failed", zap.Error(err))
 	}
 
 	return nil

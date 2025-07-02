@@ -36,7 +36,7 @@ func TestRootCommand(t *testing.T) {
 		{
 			name:       "help flag",
 			args:       []string{"-h"},
-			wantStderr: "A tool to remove Go binaries\n\nUsage:\n  go-remove [binary] [flags]\n\nFlags:\n      --goroot    Target GOROOT/bin instead of GOBIN or GOPATH/bin\n  -h, --help      help for go-remove\n  -v, --verbose   Enable verbose output\n",
+			wantStderr: "A tool to remove Go binaries\n\nUsage:\n  go-remove [binary] [flags]\n\nFlags:\n      --goroot             Target GOROOT/bin instead of GOBIN or GOPATH/bin\n  -h, --help               help for go-remove\n  -l, --log-level string   Set log level (debug, info, warn, error) (default \"info\")\n  -v, --verbose            Enable verbose output\n",
 			wantErr:    false,
 		},
 	}
@@ -65,7 +65,6 @@ func TestRootCommand(t *testing.T) {
 			w.Close()
 
 			var buf bytes.Buffer
-
 			buf.ReadFrom(r)
 			gotStderr := buf.String()
 
