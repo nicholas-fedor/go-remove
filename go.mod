@@ -3,7 +3,7 @@ module github.com/nicholas-fedor/go-remove
 go 1.24.4
 
 require (
-	github.com/charmbracelet/bubbletea v1.3.5
+	github.com/charmbracelet/bubbletea v1.3.6
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/stretchr/testify v1.10.0
 	go.uber.org/zap v1.27.0
