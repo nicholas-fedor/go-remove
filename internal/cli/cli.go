@@ -23,9 +23,6 @@ import (
 	"fmt"
 	"os"
 
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
-
 	"github.com/nicholas-fedor/go-remove/internal/fs"
 	"github.com/nicholas-fedor/go-remove/internal/logger"
 )
@@ -51,27 +48,6 @@ type Dependencies struct {
 // Run executes the CLI logic with the provided dependencies and configuration.
 func Run(deps Dependencies, config Config) error {
 	log := deps.Logger
-
-	// Set log level based on config if verbose mode is enabled.
-	if config.Verbose {
-		zapLogger, ok := log.(*logger.ZapLogger)
-		if !ok {
-			return fmt.Errorf("failed to set log level: %w with type %T", ErrInvalidLoggerType, log)
-		}
-
-		switch config.LogLevel {
-		case "debug":
-			zapLogger.Logger = zapLogger.WithOptions(zap.IncreaseLevel(zapcore.DebugLevel))
-		case "warn":
-			zapLogger.Logger = zapLogger.WithOptions(zap.IncreaseLevel(zapcore.WarnLevel))
-		case "error":
-			zapLogger.Logger = zapLogger.WithOptions(zap.IncreaseLevel(zapcore.ErrorLevel))
-		default:
-			zapLogger.Logger = zapLogger.WithOptions(zap.IncreaseLevel(zapcore.InfoLevel))
-		}
-
-		log = zapLogger // Update the logger for subsequent use
-	}
 
 	// Determine the binary directory based on GOROOT or GOPATH/GOBIN settings.
 	binDir, err := deps.FS.DetermineBinDir(config.Goroot)
