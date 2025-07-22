@@ -21,6 +21,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -37,7 +38,7 @@ const (
 	availWidthAdjustment     = 4 // Adjustment to width for border and padding
 	minAvailHeightAdjustment = 7 // Minimum height adjustment for UI elements
 	visibleLenPrefix         = 2 // Prefix length for cursor visibility
-	totalHeightBase          = 6 // Base height for non-grid UI components
+	totalHeightBase          = 4 // Base height for non-grid UI components
 	leftPadding              = 2 // Left padding for the entire TUI
 )
 
@@ -60,19 +61,20 @@ type styleConfig struct {
 
 // model encapsulates the state of the TUI.
 type model struct {
-	choices []string      // List of available binaries
-	cursorX int           // Horizontal cursor position
-	cursorY int           // Vertical cursor position
-	cols    int           // Number of columns in the grid
-	rows    int           // Number of rows in the grid
-	dir     string        // Directory containing binaries
-	config  Config        // CLI configuration
-	logger  logger.Logger // Logger instance
-	fs      fs.FS         // Filesystem operations
-	width   int           // Terminal width
-	height  int           // Terminal height
-	status  string        // Status message
-	styles  styleConfig   // TUI appearance settings
+	choices       []string      // List of available binaries
+	cursorX       int           // Horizontal cursor position
+	cursorY       int           // Vertical cursor position
+	cols          int           // Number of columns in the grid
+	rows          int           // Number of rows in the grid
+	dir           string        // Directory containing binaries
+	config        Config        // CLI configuration
+	logger        logger.Logger // Logger instance
+	fs            fs.FS         // Filesystem operations
+	width         int           // Terminal width
+	height        int           // Terminal height
+	status        string        // Status message
+	styles        styleConfig   // TUI appearance settings
+	sortAscending bool          // True for ascending sort, false for descending
 }
 
 // DefaultRunner provides the default Bubbletea program runner.
@@ -88,14 +90,15 @@ func RunTUI(dir string, config Config, logger logger.Logger, fs fs.FS, runner Pr
 
 	// Initialize and start the TUI program with default styles.
 	program, err := runner.RunProgram(&model{
-		choices: choices,
-		dir:     dir,
-		config:  config,
-		logger:  logger,
-		fs:      fs,
-		cursorX: 0,
-		cursorY: 0,
-		styles:  defaultStyleConfig(),
+		choices:       choices,
+		dir:           dir,
+		config:        config,
+		logger:        logger,
+		fs:            fs,
+		cursorX:       0,
+		cursorY:       0,
+		sortAscending: true,
+		styles:        defaultStyleConfig(),
 	}, tea.WithAltScreen())
 	if err != nil {
 		return fmt.Errorf("failed to start TUI program: %w", err)
@@ -135,6 +138,8 @@ func (r DefaultRunner) RunProgram(m tea.Model, opts ...tea.ProgramOption) (*tea.
 
 // Init prepares the TUI model for rendering.
 func (m *model) Init() tea.Cmd {
+	m.sortChoices()
+
 	return tea.EnterAltScreen // Switch to alternate screen buffer
 }
 
@@ -174,6 +179,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursorX++
 			}
 
+		case "s":
+			// Toggle sort order and re-sort the choices.
+			m.sortAscending = !m.sortAscending
+			m.sortChoices()
+			m.updateGrid()
+
 		case "enter":
 			// Remove the selected binary and update the TUI state.
 			if len(m.choices) > 0 {
@@ -187,6 +198,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					} else {
 						m.status = "Removed " + name
 						m.choices = m.fs.ListBinaries(m.dir)
+						m.sortChoices()
 
 						// Exit if no binaries remain.
 						if len(m.choices) == 0 {
@@ -212,6 +224,19 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// sortChoices sorts the choices based on the current sort order.
+func (m *model) sortChoices() {
+	if len(m.choices) == 0 {
+		return
+	}
+
+	if m.sortAscending {
+		sort.Strings(m.choices)
+	} else {
+		sort.Sort(sort.Reverse(sort.StringSlice(m.choices)))
+	}
 }
 
 // updateGrid recalculates the grid layout based on current state and terminal size.
@@ -325,9 +350,13 @@ func (m *model) View() string {
 	}
 
 	footer := footerStyle.Render(
-		"↑/k: up  ↓/j: down  ←/h: left  →/l: right  Enter: remove  q: quit",
+		"↑/k: up  ↓/j: down  ←/h: left  →/l: right  Enter: remove  s: toggle sort  q: quit",
 	)
-	totalHeight := m.rows + totalHeightBase + len(strings.Split(m.status, "\n"))
+	lenStatus := 0
+	if m.status != "" {
+		lenStatus = 1
+	}
+	totalHeight := m.rows + totalHeightBase + lenStatus
 
 	// Add padding lines to fill the terminal height.
 	for i := totalHeight; i < m.height; i++ {
@@ -336,7 +365,10 @@ func (m *model) View() string {
 
 	s.WriteString(footer)
 
-	return lipgloss.NewStyle().PaddingLeft(leftPadding).Render(s.String())
+	return lipgloss.NewStyle().
+		PaddingLeft(leftPadding).
+		Width(m.width - leftPadding).
+		Render(s.String())
 }
 
 // maximum returns the larger of two integers.

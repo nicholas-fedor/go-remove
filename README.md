@@ -1,8 +1,10 @@
+<!-- markdownlint-disable -->
 <div align="center">
 
 # go-remove
 
 <img src="/.github/assets/logo.svg" alt="go-remove Logo" width="150">
+<!-- markdownlint-restore -->
 
 A command-line tool to remove Go binaries with ease
 
