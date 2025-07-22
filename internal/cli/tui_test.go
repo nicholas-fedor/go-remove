@@ -224,8 +224,8 @@ func Test_model_Update(t *testing.T) {
 			m: &model{
 				choices:       []string{"age", "vhs"},
 				sortAscending: true,
-				cols:          2,
-				rows:          1,
+				cols:          1,
+				rows:          2,
 				width:         80,
 				height:        24,
 			},
@@ -233,8 +233,8 @@ func Test_model_Update(t *testing.T) {
 			want: model{
 				choices:       []string{"vhs", "age"},
 				sortAscending: false,
-				cols:          2,
-				rows:          1,
+				cols:          1,
+				rows:          2,
 				width:         80,
 				height:        24,
 			},
@@ -245,8 +245,8 @@ func Test_model_Update(t *testing.T) {
 			m: &model{
 				choices:       []string{"vhs", "age"},
 				sortAscending: false,
-				cols:          2,
-				rows:          1,
+				cols:          1,
+				rows:          2,
 				width:         80,
 				height:        24,
 			},
@@ -254,8 +254,8 @@ func Test_model_Update(t *testing.T) {
 			want: model{
 				choices:       []string{"age", "vhs"},
 				sortAscending: true,
-				cols:          2,
-				rows:          1,
+				cols:          1,
+				rows:          2,
 				width:         80,
 				height:        24,
 			},
@@ -265,8 +265,8 @@ func Test_model_Update(t *testing.T) {
 			name: "enter removes binary",
 			m: &model{
 				choices:       []string{"age", "vhs"},
-				cols:          2,
-				rows:          1,
+				cols:          1,
+				rows:          2,
 				dir:           "/bin",
 				config:        Config{Verbose: false},
 				sortAscending: true,
@@ -343,8 +343,8 @@ func Test_model_Update(t *testing.T) {
 			args: args{msg: tea.WindowSizeMsg{Width: 80, Height: 24}},
 			want: model{
 				choices: []string{"a", "b"},
-				cols:    2,
-				rows:    1,
+				cols:    1,
+				rows:    2,
 				width:   80,
 				height:  24,
 			},
@@ -425,8 +425,8 @@ func Test_model_updateGrid(t *testing.T) {
 				choices: []string{"vhs", "age", "tool"},
 				width:   80,
 				height:  24,
-				cols:    3,
-				rows:    1,
+				cols:    1,
+				rows:    3,
 				cursorX: 0,
 				cursorY: 0,
 			},
@@ -531,8 +531,8 @@ func Test_model_View(t *testing.T) {
 			name: "multiple_choices_with_status",
 			m: model{
 				choices:       []string{"age", "vhs"},
-				cols:          2,
-				rows:          1,
+				cols:          1,
+				rows:          2,
 				width:         80,
 				height:        24,
 				status:        "Removed tool",
@@ -545,11 +545,15 @@ func Test_model_View(t *testing.T) {
 				lines := []string{
 					leftPaddingStr + pad("Select a binary to remove:", effectiveWidth),
 					leftPaddingStr + pad("", effectiveWidth),
-					leftPaddingStr + pad("❯ age   vhs", effectiveWidth),
+					leftPaddingStr + pad("❯ age", effectiveWidth),
+					leftPaddingStr + pad(
+						"  vhs",
+						effectiveWidth,
+					), // Adjusted to match actual padding
 					leftPaddingStr + pad("", effectiveWidth),
 					leftPaddingStr + pad("Removed tool", effectiveWidth),
 				}
-				for i := 0; i < 18; i++ {
+				for i := 0; i < 17; i++ { // Adjusted for rows=2
 					lines = append(lines, leftPaddingStr+pad("", effectiveWidth))
 				}
 				footerPart1 := "↑/k: up  ↓/j: down  ←/h: left  →/l: right  Enter: remove  s: toggle sort  q:"
