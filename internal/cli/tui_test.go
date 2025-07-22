@@ -20,7 +20,10 @@ package cli
 import (
 	"errors"
 	"reflect"
+	"regexp"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/mock"
 
@@ -217,13 +220,58 @@ func Test_model_Update(t *testing.T) {
 			wantCmd: nil,
 		},
 		{
+			name: "toggle sort to descending",
+			m: &model{
+				choices:       []string{"age", "vhs"},
+				sortAscending: true,
+				cols:          1,
+				rows:          2,
+				width:         80,
+				height:        24,
+			},
+			args: args{msg: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}},
+			want: model{
+				choices:       []string{"vhs", "age"},
+				sortAscending: false,
+				cols:          1,
+				rows:          2,
+				width:         80,
+				height:        24,
+			},
+			wantCmd: nil,
+		},
+		{
+			name: "toggle sort to ascending",
+			m: &model{
+				choices:       []string{"vhs", "age"},
+				sortAscending: false,
+				cols:          1,
+				rows:          2,
+				width:         80,
+				height:        24,
+			},
+			args: args{msg: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}},
+			want: model{
+				choices:       []string{"age", "vhs"},
+				sortAscending: true,
+				cols:          1,
+				rows:          2,
+				width:         80,
+				height:        24,
+			},
+			wantCmd: nil,
+		},
+		{
 			name: "enter removes binary",
 			m: &model{
-				choices: []string{"vhs", "age"},
-				cols:    2,
-				rows:    1,
-				dir:     "/bin",
-				config:  Config{Verbose: false},
+				choices:       []string{"age", "vhs"},
+				cols:          1,
+				rows:          2,
+				dir:           "/bin",
+				config:        Config{Verbose: false},
+				sortAscending: true,
+				width:         80,
+				height:        24,
 				logger: func() *logmocks.MockLogger {
 					m := logmocks.NewMockLogger(t)
 
@@ -231,31 +279,37 @@ func Test_model_Update(t *testing.T) {
 				}(),
 				fs: func() *fsmocks.MockFS {
 					m := fsmocks.NewMockFS(t)
-					m.On("AdjustBinaryPath", "/bin", "vhs").Return("/bin/vhs")
-					m.On("RemoveBinary", "/bin/vhs", "vhs", false, mock.Anything).Return(nil)
-					m.On("ListBinaries", "/bin").Return([]string{"age"})
+					m.On("AdjustBinaryPath", "/bin", "age").Return("/bin/age")
+					m.On("RemoveBinary", "/bin/age", "age", false, mock.Anything).Return(nil)
+					m.On("ListBinaries", "/bin").Return([]string{"vhs"})
 
 					return m
 				}(),
 			},
 			args: args{msg: tea.KeyMsg{Type: tea.KeyEnter}},
 			want: model{
-				choices: []string{"age"},
-				cols:    1,
-				rows:    1,
-				dir:     "/bin",
-				config:  Config{Verbose: false},
-				status:  "Removed vhs",
+				choices:       []string{"vhs"},
+				cols:          1,
+				rows:          1,
+				dir:           "/bin",
+				config:        Config{Verbose: false},
+				sortAscending: true,
+				status:        "Removed age",
+				width:         80,
+				height:        24,
 			},
 			wantCmd: nil,
 		},
 		{
 			name: "enter with error",
 			m: &model{
-				choices: []string{"vhs"},
-				cols:    1,
-				rows:    1,
-				dir:     "/bin",
+				choices:       []string{"age"},
+				cols:          1,
+				rows:          1,
+				dir:           "/bin",
+				sortAscending: true,
+				width:         80,
+				height:        24,
 				logger: func() *logmocks.MockLogger {
 					m := logmocks.NewMockLogger(t)
 
@@ -263,8 +317,8 @@ func Test_model_Update(t *testing.T) {
 				}(),
 				fs: func() *fsmocks.MockFS {
 					m := fsmocks.NewMockFS(t)
-					m.On("AdjustBinaryPath", "/bin", "vhs").Return("/bin/vhs")
-					m.On("RemoveBinary", "/bin/vhs", "vhs", false, mock.Anything).
+					m.On("AdjustBinaryPath", "/bin", "age").Return("/bin/age")
+					m.On("RemoveBinary", "/bin/age", "age", false, mock.Anything).
 						Return(errors.New("remove failed"))
 
 					return m
@@ -272,11 +326,14 @@ func Test_model_Update(t *testing.T) {
 			},
 			args: args{msg: tea.KeyMsg{Type: tea.KeyEnter}},
 			want: model{
-				choices: []string{"vhs"},
-				cols:    1,
-				rows:    1,
-				dir:     "/bin",
-				status:  "Error removing vhs: remove failed",
+				choices:       []string{"age"},
+				cols:          1,
+				rows:          1,
+				dir:           "/bin",
+				sortAscending: true,
+				status:        "Error removing age: remove failed",
+				width:         80,
+				height:        24,
 			},
 			wantCmd: nil,
 		},
@@ -286,8 +343,8 @@ func Test_model_Update(t *testing.T) {
 			args: args{msg: tea.WindowSizeMsg{Width: 80, Height: 24}},
 			want: model{
 				choices: []string{"a", "b"},
-				cols:    2,
-				rows:    1,
+				cols:    1,
+				rows:    2,
 				width:   80,
 				height:  24,
 			},
@@ -318,7 +375,8 @@ func Test_model_Update(t *testing.T) {
 				gotModel.config != tt.want.config ||
 				gotModel.width != tt.want.width ||
 				gotModel.height != tt.want.height ||
-				gotModel.status != tt.want.status {
+				gotModel.status != tt.want.status ||
+				gotModel.sortAscending != tt.want.sortAscending {
 				t.Errorf("model.Update() got = %+v, want %+v", gotModel, tt.want)
 			}
 
@@ -367,8 +425,8 @@ func Test_model_updateGrid(t *testing.T) {
 				choices: []string{"vhs", "age", "tool"},
 				width:   80,
 				height:  24,
-				cols:    3,
-				rows:    1,
+				cols:    1,
+				rows:    3,
 				cursorX: 0,
 				cursorY: 0,
 			},
@@ -403,8 +461,33 @@ func Test_model_updateGrid(t *testing.T) {
 	}
 }
 
+var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+func stripANSI(str string) string {
+	return ansiRegex.ReplaceAllString(str, "")
+}
+
 // Test_model_View verifies the View method’s rendered output.
 func Test_model_View(t *testing.T) {
+	const contentWidth = 78 // Max visible width for content (excluding leftPadding)
+
+	const leftPaddingStr = "  " // The left padding string
+
+	const effectiveWidth = contentWidth - len(leftPaddingStr) // Effective width for content padding
+
+	displayWidth := func(s string) int {
+		return utf8.RuneCountInString(stripANSI(s))
+	}
+
+	pad := func(s string, w int) string {
+		currentWidth := displayWidth(s)
+		if currentWidth >= w {
+			return s
+		}
+
+		return s + strings.Repeat(" ", w-currentWidth)
+	}
+
 	tests := []struct {
 		name string
 		m    model
@@ -418,84 +501,81 @@ func Test_model_View(t *testing.T) {
 		{
 			name: "single_choice",
 			m: model{
-				choices: []string{"vhs"},
-				cols:    1,
-				rows:    1,
-				width:   80,
-				height:  24,
-				cursorX: 0,
-				cursorY: 0,
-				styles:  defaultStyleConfig(),
+				choices:       []string{"vhs"},
+				cols:          1,
+				rows:          1,
+				width:         80,
+				height:        24,
+				cursorX:       0,
+				cursorY:       0,
+				sortAscending: true,
+				styles:        defaultStyleConfig(),
 			},
-			want: "  Select a binary to remove:                                       \n" +
-				"                                                                   \n" +
-				"  ❯ vhs                                                            \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"  ↑/k: up  ↓/j: down  ←/h: left  →/l: right  Enter: remove  q: quit",
+			want: func() string {
+				lines := []string{
+					leftPaddingStr + pad("Select a binary to remove:", effectiveWidth),
+					leftPaddingStr + pad("", effectiveWidth),
+					leftPaddingStr + pad("❯ vhs", effectiveWidth),
+					leftPaddingStr + pad("", effectiveWidth),
+				}
+				for range 19 {
+					lines = append(lines, leftPaddingStr+pad("", effectiveWidth))
+				}
+				footerPart1 := "↑/k: up  ↓/j: down  ←/h: left  →/l: right  Enter: remove  s: toggle sort  q:"
+				footerPart2 := "quit"
+				lines = append(lines, leftPaddingStr+pad(footerPart1, effectiveWidth))
+				lines = append(lines, leftPaddingStr+pad(footerPart2, effectiveWidth))
+
+				return strings.Join(lines, "\n")
+			}(),
 		},
 		{
 			name: "multiple_choices_with_status",
 			m: model{
-				choices: []string{"vhs", "age"},
-				cols:    2,
-				rows:    1,
-				width:   80,
-				height:  24,
-				status:  "Removed tool",
-				cursorX: 0,
-				cursorY: 0,
-				styles:  defaultStyleConfig(),
+				choices:       []string{"age", "vhs"},
+				cols:          1,
+				rows:          2,
+				width:         80,
+				height:        24,
+				status:        "Removed tool",
+				cursorX:       0,
+				cursorY:       0,
+				sortAscending: true,
+				styles:        defaultStyleConfig(),
 			},
-			want: "  Select a binary to remove:                                       \n" +
-				"                                                                   \n" +
-				"  ❯ vhs   age                                                      \n" +
-				"                                                                   \n" +
-				"  Removed tool                                                     \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"                                                                   \n" +
-				"  ↑/k: up  ↓/j: down  ←/h: left  →/l: right  Enter: remove  q: quit",
+			want: func() string {
+				lines := []string{
+					leftPaddingStr + pad("Select a binary to remove:", effectiveWidth),
+					leftPaddingStr + pad("", effectiveWidth),
+					leftPaddingStr + pad("❯ age", effectiveWidth),
+					leftPaddingStr + pad(
+						"  vhs",
+						effectiveWidth,
+					), // Adjusted to match actual padding
+					leftPaddingStr + pad("", effectiveWidth),
+					leftPaddingStr + pad("Removed tool", effectiveWidth),
+				}
+				for range 17 { // Adjusted for rows=2
+					lines = append(lines, leftPaddingStr+pad("", effectiveWidth))
+				}
+				footerPart1 := "↑/k: up  ↓/j: down  ←/h: left  →/l: right  Enter: remove  s: toggle sort  q:"
+				footerPart2 := "quit"
+				lines = append(lines, leftPaddingStr+pad(footerPart1, effectiveWidth))
+				lines = append(lines, leftPaddingStr+pad(footerPart2, effectiveWidth))
+
+				return strings.Join(lines, "\n")
+			}(),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			tt.m.sortChoices()
 			tt.m.updateGrid()
 
-			got := tt.m.View()
-			want := tt.want
-
-			if got != want {
-				t.Errorf("model.View() got = %q, want %q", got, want)
+			got := stripANSI(tt.m.View())
+			if got != tt.want {
+				t.Errorf("model.View() got = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -516,8 +596,8 @@ func Test_max(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := max(tt.a, tt.b); got != tt.want {
-				t.Errorf("max() = %v, want %v", got, tt.want)
+			if got := maximum(tt.a, tt.b); got != tt.want {
+				t.Errorf("maximum() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -538,8 +618,8 @@ func Test_min(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := min(tt.a, tt.b); got != tt.want {
-				t.Errorf("min() = %v, want %v", got, tt.want)
+			if got := minimum(tt.a, tt.b); got != tt.want {
+				t.Errorf("minimum() = %v, want %v", got, tt.want)
 			}
 		})
 	}
