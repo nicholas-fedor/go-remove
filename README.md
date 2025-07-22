@@ -26,6 +26,7 @@ It supports both direct removal of a specified binary and an interactive TUI (Te
 
 - **Direct Removal**: Remove a specific binary by name.
 - **Interactive TUI**: Browse and select binaries to remove from a grid interface.
+- **Sorting in TUI**: Toggle ascending/descending alphabetical order with the `s` key.
 - **Verbose Logging**: Optional detailed output for debugging or confirmation.
 - **Platform Support**: Handles Windows `.exe` extensions and cross-platform paths.
 
@@ -71,6 +72,7 @@ go-remove
 
 - Use arrow keys (`↑`/`↓`/`←`/`→`) or `k`/`j`/`h`/`l` to navigate.
 - Press `Enter` to remove the selected binary.
+- Press `s` to toggle sort order (ascending/descending alphabetical).
 - Press `q` or `Ctrl+C` to quit.
 
 ### Help
