@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sort"
 	"testing"
 
 	"go.uber.org/zap"
@@ -328,8 +329,8 @@ func TestRealFS_ListBinaries(t *testing.T) {
 				if runtime.GOOS == windowsOS {
 					ext = windowsExt
 				}
-				os.WriteFile(filepath.Join(tmpDir, "tool1"+ext), []byte("test"), 0o755)
 				os.WriteFile(filepath.Join(tmpDir, "tool2"+ext), []byte("test"), 0o755)
+				os.WriteFile(filepath.Join(tmpDir, "tool1"+ext), []byte("test"), 0o755)
 				if runtime.GOOS == windowsOS {
 					os.WriteFile(filepath.Join(tmpDir, "tool3.exe"), []byte("test"), 0o755)
 				}
@@ -369,6 +370,13 @@ func TestRealFS_ListBinaries(t *testing.T) {
 			}
 
 			got := tt.r.ListBinaries(tt.args.dir)
+
+			if tt.name == "list binaries" {
+				sortedGot := make([]string, len(got))
+				copy(sortedGot, got)
+				sort.Strings(sortedGot)
+				got = sortedGot
+			}
 
 			if tt.name == "empty dir" {
 				files, err := os.ReadDir(tt.args.dir)
