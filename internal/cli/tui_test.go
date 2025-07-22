@@ -469,8 +469,10 @@ func stripANSI(str string) string {
 
 // Test_model_View verifies the View method’s rendered output.
 func Test_model_View(t *testing.T) {
-	const contentWidth = 78                                   // Max visible width for content (excluding leftPadding)
-	const leftPaddingStr = "  "                               // The left padding string
+	const contentWidth = 78 // Max visible width for content (excluding leftPadding)
+
+	const leftPaddingStr = "  " // The left padding string
+
 	const effectiveWidth = contentWidth - len(leftPaddingStr) // Effective width for content padding
 
 	displayWidth := func(s string) int {
@@ -516,7 +518,7 @@ func Test_model_View(t *testing.T) {
 					leftPaddingStr + pad("❯ vhs", effectiveWidth),
 					leftPaddingStr + pad("", effectiveWidth),
 				}
-				for i := 0; i < 19; i++ {
+				for range 19 {
 					lines = append(lines, leftPaddingStr+pad("", effectiveWidth))
 				}
 				footerPart1 := "↑/k: up  ↓/j: down  ←/h: left  →/l: right  Enter: remove  s: toggle sort  q:"
@@ -553,7 +555,7 @@ func Test_model_View(t *testing.T) {
 					leftPaddingStr + pad("", effectiveWidth),
 					leftPaddingStr + pad("Removed tool", effectiveWidth),
 				}
-				for i := 0; i < 17; i++ { // Adjusted for rows=2
+				for range 17 { // Adjusted for rows=2
 					lines = append(lines, leftPaddingStr+pad("", effectiveWidth))
 				}
 				footerPart1 := "↑/k: up  ↓/j: down  ←/h: left  →/l: right  Enter: remove  s: toggle sort  q:"

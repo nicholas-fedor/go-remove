@@ -161,6 +161,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "down", "j":
 			// Move cursor down, respecting grid bounds and item count.
 			newY := m.cursorY + 1
+
 			newIdx := newY + m.cursorX*m.rows // Column-major index (fill down columns)
 			if newY < m.rows && newIdx < len(m.choices) {
 				m.cursorY = newY
@@ -175,6 +176,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "right", "l":
 			// Move cursor right, respecting column bounds and item count.
 			newX := m.cursorX + 1
+
 			newIdx := m.cursorY + newX*m.rows // Column-major index
 			if newX < m.cols && newIdx < len(m.choices) {
 				m.cursorX = newX
@@ -268,19 +270,23 @@ func (m *model) updateGrid() {
 
 	// Compute grid dimensions: maximize rows, limit columns by width.
 	maxCols := maximum(availWidth/colWidth, 1)
+
 	m.rows = minimum(availHeight, len(m.choices))
 	if m.rows == 0 {
 		m.rows = 1 // Ensure at least one row
 	}
+
 	m.cols = minimum(maxCols, (len(m.choices)+m.rows-1)/m.rows)
 
 	// Clamp cursor position to valid bounds after resizing.
 	if m.cursorX >= m.cols {
 		m.cursorX = m.cols - 1
 	}
+
 	if m.cursorY >= m.rows {
 		m.cursorY = m.rows - 1
 	}
+
 	currentIdx := m.cursorY + m.cursorX*m.rows
 	if currentIdx >= len(m.choices) {
 		lastIdx := len(m.choices) - 1
@@ -314,8 +320,8 @@ func (m *model) View() string {
 	// Build the grid of binary choices with cursor highlighting.
 	var grid strings.Builder
 
-	for row := 0; row < m.rows; row++ {
-		for col := 0; col < m.cols; col++ {
+	for row := range m.rows {
+		for col := range m.cols {
 			idx := row + col*m.rows // Column-major index (fill down columns)
 			if idx >= len(m.choices) {
 				break
@@ -352,10 +358,12 @@ func (m *model) View() string {
 	footer := footerStyle.Render(
 		"↑/k: up  ↓/j: down  ←/h: left  →/l: right  Enter: remove  s: toggle sort  q: quit",
 	)
+
 	lenStatus := 0
 	if m.status != "" {
 		lenStatus = 1
 	}
+
 	totalHeight := m.rows + totalHeightBase + lenStatus
 
 	// Add padding lines to fill the terminal height.
