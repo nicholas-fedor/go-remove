@@ -521,8 +521,10 @@ func Test_model_View(t *testing.T) {
 				for range 19 {
 					lines = append(lines, leftPaddingStr+pad("", effectiveWidth))
 				}
+
 				footerPart1 := "↑/k: up  ↓/j: down  ←/h: left  →/l: right  Enter: remove  s: toggle sort  q:"
 				footerPart2 := "quit"
+
 				lines = append(lines, leftPaddingStr+pad(footerPart1, effectiveWidth))
 				lines = append(lines, leftPaddingStr+pad(footerPart2, effectiveWidth))
 
@@ -558,8 +560,10 @@ func Test_model_View(t *testing.T) {
 				for range 17 { // Adjusted for rows=2
 					lines = append(lines, leftPaddingStr+pad("", effectiveWidth))
 				}
+
 				footerPart1 := "↑/k: up  ↓/j: down  ←/h: left  →/l: right  Enter: remove  s: toggle sort  q:"
 				footerPart2 := "quit"
+
 				lines = append(lines, leftPaddingStr+pad(footerPart1, effectiveWidth))
 				lines = append(lines, leftPaddingStr+pad(footerPart2, effectiveWidth))
 
