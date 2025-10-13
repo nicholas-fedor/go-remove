@@ -1,6 +1,6 @@
 module github.com/nicholas-fedor/go-remove
 
-go 1.25.2
+go 1.25.3
 
 require (
 	github.com/charmbracelet/bubbletea v1.3.10
