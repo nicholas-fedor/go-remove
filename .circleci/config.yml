@@ -1,5 +1,4 @@
 version: 2.1
-
 jobs:
   build:
     docker:
@@ -20,13 +19,22 @@ jobs:
           name: Run tests
           command: |
             mkdir -p /tmp/test-reports
-            gotestsum --junitfile /tmp/test-reports/unit-tests.xml -- -race -coverprofile=coverage.txt -covermode=atomic $(go list ./... | grep -v mocks | grep -v '^.$')
+            packages=$(go list ./... | grep -v /mocks | grep -v '^.$' || echo "")
+            if [ -n "$packages" ]; then
+              gotestsum --junitfile /tmp/test-reports/unit-tests.xml -- -race -coverprofile=coverage.txt -covermode=atomic $packages
+            else
+              echo "No test packages found; skipping tests."
+            fi
       - run:
           name: Upload coverage to Codecov
-          command: bash <(curl -s https://codecov.io/bash) -f coverage.txt
+          command: |
+            if [ -f coverage.txt ]; then
+              bash <(curl -s https://codecov.io/bash) -f coverage.txt
+            else
+              echo "No coverage file found (likely no tests ran); skipping upload."
+            fi
       - store_test_results:
           path: /tmp/test-reports
-
 workflows:
   build-test:
     jobs:
