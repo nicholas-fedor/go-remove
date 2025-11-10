@@ -20,7 +20,7 @@ jobs:
           name: Run tests
           command: |
             mkdir -p /tmp/test-reports
-            gotestsum --junitfile /tmp/test-reports/unit-tests.xml -- -race -coverprofile=coverage.txt -covermode=atomic $(go list ./... | grep -v mocks)
+            gotestsum --junitfile /tmp/test-reports/unit-tests.xml -- -race -coverprofile=coverage.txt -covermode=atomic $(go list ./... | grep -v mocks | grep -v '^.$')
       - run:
           name: Upload coverage to Codecov
           command: bash <(curl -s https://codecov.io/bash) -f coverage.txt
