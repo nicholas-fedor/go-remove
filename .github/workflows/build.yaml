@@ -34,7 +34,7 @@ jobs:
           passphrase: ${{ secrets.GPG_PASSPHRASE }}
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@78265e466addc1ba4d9ebc1a6dabf008a34f0b8f
+        uses: goreleaser/goreleaser-action@902ab4a70dd43cbbbe029e9917e939ba355a50dd
         with:
           distribution: goreleaser
           version: "~> v2"
