@@ -196,7 +196,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					binaryPath := m.fs.AdjustBinaryPath(m.dir, m.choices[idx])
 					name := m.choices[idx]
 
-					if err := m.fs.RemoveBinary(binaryPath, name, m.config.Verbose, m.logger); err != nil {
+					if err := m.fs.RemoveBinary(
+						binaryPath,
+						name,
+						m.config.Verbose,
+						m.logger,
+					); err != nil {
 						m.status = fmt.Sprintf("Error removing %s: %v", name, err)
 					} else {
 						m.status = "Removed " + name

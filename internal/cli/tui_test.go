@@ -512,12 +512,15 @@ func Test_model_View(t *testing.T) {
 				styles:        defaultStyleConfig(),
 			},
 			want: func() string {
-				lines := []string{
-					leftPaddingStr + pad("Select a binary to remove:", effectiveWidth),
-					leftPaddingStr + pad("", effectiveWidth),
-					leftPaddingStr + pad("❯ vhs", effectiveWidth),
-					leftPaddingStr + pad("", effectiveWidth),
-				}
+				lines := make([]string, 0, 25)
+				lines = append(
+					lines,
+					leftPaddingStr+pad("Select a binary to remove:", effectiveWidth),
+				)
+				lines = append(lines, leftPaddingStr+pad("", effectiveWidth))
+				lines = append(lines, leftPaddingStr+pad("❯ vhs", effectiveWidth))
+
+				lines = append(lines, leftPaddingStr+pad("", effectiveWidth))
 				for range 19 {
 					lines = append(lines, leftPaddingStr+pad("", effectiveWidth))
 				}
@@ -546,17 +549,20 @@ func Test_model_View(t *testing.T) {
 				styles:        defaultStyleConfig(),
 			},
 			want: func() string {
-				lines := []string{
-					leftPaddingStr + pad("Select a binary to remove:", effectiveWidth),
-					leftPaddingStr + pad("", effectiveWidth),
-					leftPaddingStr + pad("❯ age", effectiveWidth),
-					leftPaddingStr + pad(
-						"  vhs",
-						effectiveWidth,
-					), // Adjusted to match actual padding
-					leftPaddingStr + pad("", effectiveWidth),
-					leftPaddingStr + pad("Removed tool", effectiveWidth),
-				}
+				lines := make([]string, 0, 25)
+				lines = append(
+					lines,
+					leftPaddingStr+pad("Select a binary to remove:", effectiveWidth),
+				)
+				lines = append(lines, leftPaddingStr+pad("", effectiveWidth))
+				lines = append(lines, leftPaddingStr+pad("❯ age", effectiveWidth))
+				lines = append(lines, leftPaddingStr+pad(
+					"  vhs",
+					effectiveWidth,
+				)) // Adjusted to match actual padding
+				lines = append(lines, leftPaddingStr+pad("", effectiveWidth))
+
+				lines = append(lines, leftPaddingStr+pad("Removed tool", effectiveWidth))
 				for range 17 { // Adjusted for rows=2
 					lines = append(lines, leftPaddingStr+pad("", effectiveWidth))
 				}
