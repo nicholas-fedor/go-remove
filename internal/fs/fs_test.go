@@ -71,7 +71,7 @@ func TestRealFS_DetermineBinDir(t *testing.T) {
 			r:       &RealFS{},
 			args:    args{useGoroot: true},
 			env:     map[string]string{"GOROOT": "/go"},
-			want:    filepath.Join("/go", "bin"),
+			want:    "/go/bin",
 			wantErr: false,
 		},
 		{
@@ -95,7 +95,7 @@ func TestRealFS_DetermineBinDir(t *testing.T) {
 			r:       &RealFS{},
 			args:    args{useGoroot: false},
 			env:     map[string]string{"GOPATH": "/gopath", "GOBIN": ""},
-			want:    filepath.Join("/gopath", "bin"),
+			want:    "/gopath/bin",
 			wantErr: false,
 		},
 		{
@@ -161,7 +161,7 @@ func TestRealFS_AdjustBinaryPath(t *testing.T) {
 			name: "basic path",
 			r:    &RealFS{},
 			args: args{dir: "/bin", binary: "tool"},
-			want: filepath.Join("/bin", "tool") + func() string {
+			want: "/bin/tool" + func() string {
 				if runtime.GOOS == windowsOS {
 					return windowsExt
 				}
@@ -186,7 +186,7 @@ func TestRealFS_AdjustBinaryPath(t *testing.T) {
 			name: "windows adds .exe",
 			r:    &RealFS{},
 			args: args{dir: "/bin", binary: "tool"},
-			want: filepath.Join("/bin", "tool.exe"),
+			want: "/bin/tool.exe",
 		})
 	}
 

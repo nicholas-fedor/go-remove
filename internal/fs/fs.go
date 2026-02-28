@@ -102,14 +102,14 @@ func (r *RealFS) AdjustBinaryPath(dir, binary string) string {
 }
 
 // RemoveBinary deletes a binary file from the filesystem.
-func (r *RealFS) RemoveBinary(binaryPath, name string, verbose bool, logger logger.Logger) error {
+func (r *RealFS) RemoveBinary(binaryPath, name string, verbose bool, log logger.Logger) error {
 	// Verify the binary exists before attempting removal.
 	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
 		return fmt.Errorf("%w: %s at %s", ErrBinaryNotFound, name, binaryPath)
 	}
 
 	// Log debug and info messages if verbose mode is enabled.
-	sugar := logger.Sugar()
+	sugar := log.Sugar()
 	if verbose {
 		sugar.Debugf("Constructed binary path: %s", binaryPath)
 		sugar.Infof("Removing binary: %s", binaryPath)

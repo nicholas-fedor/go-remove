@@ -173,8 +173,10 @@ func keyPressString(s string) tea.KeyPressMsg {
 	default:
 		if len(s) == 1 {
 			r := rune(s[0])
+
 			return tea.KeyPressMsg{Text: s, Code: r, ShiftedCode: r}
 		}
+
 		return tea.KeyPressMsg{}
 	}
 }
@@ -540,14 +542,14 @@ func Test_model_View(t *testing.T) {
 			},
 			want: func() string {
 				lines := make([]string, 0, 25)
+
 				lines = append(
 					lines,
 					leftPaddingStr+pad("Select a binary to remove:", effectiveWidth),
+					leftPaddingStr+pad("", effectiveWidth),
+					leftPaddingStr+pad("❯ vhs", effectiveWidth),
+					leftPaddingStr+pad("", effectiveWidth),
 				)
-				lines = append(lines, leftPaddingStr+pad("", effectiveWidth))
-				lines = append(lines, leftPaddingStr+pad("❯ vhs", effectiveWidth))
-
-				lines = append(lines, leftPaddingStr+pad("", effectiveWidth))
 				for range 19 {
 					lines = append(lines, leftPaddingStr+pad("", effectiveWidth))
 				}
@@ -555,8 +557,11 @@ func Test_model_View(t *testing.T) {
 				footerPart1 := "↑/k: up  ↓/j: down  ←/h: left  →/l: right  Enter: remove  s: toggle sort  q:"
 				footerPart2 := "quit"
 
-				lines = append(lines, leftPaddingStr+pad(footerPart1, effectiveWidth))
-				lines = append(lines, leftPaddingStr+pad(footerPart2, effectiveWidth))
+				lines = append(
+					lines,
+					leftPaddingStr+pad(footerPart1, effectiveWidth),
+					leftPaddingStr+pad(footerPart2, effectiveWidth),
+				)
 
 				return strings.Join(lines, "\n")
 			}(),
@@ -577,19 +582,16 @@ func Test_model_View(t *testing.T) {
 			},
 			want: func() string {
 				lines := make([]string, 0, 25)
+
 				lines = append(
 					lines,
 					leftPaddingStr+pad("Select a binary to remove:", effectiveWidth),
+					leftPaddingStr+pad("", effectiveWidth),
+					leftPaddingStr+pad("❯ age", effectiveWidth),
+					leftPaddingStr+pad("  vhs", effectiveWidth), // Adjusted to match actual padding
+					leftPaddingStr+pad("", effectiveWidth),
+					leftPaddingStr+pad("Removed tool", effectiveWidth),
 				)
-				lines = append(lines, leftPaddingStr+pad("", effectiveWidth))
-				lines = append(lines, leftPaddingStr+pad("❯ age", effectiveWidth))
-				lines = append(lines, leftPaddingStr+pad(
-					"  vhs",
-					effectiveWidth,
-				)) // Adjusted to match actual padding
-				lines = append(lines, leftPaddingStr+pad("", effectiveWidth))
-
-				lines = append(lines, leftPaddingStr+pad("Removed tool", effectiveWidth))
 				for range 17 { // Adjusted for rows=2
 					lines = append(lines, leftPaddingStr+pad("", effectiveWidth))
 				}
@@ -597,8 +599,11 @@ func Test_model_View(t *testing.T) {
 				footerPart1 := "↑/k: up  ↓/j: down  ←/h: left  →/l: right  Enter: remove  s: toggle sort  q:"
 				footerPart2 := "quit"
 
-				lines = append(lines, leftPaddingStr+pad(footerPart1, effectiveWidth))
-				lines = append(lines, leftPaddingStr+pad(footerPart2, effectiveWidth))
+				lines = append(
+					lines,
+					leftPaddingStr+pad(footerPart1, effectiveWidth),
+					leftPaddingStr+pad(footerPart2, effectiveWidth),
+				)
 
 				return strings.Join(lines, "\n")
 			}(),

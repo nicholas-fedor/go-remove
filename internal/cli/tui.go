@@ -81,9 +81,15 @@ type model struct {
 type DefaultRunner struct{}
 
 // RunTUI launches the interactive TUI mode for binary selection and removal.
-func RunTUI(dir string, config Config, logger logger.Logger, fs fs.FS, runner ProgramRunner) error {
+func RunTUI(
+	dir string,
+	config Config,
+	log logger.Logger,
+	filesystem fs.FS,
+	runner ProgramRunner,
+) error {
 	// Fetch available binaries from the specified directory.
-	choices := fs.ListBinaries(dir)
+	choices := filesystem.ListBinaries(dir)
 	if len(choices) == 0 {
 		return fmt.Errorf("%w: %s", ErrNoBinariesFound, dir)
 	}
@@ -93,8 +99,8 @@ func RunTUI(dir string, config Config, logger logger.Logger, fs fs.FS, runner Pr
 		choices:       choices,
 		dir:           dir,
 		config:        config,
-		logger:        logger,
-		fs:            fs,
+		logger:        log,
+		fs:            filesystem,
 		cursorX:       0,
 		cursorY:       0,
 		sortAscending: true,

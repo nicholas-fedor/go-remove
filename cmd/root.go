@@ -74,6 +74,7 @@ var rootCmd = &cobra.Command{
 					log,
 				)
 			}
+
 			switch logLevel {
 			case "debug":
 				zapLogger.Logger = zapLogger.WithOptions(
@@ -92,6 +93,7 @@ var rootCmd = &cobra.Command{
 					zap.IncreaseLevel(zapcore.InfoLevel),
 				)
 			}
+
 			log = zapLogger // Update the logger in deps
 			deps.Logger = log
 		}
