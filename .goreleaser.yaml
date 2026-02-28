@@ -18,8 +18,6 @@ builds:
 
     ignore:
       - goos: windows
-        goarch: riscv64
-      - goos: windows
         goarch: arm
 
 archives:

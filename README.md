@@ -19,8 +19,7 @@ A command-line tool to remove Go binaries with ease
 
 </div>
 
-`go-remove` is a command-line tool for removing Go binaries from standard binary directories (`GOROOT/bin`, `GOBIN`, or `GOPATH/bin`).
-It supports both direct removal of a specified binary and an interactive TUI (Terminal User Interface) mode for selecting binaries to delete.
+`go-remove` is a simple CLI/TUI for removing Go binaries.
 
 ## Features
 
