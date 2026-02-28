@@ -27,8 +27,8 @@ import (
 	"github.com/nicholas-fedor/go-remove/internal/logger"
 )
 
-// ErrInvalidLoggerType indicates that the logger is not of the expected *ZapLogger type.
-var ErrInvalidLoggerType = errors.New("logger is not a *ZapLogger")
+// ErrInvalidLoggerType indicates that the logger is not of the expected *ZerologLogger type.
+var ErrInvalidLoggerType = errors.New("logger is not a *ZerologLogger")
 
 // Config holds command-line configuration options.
 type Config struct {

@@ -34,16 +34,25 @@ import (
 
 // Layout constants for TUI rendering.
 const (
-	colWidthPadding          = 3 // Padding added to column width for spacing
-	availWidthAdjustment     = 4 // Adjustment to width for border and padding
-	minAvailHeightAdjustment = 7 // Minimum height adjustment for UI elements
-	visibleLenPrefix         = 2 // Prefix length for cursor visibility
-	totalHeightBase          = 4 // Base height for non-grid UI components
-	leftPadding              = 2 // Left padding for the entire TUI
+	colWidthPadding          = 3  // Padding added to column width for spacing
+	availWidthAdjustment     = 4  // Adjustment to width for border and padding
+	minAvailHeightAdjustment = 7  // Minimum height adjustment for UI elements
+	visibleLenPrefix         = 2  // Prefix length for cursor visibility
+	totalHeightBase          = 4  // Base height for non-grid UI components
+	leftPadding              = 2  // Left padding for the entire TUI
+	maxLogLines              = 50 // Maximum number of log lines to retain
+	maxVisibleLogLines       = 5  // Maximum number of log lines to display
+	logPanelSeparatorLines   = 2  // Number of separator lines for log panel
 )
 
 // ErrNoBinariesFound signals that no binaries were found in the target directory.
 var ErrNoBinariesFound = errors.New("no binaries found in directory")
+
+// LogMsg is a Bubble Tea message that carries a log entry to be displayed in the TUI.
+type LogMsg struct {
+	Level   string // Log level (e.g., "DBG", "INF", "WRN", "ERR")
+	Message string // Log message content
+}
 
 // ProgramRunner defines an interface for running Bubbletea programs.
 type ProgramRunner interface {
@@ -56,6 +65,7 @@ type styleConfig struct {
 	CursorColor string // ANSI 256-color code for cursor
 	FooterColor string // ANSI 256-color code for footer
 	StatusColor string // ANSI 256-color code for status
+	LogColor    string // ANSI 256-color code for log messages
 	Cursor      string // Symbol used for the cursor
 }
 
@@ -75,10 +85,19 @@ type model struct {
 	status        string        // Status message
 	styles        styleConfig   // TUI appearance settings
 	sortAscending bool          // True for ascending sort, false for descending
+	logs          []string      // Captured log messages (circular buffer)
+	showLogs      bool          // Toggle log panel visibility
+	program       *tea.Program  // Reference to the Bubble Tea program for sending messages
+	logChan       chan LogMsg   // Channel for receiving log messages from the logger
 }
 
 // DefaultRunner provides the default Bubbletea program runner.
 type DefaultRunner struct{}
+
+// NewLogMsg creates a new LogMsg for sending log entries to the TUI.
+func NewLogMsg(level, message string) LogMsg {
+	return LogMsg{Level: level, Message: message}
+}
 
 // RunTUI launches the interactive TUI mode for binary selection and removal.
 func RunTUI(
@@ -94,8 +113,9 @@ func RunTUI(
 		return fmt.Errorf("%w: %s", ErrNoBinariesFound, dir)
 	}
 
-	// Initialize and start the TUI program with default styles.
-	program, err := runner.RunProgram(&model{
+	// Initialize the model with default styles.
+	// Enable log visibility by default when verbose mode is active.
+	m := &model{
 		choices:       choices,
 		dir:           dir,
 		config:        config,
@@ -105,7 +125,28 @@ func RunTUI(
 		cursorY:       0,
 		sortAscending: true,
 		styles:        defaultStyleConfig(),
-	})
+		logs:          make([]string, 0, maxLogLines),
+		showLogs:      config.Verbose,
+	}
+
+	// Set up log capture channel if verbose mode is enabled.
+	// This must be done before starting the program to ensure capture is ready.
+	if config.Verbose {
+		m.logChan = make(chan LogMsg, maxLogLines)
+
+		log.SetCaptureFunc(func(level, msg string) {
+			// Send to channel without blocking.
+			// If channel is full, the message is dropped to prevent blocking.
+			select {
+			case m.logChan <- NewLogMsg(level, msg):
+			default:
+				// Channel is full, message is dropped to prevent blocking.
+			}
+		})
+	}
+
+	// Start the TUI program.
+	program, err := runner.RunProgram(m)
 	if err != nil {
 		return fmt.Errorf("failed to start TUI program: %w", err)
 	}
@@ -114,6 +155,9 @@ func RunTUI(
 	if program == nil {
 		return nil
 	}
+
+	// Store program reference for log message sending.
+	m.program = program
 
 	// Run the program and capture any runtime errors.
 	_, err = program.Run()
@@ -131,6 +175,7 @@ func defaultStyleConfig() styleConfig {
 		CursorColor: "214", // Orange
 		FooterColor: "245", // Light gray
 		StatusColor: "46",  // Lime green
+		LogColor:    "240", // Dark gray for subtle log display
 		Cursor:      "❯ ",
 	}
 }
@@ -146,7 +191,29 @@ func (r DefaultRunner) RunProgram(m tea.Model, opts ...tea.ProgramOption) (*tea.
 func (m *model) Init() tea.Cmd {
 	m.sortChoices()
 
+	// Start log polling if verbose mode is enabled.
+	if m.config.Verbose && m.logChan != nil {
+		return m.pollLogChannel()
+	}
+
 	return nil
+}
+
+// pollLogChannel returns a command that polls for log messages.
+// This approach avoids deadlocks by having the TUI poll the channel
+// rather than trying to Send() from within the capture callback.
+func (m *model) pollLogChannel() tea.Cmd {
+	return func() tea.Msg {
+		// Check if there's a message on the channel.
+		// Use a non-blocking receive to avoid hanging.
+		select {
+		case msg := <-m.logChan:
+			return msg
+		default:
+			// No message available, schedule next poll.
+			return nil
+		}
+	}
 }
 
 // Update processes TUI events and updates the model state.
@@ -194,6 +261,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sortChoices()
 			m.updateGrid()
 
+		case "L":
+			// Toggle log panel visibility.
+			m.showLogs = !m.showLogs
+
 		case "enter":
 			// Remove the selected binary and update the TUI state.
 			if len(m.choices) > 0 {
@@ -236,9 +307,55 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.updateGrid()
+	case LogMsg:
+		// Add log message to the circular buffer.
+		m.addLogEntry(msg)
+
+		// Continue polling for more log messages.
+		// This ensures all pending logs are captured.
+		cmd := m.pollLogChannel()
+
+		return m, cmd
+	}
+
+	// Continue polling for log messages if in verbose mode.
+	// This non-blocking poll ensures logs are captured without deadlocks.
+	if m.config.Verbose && m.logChan != nil {
+		cmd := m.pollLogChannel()
+
+		return m, cmd
 	}
 
 	return m, nil
+}
+
+// addLogEntry adds a log message to the circular buffer, maintaining maxLogLines limit.
+func (m *model) addLogEntry(msg LogMsg) {
+	// Format the log entry: "[LEVEL] message"
+	entry := fmt.Sprintf("[%s] %s", msg.Level, msg.Message)
+
+	// Add to logs slice
+	m.logs = append(m.logs, entry)
+
+	// Maintain circular buffer size
+	if len(m.logs) > maxLogLines {
+		m.logs = m.logs[len(m.logs)-maxLogLines:]
+	}
+}
+
+// getVisibleLogs returns the last N log lines that fit within the available height.
+func (m *model) getVisibleLogs(maxLines int) []string {
+	if !m.showLogs || len(m.logs) == 0 || maxLines <= 0 {
+		return nil
+	}
+
+	// Return the last maxLines entries
+	start := len(m.logs) - maxLines
+	if start < 0 {
+		start = 0
+	}
+
+	return m.logs[start:]
 }
 
 // sortChoices sorts the choices based on the current sort order.
@@ -268,6 +385,13 @@ func (m *model) updateGrid() {
 	colWidth := maxNameLen + colWidthPadding
 	availWidth := m.width - availWidthAdjustment
 	availHeight := maximum(m.height-minAvailHeightAdjustment, 1)
+
+	// Adjust available height for log panel if visible
+	if m.showLogs && len(m.logs) > 0 {
+		// Reserve up to maxVisibleLogLines lines for log panel (plus 1 for separator)
+		logPanelHeight := minimum(len(m.logs), maxVisibleLogLines) + 1
+		availHeight = maximum(availHeight-logPanelHeight, 1)
+	}
 
 	// Clear grid if no choices remain.
 	if len(m.choices) == 0 {
@@ -320,6 +444,7 @@ func (m *model) View() tea.View {
 	cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.styles.CursorColor))
 	footerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.styles.FooterColor))
 	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.styles.StatusColor))
+	logStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.styles.LogColor))
 
 	// Calculate column width based on the longest binary name.
 	var maxNameLen int
@@ -356,7 +481,7 @@ func (m *model) View() tea.View {
 		grid.WriteString("\n")
 	}
 
-	// Assemble the full TUI layout: title, grid, status, and footer.
+	// Assemble the full TUI layout: title, grid, logs (if visible), status, and footer.
 	var s strings.Builder
 
 	s.WriteString(titleStyle.Render("Select a binary to remove:\n"))
@@ -364,21 +489,50 @@ func (m *model) View() tea.View {
 	s.WriteString(grid.String())
 	s.WriteString("\n")
 
+	// Render log panel if enabled and logs exist
+	if m.showLogs && len(m.logs) > 0 {
+		visibleLogs := m.getVisibleLogs(
+			maxVisibleLogLines,
+		) // Show up to maxVisibleLogLines log lines
+		if len(visibleLogs) > 0 {
+			s.WriteString(logStyle.Render("─ Log Messages ─"))
+			s.WriteString("\n")
+
+			for _, logEntry := range visibleLogs {
+				s.WriteString(logStyle.Render(logEntry))
+				s.WriteString("\n")
+			}
+
+			s.WriteString("\n")
+		}
+	}
+
 	if m.status != "" {
 		s.WriteString(statusStyle.Render(m.status))
 		s.WriteString("\n")
 	}
 
-	footer := footerStyle.Render(
-		"↑/k: up  ↓/j: down  ←/h: left  →/l: right  Enter: remove  s: toggle sort  q: quit",
-	)
+	// Update footer to include L key for toggling logs
+	footerText := "↑/k: up  ↓/j: down  ←/h: left  →/l: right  Enter: remove  s: toggle sort  L: logs  q: quit"
+	footer := footerStyle.Render(footerText)
 
 	lenStatus := 0
 	if m.status != "" {
 		lenStatus = 1
 	}
 
-	totalHeight := m.rows + totalHeightBase + lenStatus
+	// Account for log panel in height calculation
+	logPanelLines := 0
+
+	if m.showLogs && len(m.logs) > 0 {
+		visibleLogs := m.getVisibleLogs(maxVisibleLogLines)
+		if len(visibleLogs) > 0 {
+			// Log panel header + log lines + separator
+			logPanelLines = len(visibleLogs) + logPanelSeparatorLines
+		}
+	}
+
+	totalHeight := m.rows + totalHeightBase + lenStatus + logPanelLines
 
 	// Add padding lines to fill the terminal height.
 	for i := totalHeight; i < m.height; i++ {
