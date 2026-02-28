@@ -5,7 +5,7 @@
 package mocks
 
 import (
-	"github.com/charmbracelet/bubbletea"
+	"charm.land/bubbletea/v2"
 	mock "github.com/stretchr/testify/mock"
 )
 

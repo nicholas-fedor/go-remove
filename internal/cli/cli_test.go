@@ -28,7 +28,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	fsmocks "github.com/nicholas-fedor/go-remove/internal/fs/mocks"
 	"github.com/nicholas-fedor/go-remove/internal/logger"
