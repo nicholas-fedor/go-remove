@@ -70,8 +70,8 @@ func TestRealFS_DetermineBinDir(t *testing.T) {
 			name:    "useGoroot with GOROOT set",
 			r:       &RealFS{},
 			args:    args{useGoroot: true},
-			env:     map[string]string{"GOROOT": "/go"},
-			want:    "/go/bin",
+			env:     map[string]string{"GOROOT": filepath.Join("/", "go")},
+			want:    filepath.Join("/", "go", "bin"),
 			wantErr: false,
 		},
 		{
@@ -86,16 +86,16 @@ func TestRealFS_DetermineBinDir(t *testing.T) {
 			name:    "use GOBIN",
 			r:       &RealFS{},
 			args:    args{useGoroot: false},
-			env:     map[string]string{"GOBIN": "/custom/bin"},
-			want:    "/custom/bin",
+			env:     map[string]string{"GOBIN": filepath.Join("/", "custom", "bin")},
+			want:    filepath.Join("/", "custom", "bin"),
 			wantErr: false,
 		},
 		{
 			name:    "use GOPATH/bin when GOBIN unset",
 			r:       &RealFS{},
 			args:    args{useGoroot: false},
-			env:     map[string]string{"GOPATH": "/gopath", "GOBIN": ""},
-			want:    "/gopath/bin",
+			env:     map[string]string{"GOPATH": filepath.Join("/", "gopath"), "GOBIN": ""},
+			want:    filepath.Join("/", "gopath", "bin"),
 			wantErr: false,
 		},
 		{
@@ -160,8 +160,8 @@ func TestRealFS_AdjustBinaryPath(t *testing.T) {
 		{
 			name: "basic path",
 			r:    &RealFS{},
-			args: args{dir: "/bin", binary: "tool"},
-			want: "/bin/tool" + func() string {
+			args: args{dir: filepath.Join("/", "bin"), binary: "tool"},
+			want: filepath.Join("/", "bin", "tool") + func() string {
 				if runtime.GOOS == windowsOS {
 					return windowsExt
 				}
@@ -172,8 +172,8 @@ func TestRealFS_AdjustBinaryPath(t *testing.T) {
 		{
 			name: "empty binary",
 			r:    &RealFS{},
-			args: args{dir: "/bin", binary: ""},
-			want: filepath.Join("/bin"), //nolint:gocritic // Single argument intentional
+			args: args{dir: filepath.Join("/", "bin"), binary: ""},
+			want: filepath.Join("/", "bin"), //nolint:gocritic // Single argument intentional
 		},
 	}
 	if runtime.GOOS == windowsOS {
@@ -185,8 +185,8 @@ func TestRealFS_AdjustBinaryPath(t *testing.T) {
 		}{
 			name: "windows adds .exe",
 			r:    &RealFS{},
-			args: args{dir: "/bin", binary: "tool"},
-			want: "/bin/tool.exe",
+			args: args{dir: filepath.Join("/", "bin"), binary: "tool"},
+			want: filepath.Join("/", "bin", "tool.exe"),
 		})
 	}
 
