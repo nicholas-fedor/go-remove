@@ -27,7 +27,7 @@ import (
 
 	"github.com/stretchr/testify/mock"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	fsmocks "github.com/nicholas-fedor/go-remove/internal/fs/mocks"
 	logmocks "github.com/nicholas-fedor/go-remove/internal/logger/mocks"
@@ -38,7 +38,7 @@ type tuiMockRunner struct {
 	runProgram func(tea.Model, ...tea.ProgramOption) (*tea.Program, error)
 }
 
-// RunProgram executes the mock runner’s program function.
+// RunProgram executes the mock runner's program function.
 func (m *tuiMockRunner) RunProgram(
 	model tea.Model,
 	opts ...tea.ProgramOption,
@@ -46,7 +46,7 @@ func (m *tuiMockRunner) RunProgram(
 	return m.runProgram(model, opts...)
 }
 
-// TestRunTUI verifies the RunTUI function’s behavior under various conditions.
+// TestRunTUI verifies the RunTUI function's behavior under various conditions.
 func TestRunTUI(t *testing.T) {
 	type args struct {
 		dir    string
@@ -128,7 +128,7 @@ func TestRunTUI(t *testing.T) {
 	}
 }
 
-// Test_model_Init verifies the Init method’s command output.
+// Test_model_Init verifies the Init method's command output.
 func Test_model_Init(t *testing.T) {
 	tests := []struct {
 		name string
@@ -138,7 +138,7 @@ func Test_model_Init(t *testing.T) {
 		{
 			name: "basic init",
 			m:    model{},
-			want: tea.EnterAltScreen,
+			want: nil,
 		},
 	}
 
@@ -152,7 +152,34 @@ func Test_model_Init(t *testing.T) {
 	}
 }
 
-// Test_model_Update verifies the Update method’s state changes and commands.
+// keyPress creates a KeyPressMsg with the given rune.
+func keyPress(r rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Text: string(r), Code: r, ShiftedCode: r}
+}
+
+// keyPressString creates a KeyPressMsg from a string representation.
+func keyPressString(s string) tea.KeyPressMsg {
+	switch s {
+	case "enter":
+		return tea.KeyPressMsg{Code: tea.KeyEnter}
+	case "up":
+		return tea.KeyPressMsg{Code: tea.KeyUp}
+	case "down":
+		return tea.KeyPressMsg{Code: tea.KeyDown}
+	case "left":
+		return tea.KeyPressMsg{Code: tea.KeyLeft}
+	case "right":
+		return tea.KeyPressMsg{Code: tea.KeyRight}
+	default:
+		if len(s) == 1 {
+			r := rune(s[0])
+			return tea.KeyPressMsg{Text: s, Code: r, ShiftedCode: r}
+		}
+		return tea.KeyPressMsg{}
+	}
+}
+
+// Test_model_Update verifies the Update method's state changes and commands.
 func Test_model_Update(t *testing.T) {
 	type args struct {
 		msg tea.Msg
@@ -168,21 +195,21 @@ func Test_model_Update(t *testing.T) {
 		{
 			name:    "quit with q",
 			m:       &model{},
-			args:    args{msg: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}}},
+			args:    args{msg: keyPress('q')},
 			want:    model{},
 			wantCmd: tea.Quit,
 		},
 		{
 			name:    "move up",
 			m:       &model{cursorY: 1, rows: 2},
-			args:    args{msg: tea.KeyMsg{Type: tea.KeyUp}},
+			args:    args{msg: keyPressString("up")},
 			want:    model{cursorY: 0, rows: 2},
 			wantCmd: nil,
 		},
 		{
 			name:    "move down within bounds",
 			m:       &model{cursorY: 0, rows: 2, cols: 2, choices: []string{"a", "b", "c", "d"}},
-			args:    args{msg: tea.KeyMsg{Type: tea.KeyDown}},
+			args:    args{msg: keyPressString("down")},
 			want:    model{cursorY: 1, rows: 2, cols: 2, choices: []string{"a", "b", "c", "d"}},
 			wantCmd: nil,
 		},
@@ -195,7 +222,7 @@ func Test_model_Update(t *testing.T) {
 				cols:    2,
 				choices: []string{"a", "b", "c", "d"},
 			},
-			args: args{msg: tea.KeyMsg{Type: tea.KeyDown}},
+			args: args{msg: keyPressString("down")},
 			want: model{
 				cursorY: 1,
 				cursorX: 1,
@@ -208,14 +235,14 @@ func Test_model_Update(t *testing.T) {
 		{
 			name:    "move left",
 			m:       &model{cursorX: 1, cols: 2},
-			args:    args{msg: tea.KeyMsg{Type: tea.KeyLeft}},
+			args:    args{msg: keyPressString("left")},
 			want:    model{cursorX: 0, cols: 2},
 			wantCmd: nil,
 		},
 		{
 			name:    "move right within bounds",
 			m:       &model{cursorX: 0, cols: 2, choices: []string{"a", "b"}},
-			args:    args{msg: tea.KeyMsg{Type: tea.KeyRight}},
+			args:    args{msg: keyPressString("right")},
 			want:    model{cursorX: 1, cols: 2, choices: []string{"a", "b"}},
 			wantCmd: nil,
 		},
@@ -229,7 +256,7 @@ func Test_model_Update(t *testing.T) {
 				width:         80,
 				height:        24,
 			},
-			args: args{msg: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}},
+			args: args{msg: keyPress('s')},
 			want: model{
 				choices:       []string{"vhs", "age"},
 				sortAscending: false,
@@ -250,7 +277,7 @@ func Test_model_Update(t *testing.T) {
 				width:         80,
 				height:        24,
 			},
-			args: args{msg: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}},
+			args: args{msg: keyPress('s')},
 			want: model{
 				choices:       []string{"age", "vhs"},
 				sortAscending: true,
@@ -286,7 +313,7 @@ func Test_model_Update(t *testing.T) {
 					return m
 				}(),
 			},
-			args: args{msg: tea.KeyMsg{Type: tea.KeyEnter}},
+			args: args{msg: keyPressString("enter")},
 			want: model{
 				choices:       []string{"vhs"},
 				cols:          1,
@@ -324,7 +351,7 @@ func Test_model_Update(t *testing.T) {
 					return m
 				}(),
 			},
-			args: args{msg: tea.KeyMsg{Type: tea.KeyEnter}},
+			args: args{msg: keyPressString("enter")},
 			want: model{
 				choices:       []string{"age"},
 				cols:          1,
@@ -390,7 +417,7 @@ func Test_model_Update(t *testing.T) {
 	}
 }
 
-// Test_model_updateGrid verifies the updateGrid method’s layout calculations.
+// Test_model_updateGrid verifies the updateGrid method's layout calculations.
 func Test_model_updateGrid(t *testing.T) {
 	tests := []struct {
 		name string
@@ -467,7 +494,7 @@ func stripANSI(str string) string {
 	return ansiRegex.ReplaceAllString(str, "")
 }
 
-// Test_model_View verifies the View method’s rendered output.
+// Test_model_View verifies the View method's rendered output.
 func Test_model_View(t *testing.T) {
 	const contentWidth = 78 // Max visible width for content (excluding leftPadding)
 
@@ -583,7 +610,7 @@ func Test_model_View(t *testing.T) {
 			tt.m.sortChoices()
 			tt.m.updateGrid()
 
-			got := stripANSI(tt.m.View())
+			got := stripANSI(tt.m.View().Content)
 			if got != tt.want {
 				t.Errorf("model.View() got = %q, want %q", got, tt.want)
 			}
@@ -591,7 +618,7 @@ func Test_model_View(t *testing.T) {
 	}
 }
 
-// Test_max verifies the max function’s comparison logic.
+// Test_max verifies the max function's comparison logic.
 func Test_max(t *testing.T) {
 	tests := []struct {
 		name string
@@ -613,7 +640,7 @@ func Test_max(t *testing.T) {
 	}
 }
 
-// Test_min verifies the min function’s comparison logic.
+// Test_min verifies the min function's comparison logic.
 func Test_min(t *testing.T) {
 	tests := []struct {
 		name string

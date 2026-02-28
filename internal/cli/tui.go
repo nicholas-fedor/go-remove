@@ -24,9 +24,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/nicholas-fedor/go-remove/internal/fs"
 	"github.com/nicholas-fedor/go-remove/internal/logger"
@@ -99,7 +99,7 @@ func RunTUI(dir string, config Config, logger logger.Logger, fs fs.FS, runner Pr
 		cursorY:       0,
 		sortAscending: true,
 		styles:        defaultStyleConfig(),
-	}, tea.WithAltScreen())
+	})
 	if err != nil {
 		return fmt.Errorf("failed to start TUI program: %w", err)
 	}
@@ -140,7 +140,7 @@ func (r DefaultRunner) RunProgram(m tea.Model, opts ...tea.ProgramOption) (*tea.
 func (m *model) Init() tea.Cmd {
 	m.sortChoices()
 
-	return tea.EnterAltScreen // Switch to alternate screen buffer
+	return nil
 }
 
 // Update processes TUI events and updates the model state.
@@ -300,10 +300,13 @@ func (m *model) updateGrid() {
 	}
 }
 
-// View renders the TUI interface as a string.
-func (m *model) View() string {
+// View renders the TUI interface as a tea.View.
+func (m *model) View() tea.View {
 	if len(m.choices) == 0 {
-		return "No binaries found.\n"
+		view := tea.NewView("No binaries found.\n")
+		view.AltScreen = true
+
+		return view
 	}
 
 	// Apply configured styles for UI elements.
@@ -378,10 +381,15 @@ func (m *model) View() string {
 
 	s.WriteString(footer)
 
-	return lipgloss.NewStyle().
+	content := lipgloss.NewStyle().
 		PaddingLeft(leftPadding).
 		Width(m.width - leftPadding).
 		Render(s.String())
+
+	view := tea.NewView(content)
+	view.AltScreen = true
+
+	return view
 }
 
 // maximum returns the larger of two integers.
