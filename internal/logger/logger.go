@@ -59,30 +59,32 @@ type Logger interface {
 
 // ZerologLogger wraps zerolog.Logger to implement the Logger interface.
 type ZerologLogger struct {
-	logger      zerolog.Logger
-	mu          sync.RWMutex
-	output      io.Writer
-	captureFunc LogCaptureFunc
+	logger        zerolog.Logger
+	mu            sync.RWMutex
+	output        io.Writer
+	captureFunc   LogCaptureFunc
+	captureWriter *captureWriter
 }
 
 // captureWriter wraps an io.Writer and captures written data for TUI display.
 type captureWriter struct {
-	mu          sync.RWMutex
-	output      io.Writer
-	captureFunc LogCaptureFunc
+	mu             sync.RWMutex
+	output         io.Writer
+	captureFunc    LogCaptureFunc
+	captureEnabled bool
 }
 
 // Write implements io.Writer, writing to the underlying output and capturing the data.
-// When a capture function is set, output is discarded to prevent duplicate logs in TUI mode.
+// When capture is enabled, output is discarded to prevent duplicate logs in TUI mode.
 func (w *captureWriter) Write(data []byte) (int, error) {
 	w.mu.RLock()
 	output := w.output
-	capture := w.captureFunc
+	enabled := w.captureEnabled
 	w.mu.RUnlock()
 
-	// If a capture function is set, discard the output to prevent duplicate logs.
+	// If capture is enabled, discard the output to prevent duplicate logs.
 	// The log message will only be sent through the capture mechanism to the TUI log panel.
-	if capture != nil {
+	if enabled {
 		w.captureLogMessage(string(data))
 
 		// Write to io.Discard to satisfy the writer interface without producing output.
@@ -94,7 +96,7 @@ func (w *captureWriter) Write(data []byte) (int, error) {
 		return bytesWritten, nil
 	}
 
-	// No capture function set, write to the underlying output normally.
+	// Capture is not enabled, write to the underlying output normally.
 	bytesWritten, err := output.Write(data)
 	if err != nil {
 		return bytesWritten, fmt.Errorf("failed to write to output: %w", err)
@@ -137,11 +139,24 @@ func (w *captureWriter) captureLogMessage(logLine string) {
 }
 
 // SetCaptureFunc sets the capture function for the underlying capture writer.
+// When a non-nil captureFunc is provided, capture is enabled and log messages
+// will be sent to the callback instead of the normal output.
 func (w *captureWriter) SetCaptureFunc(captureFunc LogCaptureFunc) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
 	w.captureFunc = captureFunc
+	w.captureEnabled = captureFunc != nil
+}
+
+// SetupCaptureBridge configures the capture writer with a bridge function that
+// calls the provided callback. This is used internally to connect the capture
+// writer to the logger's capture function.
+func (w *captureWriter) SetupCaptureBridge(bridge func(level, msg string)) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	w.captureFunc = bridge
 }
 
 // NewLogger creates a new zerolog-based logger with console output.
@@ -176,12 +191,13 @@ func NewLogger() (Logger, error) {
 // for display in the TUI. This is useful for verbose mode where debug logs should
 // appear within the TUI interface rather than being written directly to stderr.
 func NewLoggerWithCapture() (Logger, *captureWriter, error) {
-	// Create a captureWriter that wraps stderr
+	// Create a captureWriter that wraps stderr.
+	// captureFunc and captureEnabled are left as zero values (nil and false).
 	captureWriter := &captureWriter{
 		output: os.Stderr,
 	}
 
-	// Create a ConsoleWriter that writes to the captureWriter
+	// Create a ConsoleWriter that writes to the captureWriter.
 	consoleWriter := zerolog.ConsoleWriter{
 		Out:        captureWriter,
 		TimeFormat: time.RFC3339,
@@ -196,20 +212,10 @@ func NewLoggerWithCapture() (Logger, *captureWriter, error) {
 		Level(zerolog.InfoLevel)
 
 	logger := &ZerologLogger{
-		logger:      zerologLogger,
-		output:      consoleWriter,
-		captureFunc: nil,
-	}
-
-	// Set up the capture writer to call the logger's capture function
-	captureWriter.captureFunc = func(level, msg string) {
-		logger.mu.RLock()
-		capture := logger.captureFunc
-		logger.mu.RUnlock()
-
-		if capture != nil {
-			capture(level, msg)
-		}
+		logger:        zerologLogger,
+		output:        consoleWriter,
+		captureFunc:   nil,
+		captureWriter: captureWriter,
 	}
 
 	return logger, captureWriter, nil
@@ -273,9 +279,23 @@ func (z *ZerologLogger) Level(level zerolog.Level) {
 // When set, log messages are parsed and sent to this callback.
 func (z *ZerologLogger) SetCaptureFunc(captureFunc LogCaptureFunc) {
 	z.mu.Lock()
-	defer z.mu.Unlock()
-
 	z.captureFunc = captureFunc
+	z.mu.Unlock()
+
+	// Set up the bridge function on the capture writer when a callback is provided.
+	// The bridge function reads the current captureFunc from the logger and calls it.
+	if z.captureWriter != nil && captureFunc != nil {
+		z.captureWriter.SetupCaptureBridge(func(level, msg string) {
+			z.mu.RLock()
+			capture := z.captureFunc
+			z.mu.RUnlock()
+
+			if capture != nil {
+				capture(level, msg)
+			}
+		})
+		z.captureWriter.SetCaptureFunc(captureFunc)
+	}
 }
 
 // ParseLevel parses a string log level into a zerolog.Level.
