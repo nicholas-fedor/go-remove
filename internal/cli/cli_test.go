@@ -32,7 +32,6 @@ import (
 
 	mockRunner "github.com/nicholas-fedor/go-remove/internal/cli/mocks"
 	mockFS "github.com/nicholas-fedor/go-remove/internal/fs/mocks"
-	"github.com/nicholas-fedor/go-remove/internal/logger"
 	mockLogger "github.com/nicholas-fedor/go-remove/internal/logger/mocks"
 )
 
@@ -137,12 +136,6 @@ func makeDeps(
 func executeRun(deps Dependencies, config Config, runner ProgramRunner) error {
 	log := deps.Logger
 
-	// Set log level based on config if verbose mode is enabled.
-	if config.Verbose {
-		level := logger.ParseLevel(config.LogLevel)
-		log.Level(level)
-	}
-
 	binDir, err := deps.FS.DetermineBinDir(config.Goroot)
 	if err != nil {
 		_ = log.Sync() // Flush logs; errors are ignored
@@ -172,23 +165,65 @@ func executeRun(deps Dependencies, config Config, runner ProgramRunner) error {
 	return nil
 }
 
+// testCase defines the structure for TestRun test cases.
+type testCase struct {
+	name        string
+	config      Config
+	setupFS     func(t *testing.T) *mockFS.MockFS
+	setupLog    func(t *testing.T) *mockLogger.MockLogger
+	setupRunner func(t *testing.T) *mockRunner.MockProgramRunner
+	wantErr     bool
+	wantOutput  string // Expected stdout output for non-verbose success
+}
+
+// runTestCase executes a single test case with the provided configuration.
+// It handles stdout capture, dependency setup, execution, and assertions.
+func runTestCase(t *testing.T, tt *testCase) {
+	t.Helper()
+
+	// Capture stdout for output verification.
+	getOutput := captureStdout(t)
+
+	// Set up dependencies and runner.
+	deps, mockFSInstance, mockLog, runner := makeDeps(t, makeDepsConfig{
+		setupFS:     tt.setupFS,
+		setupLog:    tt.setupLog,
+		setupRunner: tt.setupRunner,
+	})
+
+	// Execute the run function and capture any errors.
+	err := executeRun(deps, tt.config, runner)
+
+	// Capture stdout output after execution.
+	gotOutput := getOutput()
+
+	// Verify error behavior matches expectations.
+	if (err != nil) != tt.wantErr {
+		t.Errorf("Run() error = %v, wantErr %v", err, tt.wantErr)
+	}
+
+	// Verify stdout output for non-verbose success cases.
+	if tt.wantOutput != "" && gotOutput != tt.wantOutput {
+		t.Errorf("Run() output = %q, want %q", gotOutput, tt.wantOutput)
+	}
+
+	// Assert that all mock expectations were met.
+	mockFSInstance.AssertExpectations(t)
+	mockLog.AssertExpectations(t)
+
+	// If using a mock runner, assert its expectations as well.
+	if mr, ok := runner.(*mockRunner.MockProgramRunner); ok {
+		mr.AssertExpectations(t)
+	}
+}
+
 // TestRun verifies the Run function's behavior under various conditions.
-//
-//nolint:thelper // Subtest functions in table-driven tests require *testing.T parameter for mock constructors
 func TestRun(t *testing.T) {
-	tests := []struct {
-		name        string
-		config      Config
-		setupFS     func(t *testing.T) *mockFS.MockFS
-		setupLog    func(t *testing.T) *mockLogger.MockLogger
-		setupRunner func(t *testing.T) *mockRunner.MockProgramRunner
-		wantErr     bool
-		wantOutput  string // Expected stdout output for non-verbose success
-	}{
+	tests := []testCase{
 		{
 			name:   "direct removal success",
 			config: Config{Binary: "vhs", Verbose: false, Goroot: false},
-			setupFS: func(t *testing.T) *mockFS.MockFS {
+			setupFS: func(t *testing.T) *mockFS.MockFS { //nolint:thelper // Anonymous setup function, not a test helper
 				m := mockFS.NewMockFS(t)
 				m.On("DetermineBinDir", false).Return("/bin", nil)
 				m.On("AdjustBinaryPath", "/bin", "vhs").Return("/bin/vhs")
@@ -203,7 +238,7 @@ func TestRun(t *testing.T) {
 		{
 			name:   "direct removal failure",
 			config: Config{Binary: "vhs", Verbose: false, Goroot: false},
-			setupFS: func(t *testing.T) *mockFS.MockFS {
+			setupFS: func(t *testing.T) *mockFS.MockFS { //nolint:thelper // Anonymous setup function, not a test helper
 				m := mockFS.NewMockFS(t)
 				m.On("DetermineBinDir", false).Return("/bin", nil)
 				m.On("AdjustBinaryPath", "/bin", "vhs").Return("/bin/vhs")
@@ -218,7 +253,7 @@ func TestRun(t *testing.T) {
 		{
 			name:   "tui mode success",
 			config: Config{Binary: "", Verbose: false, Goroot: false},
-			setupFS: func(t *testing.T) *mockFS.MockFS {
+			setupFS: func(t *testing.T) *mockFS.MockFS { //nolint:thelper // Anonymous setup function, not a test helper
 				m := mockFS.NewMockFS(t)
 				m.On("DetermineBinDir", false).Return("/bin", nil)
 				m.On("ListBinaries", "/bin").Return([]string{"vhs"})
@@ -226,7 +261,7 @@ func TestRun(t *testing.T) {
 				return m
 			},
 			setupLog: newMockLoggerWithDefaults,
-			setupRunner: func(t *testing.T) *mockRunner.MockProgramRunner {
+			setupRunner: func(t *testing.T) *mockRunner.MockProgramRunner { //nolint:thelper // Anonymous setup function, not a test helper
 				m := mockRunner.NewMockProgramRunner(t)
 				m.On("RunProgram", mock.Anything, mock.Anything).Return(nil, nil)
 
@@ -237,7 +272,7 @@ func TestRun(t *testing.T) {
 		{
 			name:   "tui mode no binaries",
 			config: Config{Binary: "", Verbose: false, Goroot: false},
-			setupFS: func(t *testing.T) *mockFS.MockFS {
+			setupFS: func(t *testing.T) *mockFS.MockFS { //nolint:thelper // Anonymous setup function, not a test helper
 				m := mockFS.NewMockFS(t)
 				m.On("DetermineBinDir", false).Return("/bin", nil)
 				m.On("ListBinaries", "/bin").Return([]string{})
@@ -245,7 +280,7 @@ func TestRun(t *testing.T) {
 				return m
 			},
 			setupLog: newMockLoggerWithDefaults,
-			setupRunner: func(t *testing.T) *mockRunner.MockProgramRunner {
+			setupRunner: func(t *testing.T) *mockRunner.MockProgramRunner { //nolint:thelper // Anonymous setup function, not a test helper
 				m := mockRunner.NewMockProgramRunner(t)
 				// RunProgram may not be called if RunTUI returns an error early
 				m.On("RunProgram", mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -257,7 +292,7 @@ func TestRun(t *testing.T) {
 		{
 			name:   "bin dir error",
 			config: Config{Binary: "vhs", Verbose: false, Goroot: false},
-			setupFS: func(t *testing.T) *mockFS.MockFS {
+			setupFS: func(t *testing.T) *mockFS.MockFS { //nolint:thelper // Anonymous setup function, not a test helper
 				m := mockFS.NewMockFS(t)
 				m.On("DetermineBinDir", false).Return("", errors.New("bin dir failed"))
 
@@ -269,7 +304,7 @@ func TestRun(t *testing.T) {
 		{
 			name:   "logger sync error",
 			config: Config{Binary: "vhs", Verbose: false, Goroot: false},
-			setupFS: func(t *testing.T) *mockFS.MockFS {
+			setupFS: func(t *testing.T) *mockFS.MockFS { //nolint:thelper // Anonymous setup function, not a test helper
 				m := mockFS.NewMockFS(t)
 				m.On("DetermineBinDir", false).Return("/bin", nil)
 				m.On("AdjustBinaryPath", "/bin", "vhs").Return("/bin/vhs")
@@ -277,7 +312,7 @@ func TestRun(t *testing.T) {
 
 				return m
 			},
-			setupLog: func(t *testing.T) *mockLogger.MockLogger {
+			setupLog: func(t *testing.T) *mockLogger.MockLogger { //nolint:thelper // Anonymous setup function, not a test helper
 				m := mockLogger.NewMockLogger(t)
 				nopLog := zerolog.New(io.Discard)
 				m.On("Debug").Return(nopLog.Debug()).Maybe()
@@ -295,42 +330,9 @@ func TestRun(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Capture stdout for output verification.
-			getOutput := captureStdout(t)
-
-			// Set up dependencies and runner.
-			deps, mockFSInstance, mockLog, runner := makeDeps(t, makeDepsConfig{
-				setupFS:     tt.setupFS,
-				setupLog:    tt.setupLog,
-				setupRunner: tt.setupRunner,
-			})
-
-			// Execute the run function and capture any errors.
-			err := executeRun(deps, tt.config, runner)
-
-			// Capture stdout output after execution.
-			gotOutput := getOutput()
-
-			// Verify error behavior matches expectations.
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Run() error = %v, wantErr %v", err, tt.wantErr)
-			}
-
-			// Verify stdout output for non-verbose success cases.
-			if tt.wantOutput != "" && gotOutput != tt.wantOutput {
-				t.Errorf("Run() output = %q, want %q", gotOutput, tt.wantOutput)
-			}
-
-			// Assert that all mock expectations were met.
-			mockFSInstance.AssertExpectations(t)
-			mockLog.AssertExpectations(t)
-
-			// If using a mock runner, assert its expectations as well.
-			if mr, ok := runner.(*mockRunner.MockProgramRunner); ok {
-				mr.AssertExpectations(t)
-			}
+	for i := range tests {
+		t.Run(tests[i].name, func(t *testing.T) {
+			runTestCase(t, &tests[i])
 		})
 	}
 }
