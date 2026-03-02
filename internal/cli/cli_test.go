@@ -70,16 +70,34 @@ func captureStdout(t *testing.T) func() string {
 	t.Helper()
 
 	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("Failed to create pipe: %v", err)
+	}
+
 	os.Stdout = w
 
 	return func() string {
+		// Always restore os.Stdout first
 		os.Stdout = oldStdout
 
-		w.Close()
+		// Close the write end and check for errors
+		if err := w.Close(); err != nil {
+			t.Errorf("Failed to close pipe writer: %v", err)
+		}
 
+		// Read from pipe and check for errors
 		var buf bytes.Buffer
-		buf.ReadFrom(r)
+
+		if _, err := buf.ReadFrom(r); err != nil {
+			t.Errorf("Failed to read from pipe: %v", err)
+		}
+
+		// Close the read end to prevent FD leak
+		if err := r.Close(); err != nil {
+			t.Errorf("Failed to close pipe reader: %v", err)
+		}
 
 		return buf.String()
 	}
@@ -322,9 +340,12 @@ func TestRun(t *testing.T) {
 //nolint:thelper // Subtest functions in table-driven tests require *testing.T parameter for mock constructors
 func TestRun_WithLoggerSync(t *testing.T) {
 	tests := []struct {
-		name    string
-		config  Config
-		setupFS func(t *testing.T) *mockFS.MockFS
+		name       string
+		config     Config
+		setupFS    func(t *testing.T) *mockFS.MockFS
+		setupLog   func(t *testing.T) *mockLogger.MockLogger
+		wantErr    bool
+		wantOutput string
 	}{
 		{
 			name:   "sync called on success",
@@ -337,6 +358,19 @@ func TestRun_WithLoggerSync(t *testing.T) {
 
 				return m
 			},
+			setupLog: func(t *testing.T) *mockLogger.MockLogger {
+				m := mockLogger.NewMockLogger(t)
+				nopLog := zerolog.New(io.Discard)
+				m.On("Debug").Return(nopLog.Debug()).Maybe()
+				m.On("Info").Return(nopLog.Info()).Maybe()
+				m.On("Warn").Return(nopLog.Warn()).Maybe()
+				m.On("Error").Return(nopLog.Error()).Maybe()
+				m.On("Sync").Return(nil)
+
+				return m
+			},
+			wantErr:    false,
+			wantOutput: "Successfully removed tool\n",
 		},
 		{
 			name:   "sync called on error",
@@ -347,33 +381,57 @@ func TestRun_WithLoggerSync(t *testing.T) {
 
 				return m
 			},
+			setupLog: func(t *testing.T) *mockLogger.MockLogger {
+				m := mockLogger.NewMockLogger(t)
+				nopLog := zerolog.New(io.Discard)
+				m.On("Debug").Return(nopLog.Debug()).Maybe()
+				m.On("Info").Return(nopLog.Info()).Maybe()
+				m.On("Warn").Return(nopLog.Warn()).Maybe()
+				m.On("Error").Return(nopLog.Error()).Maybe()
+				m.On("Sync").Return(nil)
+
+				return m
+			},
+			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockLog := mockLogger.NewMockLogger(t)
-			mockLog.On("Sync").Return(nil)
+			// Capture stdout for output verification.
+			getOutput := captureStdout(t)
 
+			// Set up dependencies.
 			mockFSInstance := tt.setupFS(t)
+			mockLog := tt.setupLog(t)
+
 			deps := Dependencies{
 				FS:     mockFSInstance,
 				Logger: mockLog,
 			}
 
-			binDir, err := deps.FS.DetermineBinDir(tt.config.Goroot)
-			if err != nil {
-				_ = deps.Logger.Sync()
+			// Execute the Run function and capture any errors.
+			err := Run(deps, tt.config)
 
-				return
+			// Capture stdout output after execution.
+			gotOutput := getOutput()
+
+			// Verify error behavior matches expectations.
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Run() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
-			binaryPath := deps.FS.AdjustBinaryPath(binDir, tt.config.Binary)
-			_ = deps.FS.RemoveBinary(binaryPath, tt.config.Binary, tt.config.Verbose, deps.Logger)
-			_ = deps.Logger.Sync()
+			// Verify stdout output for success cases.
+			if tt.wantOutput != "" && gotOutput != tt.wantOutput {
+				t.Errorf("Run() output = %q, want %q", gotOutput, tt.wantOutput)
+			}
 
 			// Assert that Sync was called on the mock logger.
 			mockLog.AssertCalled(t, "Sync")
+
+			// Assert that all mock expectations were met.
+			mockFSInstance.AssertExpectations(t)
+			mockLog.AssertExpectations(t)
 		})
 	}
 }
@@ -386,7 +444,11 @@ func TestRun_VerboseMode(t *testing.T) {
 	m.On("RemoveBinary", "/bin/vhs", "vhs", true, mock.Anything).Return(nil)
 
 	mockLog := mockLogger.NewMockLogger(t)
-	// Level is optional since the test doesn't go through the full Run() path
+	nopLog := zerolog.New(io.Discard)
+	mockLog.On("Debug").Return(nopLog.Debug()).Maybe()
+	mockLog.On("Info").Return(nopLog.Info()).Maybe()
+	mockLog.On("Warn").Return(nopLog.Warn()).Maybe()
+	mockLog.On("Error").Return(nopLog.Error()).Maybe()
 	mockLog.On("Level", mock.Anything).Return().Maybe()
 	mockLog.On("Sync").Return(nil)
 
@@ -399,10 +461,8 @@ func TestRun_VerboseMode(t *testing.T) {
 	// Capture stdout to capture output.
 	getOutput := captureStdout(t)
 
-	binDir, _ := deps.FS.DetermineBinDir(config.Goroot)
-	binaryPath := deps.FS.AdjustBinaryPath(binDir, config.Binary)
-	err := deps.FS.RemoveBinary(binaryPath, config.Binary, config.Verbose, deps.Logger)
-	_ = deps.Logger.Sync()
+	// Execute the Run function and capture any errors.
+	err := Run(deps, config)
 
 	// Restore stdout and get captured output.
 	gotOutput := getOutput()

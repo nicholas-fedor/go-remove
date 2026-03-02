@@ -160,9 +160,8 @@ func (w *captureWriter) captureLogMessage(logLine string) {
 
 	if levelIndex >= 0 {
 		// Level found: message is everything after the level field.
-		// Reconstruct by finding the level in the original line and taking everything after it.
-		msgStart := strings.Index(logLine, level) + len(level)
-		msg = strings.TrimSpace(logLine[msgStart:])
+		// Build message from the parsed parts slice to avoid matching earlier tokens.
+		msg = strings.TrimSpace(strings.Join(parts[levelIndex+1:], " "))
 	} else {
 		// No known level found: use the whole line as the message.
 		msg = strings.TrimSpace(logLine)
@@ -315,10 +314,13 @@ func (z *ZerologLogger) SetCaptureFunc(captureFunc LogCaptureFunc) {
 	z.captureFunc = captureFunc
 	z.mu.Unlock()
 
-	// Set up the bridge function on the capture writer when it exists.
-	// The bridge function reads the current captureFunc from the logger and calls it.
-	// This ensures capture is properly disabled when captureFunc is nil.
+	// Update the capture writer's state atomically when it exists.
+	// SetCaptureFunc is called FIRST to update the writer's capture handler and
+	// enable flag. Then SetupCaptureBridge installs a bridge that delegates to
+	// the writer's capture handler. This ordering prevents a race condition where
+	// logs could be dropped between setting up the bridge and updating the handler.
 	if z.captureWriter != nil {
+		z.captureWriter.SetCaptureFunc(captureFunc)
 		z.captureWriter.SetupCaptureBridge(func(level, msg string) {
 			z.mu.RLock()
 			capture := z.captureFunc
@@ -328,7 +330,6 @@ func (z *ZerologLogger) SetCaptureFunc(captureFunc LogCaptureFunc) {
 				capture(level, msg)
 			}
 		})
-		z.captureWriter.SetCaptureFunc(captureFunc)
 	}
 }
 

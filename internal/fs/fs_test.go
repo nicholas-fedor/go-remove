@@ -311,11 +311,15 @@ func TestRealFS_RemoveBinary_VerboseLogging(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "testbin")
-	os.WriteFile(tmpFile, []byte("test"), 0o755)
+
+	err := os.WriteFile(tmpFile, []byte("test"), 0o600)
+	if err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
 
 	fs := &RealFS{}
 
-	err := fs.RemoveBinary(tmpFile, "testbin", true, log)
+	err = fs.RemoveBinary(tmpFile, "testbin", true, log)
 	if err != nil {
 		t.Errorf("RemoveBinary() unexpected error = %v", err)
 	}
