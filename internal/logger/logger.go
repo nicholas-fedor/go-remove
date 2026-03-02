@@ -315,9 +315,10 @@ func (z *ZerologLogger) SetCaptureFunc(captureFunc LogCaptureFunc) {
 	z.captureFunc = captureFunc
 	z.mu.Unlock()
 
-	// Set up the bridge function on the capture writer when a callback is provided.
+	// Set up the bridge function on the capture writer when it exists.
 	// The bridge function reads the current captureFunc from the logger and calls it.
-	if z.captureWriter != nil && captureFunc != nil {
+	// This ensures capture is properly disabled when captureFunc is nil.
+	if z.captureWriter != nil {
 		z.captureWriter.SetupCaptureBridge(func(level, msg string) {
 			z.mu.RLock()
 			capture := z.captureFunc

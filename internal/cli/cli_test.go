@@ -64,6 +64,96 @@ func newMockLoggerWithDefaults(t *testing.T) *mockLogger.MockLogger {
 	return m
 }
 
+// captureStdout redirects os.Stdout and returns a function that restores stdout
+// and returns the captured output as a string.
+func captureStdout(t *testing.T) func() string {
+	t.Helper()
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	return func() string {
+		os.Stdout = oldStdout
+
+		w.Close()
+
+		var buf bytes.Buffer
+		buf.ReadFrom(r)
+
+		return buf.String()
+	}
+}
+
+// makeDeps creates Dependencies from the provided setup functions.
+type makeDepsConfig struct {
+	setupFS     func(t *testing.T) *mockFS.MockFS
+	setupLog    func(t *testing.T) *mockLogger.MockLogger
+	setupRunner func(t *testing.T) *mockRunner.MockProgramRunner
+}
+
+func makeDeps(
+	t *testing.T,
+	cfg makeDepsConfig,
+) (Dependencies, *mockFS.MockFS, *mockLogger.MockLogger, ProgramRunner) {
+	t.Helper()
+
+	mockFSInstance := cfg.setupFS(t)
+	mockLog := cfg.setupLog(t)
+
+	deps := Dependencies{
+		FS:     mockFSInstance,
+		Logger: mockLog,
+	}
+
+	var runner ProgramRunner = DefaultRunner{}
+	if cfg.setupRunner != nil {
+		runner = cfg.setupRunner(t)
+	}
+
+	return deps, mockFSInstance, mockLog, runner
+}
+
+// executeRun wraps the local run logic and returns the error.
+// It mirrors the behavior of the Run function but accepts a custom runner for testing.
+func executeRun(deps Dependencies, config Config, runner ProgramRunner) error {
+	log := deps.Logger
+
+	// Set log level based on config if verbose mode is enabled.
+	if config.Verbose {
+		level := logger.ParseLevel(config.LogLevel)
+		log.Level(level)
+	}
+
+	binDir, err := deps.FS.DetermineBinDir(config.Goroot)
+	if err != nil {
+		_ = log.Sync() // Flush logs; errors are ignored
+
+		return err
+	}
+
+	if config.Binary == "" {
+		err = RunTUI(binDir, config, log, deps.FS, runner)
+	} else {
+		binaryPath := deps.FS.AdjustBinaryPath(binDir, config.Binary)
+
+		err = deps.FS.RemoveBinary(binaryPath, config.Binary, config.Verbose, log)
+		if err == nil && !config.Verbose {
+			fmt.Fprintf(os.Stdout, "Successfully removed %s\n", config.Binary)
+		}
+	}
+
+	if err != nil {
+		_ = log.Sync() // Flush logs; errors are ignored
+
+		return err
+	}
+
+	_ = log.Sync() // Errors are ignored
+
+	return nil
+}
+
 // TestRun verifies the Run function's behavior under various conditions.
 //
 //nolint:thelper // Subtest functions in table-driven tests require *testing.T parameter for mock constructors
@@ -189,79 +279,21 @@ func TestRun(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Redirect stdout to capture output for non-verbose success cases.
-			oldStdout := os.Stdout
-			r, w, _ := os.Pipe()
-			os.Stdout = w
+			// Capture stdout for output verification.
+			getOutput := captureStdout(t)
 
-			defer func() {
-				os.Stdout = oldStdout
-
-				w.Close()
-			}()
-
-			// Set up dependencies using mock constructors.
-			mockFSInstance := tt.setupFS(t)
-			mockLog := tt.setupLog(t)
-			deps := Dependencies{
-				FS:     mockFSInstance,
-				Logger: mockLog,
-			}
-
-			// Define a local run function to test with a custom runner.
-			run := func(deps Dependencies, config Config, runner ProgramRunner) error {
-				log := deps.Logger
-
-				// Set log level based on config if verbose mode is enabled.
-				if config.Verbose {
-					level := logger.ParseLevel(config.LogLevel)
-					log.Level(level)
-				}
-
-				binDir, err := deps.FS.DetermineBinDir(config.Goroot)
-				if err != nil {
-					_ = log.Sync() // Flush logs; errors are ignored
-
-					return err
-				}
-
-				if config.Binary == "" {
-					err = RunTUI(binDir, config, log, deps.FS, runner)
-				} else {
-					binaryPath := deps.FS.AdjustBinaryPath(binDir, config.Binary)
-
-					err = deps.FS.RemoveBinary(binaryPath, config.Binary, config.Verbose, log)
-					if err == nil && !config.Verbose {
-						fmt.Fprintf(os.Stdout, "Successfully removed %s\n", config.Binary)
-					}
-				}
-
-				if err != nil {
-					_ = log.Sync() // Flush logs; errors are ignored
-
-					return err
-				}
-
-				_ = log.Sync() // Errors are ignored
-
-				return nil
-			}
-
-			// Use DefaultRunner if no mock is provided, otherwise use the mock runner.
-			var runner ProgramRunner = DefaultRunner{}
-			if tt.setupRunner != nil {
-				runner = tt.setupRunner(t)
-			}
+			// Set up dependencies and runner.
+			deps, mockFSInstance, mockLog, runner := makeDeps(t, makeDepsConfig{
+				setupFS:     tt.setupFS,
+				setupLog:    tt.setupLog,
+				setupRunner: tt.setupRunner,
+			})
 
 			// Execute the run function and capture any errors.
-			err := run(deps, tt.config, runner)
+			err := executeRun(deps, tt.config, runner)
 
 			// Capture stdout output after execution.
-			w.Close()
-
-			var buf bytes.Buffer
-			buf.ReadFrom(r)
-			gotOutput := buf.String()
+			gotOutput := getOutput()
 
 			// Verify error behavior matches expectations.
 			if (err != nil) != tt.wantErr {
@@ -290,10 +322,9 @@ func TestRun(t *testing.T) {
 //nolint:thelper // Subtest functions in table-driven tests require *testing.T parameter for mock constructors
 func TestRun_WithLoggerSync(t *testing.T) {
 	tests := []struct {
-		name           string
-		config         Config
-		setupFS        func(t *testing.T) *mockFS.MockFS
-		expectSyncCall bool
+		name    string
+		config  Config
+		setupFS func(t *testing.T) *mockFS.MockFS
 	}{
 		{
 			name:   "sync called on success",
@@ -306,7 +337,6 @@ func TestRun_WithLoggerSync(t *testing.T) {
 
 				return m
 			},
-			expectSyncCall: true,
 		},
 		{
 			name:   "sync called on error",
@@ -317,7 +347,6 @@ func TestRun_WithLoggerSync(t *testing.T) {
 
 				return m
 			},
-			expectSyncCall: true,
 		},
 	}
 
@@ -367,30 +396,24 @@ func TestRun_VerboseMode(t *testing.T) {
 	}
 	config := Config{Binary: "vhs", Verbose: true, Goroot: false}
 
-	// Redirect stdout to capture output.
-	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
+	// Capture stdout to capture output.
+	getOutput := captureStdout(t)
 
 	binDir, _ := deps.FS.DetermineBinDir(config.Goroot)
 	binaryPath := deps.FS.AdjustBinaryPath(binDir, config.Binary)
 	err := deps.FS.RemoveBinary(binaryPath, config.Binary, config.Verbose, deps.Logger)
 	_ = deps.Logger.Sync()
 
-	w.Close()
-
-	os.Stdout = oldStdout
-
-	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	// Restore stdout and get captured output.
+	gotOutput := getOutput()
 
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
 
 	// In verbose mode, no success message should be printed to stdout.
-	if buf.String() != "" {
-		t.Errorf("Expected no stdout output in verbose mode, got: %q", buf.String())
+	if gotOutput != "" {
+		t.Errorf("Expected no stdout output in verbose mode, got: %q", gotOutput)
 	}
 
 	// Assert that all mock expectations were met.

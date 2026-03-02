@@ -212,7 +212,7 @@ func TestRealFS_RemoveBinary(t *testing.T) {
 		binaryPath string
 		name       string
 		verbose    bool
-		logger     func() logger.Logger // Factory function to create logger
+		logger     func(t *testing.T) logger.Logger // Factory function to create logger
 	}
 
 	tests := []struct {
@@ -228,9 +228,7 @@ func TestRealFS_RemoveBinary(t *testing.T) {
 			args: args{
 				name:    "testbin",
 				verbose: false,
-				logger: func() logger.Logger {
-					return nopLogger(t)
-				},
+				logger:  nopLogger,
 			},
 			setup: func() string {
 				tmpDir := t.TempDir()
@@ -248,9 +246,7 @@ func TestRealFS_RemoveBinary(t *testing.T) {
 				binaryPath: "/nonexistent/testbin",
 				name:       "testbin",
 				verbose:    false,
-				logger: func() logger.Logger {
-					return nopLogger(t)
-				},
+				logger:     nopLogger,
 			},
 			wantErr: true,
 		},
@@ -260,7 +256,9 @@ func TestRealFS_RemoveBinary(t *testing.T) {
 			args: args{
 				name:    "testbin",
 				verbose: true,
-				logger: func() logger.Logger {
+				logger: func(t *testing.T) logger.Logger {
+					t.Helper()
+
 					// Create mock with expectations for verbose logging.
 					log := mocks.NewMockLogger(t)
 					zl := zerolog.New(nil).With().Logger()
@@ -292,7 +290,7 @@ func TestRealFS_RemoveBinary(t *testing.T) {
 				tt.args.binaryPath,
 				tt.args.name,
 				tt.args.verbose,
-				tt.args.logger(), // Call factory to get logger
+				tt.args.logger(t), // Call factory to get logger
 			)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("RemoveBinary() error = %v, wantErr %v", err, tt.wantErr)
