@@ -103,8 +103,14 @@ func (w *captureWriter) Write(data []byte) (int, error) {
 	return bytesWritten, nil
 }
 
-// captureLogMessage parses and captures the log message.
-// Expected format from ConsoleWriter: "<timestamp> <LEVEL> <message>".
+// captureLogMessage parses and captures the log message from zerolog ConsoleWriter output.
+//
+// Expected format from ConsoleWriter: "<timestamp> <LEVEL> <message>"
+// where LEVEL is one of: DBG, INF, WRN, ERR, FTL (zerolog's default level abbreviations).
+//
+// This function scans fields to find a known level token rather than assuming a fixed
+// position, making it tolerant to format changes (e.g., additional prefix fields).
+// If no known level token is found, it defaults to level "LOG" with the full message.
 func (w *captureWriter) captureLogMessage(logLine string) {
 	w.mu.RLock()
 	capture := w.captureFunc
@@ -114,24 +120,53 @@ func (w *captureWriter) captureLogMessage(logLine string) {
 		return
 	}
 
-	// Parse the log line to extract level and message
-	// Format: "2006-01-02T15:04:05Z07:00 DBG message here"
+	// Known zerolog level abbreviations used by ConsoleWriter.
+	// These are the default short level names output by zerolog.
+	knownLevels := map[string]bool{
+		"DBG": true,
+		"INF": true,
+		"WRN": true,
+		"ERR": true,
+		"FTL": true,
+	}
+
+	// Parse the log line to extract level and message.
+	// Expected format: "2006-01-02T15:04:05Z07:00 DBG message here"
 	parts := strings.Fields(logLine)
 
 	const minLogParts = 3 // timestamp, level, message
 	if len(parts) < minLogParts {
-		// Not enough parts, use the whole line
+		// Not enough parts, use the whole line as a generic log entry.
 		capture("LOG", strings.TrimSpace(logLine))
 
 		return
 	}
 
-	// The level is typically the second field (index 1)
-	level := parts[1]
+	// Scan for a known level token instead of assuming fixed position.
+	// This makes parsing more robust against format changes.
+	level := "LOG" // default level if no known token found
+	levelIndex := -1
 
-	// The message is everything after the level
-	msgStart := strings.Index(logLine, level) + len(level)
-	msg := strings.TrimSpace(logLine[msgStart:])
+	for i, part := range parts {
+		if knownLevels[part] {
+			level = part
+			levelIndex = i
+
+			break
+		}
+	}
+
+	var msg string
+
+	if levelIndex >= 0 {
+		// Level found: message is everything after the level field.
+		// Reconstruct by finding the level in the original line and taking everything after it.
+		msgStart := strings.Index(logLine, level) + len(level)
+		msg = strings.TrimSpace(logLine[msgStart:])
+	} else {
+		// No known level found: use the whole line as the message.
+		msg = strings.TrimSpace(logLine)
+	}
 
 	capture(level, msg)
 }
