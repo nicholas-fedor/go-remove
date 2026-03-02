@@ -88,12 +88,10 @@ func (w *captureWriter) Write(data []byte) (int, error) {
 		w.captureLogMessage(string(data))
 
 		// Write to io.Discard to satisfy the writer interface without producing output.
-		bytesWritten, err := io.Discard.Write(data)
-		if err != nil {
-			return bytesWritten, fmt.Errorf("failed to write to discard: %w", err)
-		}
+		// io.Discard.Write always returns (len(p), nil), so we can safely ignore the error.
+		_, _ = io.Discard.Write(data)
 
-		return bytesWritten, nil
+		return len(data), nil
 	}
 
 	// Capture is not enabled, write to the underlying output normally.
