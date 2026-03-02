@@ -100,7 +100,7 @@ Run locally:
 
 ## Requirements
 
-- Go 1.16 or later (for module support).
+- Go 1.26 or later (for module support).
 
 ## License
 
