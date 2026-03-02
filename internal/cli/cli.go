@@ -19,16 +19,12 @@ along with this program. If not, see <http://www.gnu.org/licenses/>.
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"os"
 
 	"github.com/nicholas-fedor/go-remove/internal/fs"
 	"github.com/nicholas-fedor/go-remove/internal/logger"
 )
-
-// ErrInvalidLoggerType indicates that the logger is not of the expected *ZapLogger type.
-var ErrInvalidLoggerType = errors.New("logger is not a *ZapLogger")
 
 // Config holds command-line configuration options.
 type Config struct {

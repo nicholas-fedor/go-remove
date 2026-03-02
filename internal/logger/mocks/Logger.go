@@ -5,8 +5,9 @@
 package mocks
 
 import (
+	"github.com/nicholas-fedor/go-remove/internal/logger"
+	"github.com/rs/zerolog"
 	mock "github.com/stretchr/testify/mock"
-	"go.uber.org/zap"
 )
 
 // NewMockLogger creates a new instance of MockLogger. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
@@ -36,49 +37,221 @@ func (_m *MockLogger) EXPECT() *MockLogger_Expecter {
 	return &MockLogger_Expecter{mock: &_m.Mock}
 }
 
-// Sugar provides a mock function for the type MockLogger
-func (_mock *MockLogger) Sugar() *zap.SugaredLogger {
+// Debug provides a mock function for the type MockLogger
+func (_mock *MockLogger) Debug() *zerolog.Event {
 	ret := _mock.Called()
 
 	if len(ret) == 0 {
-		panic("no return value specified for Sugar")
+		panic("no return value specified for Debug")
 	}
 
-	var r0 *zap.SugaredLogger
-	if returnFunc, ok := ret.Get(0).(func() *zap.SugaredLogger); ok {
+	var r0 *zerolog.Event
+	if returnFunc, ok := ret.Get(0).(func() *zerolog.Event); ok {
 		r0 = returnFunc()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*zap.SugaredLogger)
+			r0 = ret.Get(0).(*zerolog.Event)
 		}
 	}
 	return r0
 }
 
-// MockLogger_Sugar_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Sugar'
-type MockLogger_Sugar_Call struct {
+// MockLogger_Debug_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Debug'
+type MockLogger_Debug_Call struct {
 	*mock.Call
 }
 
-// Sugar is a helper method to define mock.On call
-func (_e *MockLogger_Expecter) Sugar() *MockLogger_Sugar_Call {
-	return &MockLogger_Sugar_Call{Call: _e.mock.On("Sugar")}
+// Debug is a helper method to define mock.On call
+func (_e *MockLogger_Expecter) Debug() *MockLogger_Debug_Call {
+	return &MockLogger_Debug_Call{Call: _e.mock.On("Debug")}
 }
 
-func (_c *MockLogger_Sugar_Call) Run(run func()) *MockLogger_Sugar_Call {
+func (_c *MockLogger_Debug_Call) Run(run func()) *MockLogger_Debug_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run()
 	})
 	return _c
 }
 
-func (_c *MockLogger_Sugar_Call) Return(sugaredLogger *zap.SugaredLogger) *MockLogger_Sugar_Call {
-	_c.Call.Return(sugaredLogger)
+func (_c *MockLogger_Debug_Call) Return(event *zerolog.Event) *MockLogger_Debug_Call {
+	_c.Call.Return(event)
 	return _c
 }
 
-func (_c *MockLogger_Sugar_Call) RunAndReturn(run func() *zap.SugaredLogger) *MockLogger_Sugar_Call {
+func (_c *MockLogger_Debug_Call) RunAndReturn(run func() *zerolog.Event) *MockLogger_Debug_Call {
 	_c.Call.Return(run)
+	return _c
+}
+
+// Error provides a mock function for the type MockLogger
+func (_mock *MockLogger) Error() *zerolog.Event {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Error")
+	}
+
+	var r0 *zerolog.Event
+	if returnFunc, ok := ret.Get(0).(func() *zerolog.Event); ok {
+		r0 = returnFunc()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*zerolog.Event)
+		}
+	}
+	return r0
+}
+
+// MockLogger_Error_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Error'
+type MockLogger_Error_Call struct {
+	*mock.Call
+}
+
+// Error is a helper method to define mock.On call
+func (_e *MockLogger_Expecter) Error() *MockLogger_Error_Call {
+	return &MockLogger_Error_Call{Call: _e.mock.On("Error")}
+}
+
+func (_c *MockLogger_Error_Call) Run(run func()) *MockLogger_Error_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockLogger_Error_Call) Return(event *zerolog.Event) *MockLogger_Error_Call {
+	_c.Call.Return(event)
+	return _c
+}
+
+func (_c *MockLogger_Error_Call) RunAndReturn(run func() *zerolog.Event) *MockLogger_Error_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Info provides a mock function for the type MockLogger
+func (_mock *MockLogger) Info() *zerolog.Event {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Info")
+	}
+
+	var r0 *zerolog.Event
+	if returnFunc, ok := ret.Get(0).(func() *zerolog.Event); ok {
+		r0 = returnFunc()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*zerolog.Event)
+		}
+	}
+	return r0
+}
+
+// MockLogger_Info_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Info'
+type MockLogger_Info_Call struct {
+	*mock.Call
+}
+
+// Info is a helper method to define mock.On call
+func (_e *MockLogger_Expecter) Info() *MockLogger_Info_Call {
+	return &MockLogger_Info_Call{Call: _e.mock.On("Info")}
+}
+
+func (_c *MockLogger_Info_Call) Run(run func()) *MockLogger_Info_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockLogger_Info_Call) Return(event *zerolog.Event) *MockLogger_Info_Call {
+	_c.Call.Return(event)
+	return _c
+}
+
+func (_c *MockLogger_Info_Call) RunAndReturn(run func() *zerolog.Event) *MockLogger_Info_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Level provides a mock function for the type MockLogger
+func (_mock *MockLogger) Level(level zerolog.Level) {
+	_mock.Called(level)
+	return
+}
+
+// MockLogger_Level_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Level'
+type MockLogger_Level_Call struct {
+	*mock.Call
+}
+
+// Level is a helper method to define mock.On call
+//   - level zerolog.Level
+func (_e *MockLogger_Expecter) Level(level interface{}) *MockLogger_Level_Call {
+	return &MockLogger_Level_Call{Call: _e.mock.On("Level", level)}
+}
+
+func (_c *MockLogger_Level_Call) Run(run func(level zerolog.Level)) *MockLogger_Level_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 zerolog.Level
+		if args[0] != nil {
+			arg0 = args[0].(zerolog.Level)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockLogger_Level_Call) Return() *MockLogger_Level_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockLogger_Level_Call) RunAndReturn(run func(level zerolog.Level)) *MockLogger_Level_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetCaptureFunc provides a mock function for the type MockLogger
+func (_mock *MockLogger) SetCaptureFunc(captureFunc logger.LogCaptureFunc) {
+	_mock.Called(captureFunc)
+	return
+}
+
+// MockLogger_SetCaptureFunc_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetCaptureFunc'
+type MockLogger_SetCaptureFunc_Call struct {
+	*mock.Call
+}
+
+// SetCaptureFunc is a helper method to define mock.On call
+//   - captureFunc logger.LogCaptureFunc
+func (_e *MockLogger_Expecter) SetCaptureFunc(captureFunc interface{}) *MockLogger_SetCaptureFunc_Call {
+	return &MockLogger_SetCaptureFunc_Call{Call: _e.mock.On("SetCaptureFunc", captureFunc)}
+}
+
+func (_c *MockLogger_SetCaptureFunc_Call) Run(run func(captureFunc logger.LogCaptureFunc)) *MockLogger_SetCaptureFunc_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 logger.LogCaptureFunc
+		if args[0] != nil {
+			arg0 = args[0].(logger.LogCaptureFunc)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockLogger_SetCaptureFunc_Call) Return() *MockLogger_SetCaptureFunc_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockLogger_SetCaptureFunc_Call) RunAndReturn(run func(captureFunc logger.LogCaptureFunc)) *MockLogger_SetCaptureFunc_Call {
+	_c.Run(run)
 	return _c
 }
 
@@ -122,6 +295,52 @@ func (_c *MockLogger_Sync_Call) Return(err error) *MockLogger_Sync_Call {
 }
 
 func (_c *MockLogger_Sync_Call) RunAndReturn(run func() error) *MockLogger_Sync_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Warn provides a mock function for the type MockLogger
+func (_mock *MockLogger) Warn() *zerolog.Event {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Warn")
+	}
+
+	var r0 *zerolog.Event
+	if returnFunc, ok := ret.Get(0).(func() *zerolog.Event); ok {
+		r0 = returnFunc()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*zerolog.Event)
+		}
+	}
+	return r0
+}
+
+// MockLogger_Warn_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Warn'
+type MockLogger_Warn_Call struct {
+	*mock.Call
+}
+
+// Warn is a helper method to define mock.On call
+func (_e *MockLogger_Expecter) Warn() *MockLogger_Warn_Call {
+	return &MockLogger_Warn_Call{Call: _e.mock.On("Warn")}
+}
+
+func (_c *MockLogger_Warn_Call) Run(run func()) *MockLogger_Warn_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockLogger_Warn_Call) Return(event *zerolog.Event) *MockLogger_Warn_Call {
+	_c.Call.Return(event)
+	return _c
+}
+
+func (_c *MockLogger_Warn_Call) RunAndReturn(run func() *zerolog.Event) *MockLogger_Warn_Call {
 	_c.Call.Return(run)
 	return _c
 }

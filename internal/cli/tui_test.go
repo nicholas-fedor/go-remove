@@ -25,13 +25,46 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/mock"
 
 	tea "charm.land/bubbletea/v2"
 
-	fsmocks "github.com/nicholas-fedor/go-remove/internal/fs/mocks"
-	logmocks "github.com/nicholas-fedor/go-remove/internal/logger/mocks"
+	mockFS "github.com/nicholas-fedor/go-remove/internal/fs/mocks"
+	"github.com/nicholas-fedor/go-remove/internal/logger"
 )
+
+// tuiMockLogger is a simple mock logger for TUI tests.
+type tuiMockLogger struct {
+	nopLogger zerolog.Logger
+}
+
+func (m *tuiMockLogger) Debug() *zerolog.Event {
+	m.nopLogger.Debug().Msg("")
+
+	return nil
+}
+
+func (m *tuiMockLogger) Info() *zerolog.Event {
+	m.nopLogger.Info().Msg("")
+
+	return nil
+}
+
+func (m *tuiMockLogger) Warn() *zerolog.Event {
+	m.nopLogger.Warn().Msg("")
+
+	return nil
+}
+
+func (m *tuiMockLogger) Error() *zerolog.Event {
+	m.nopLogger.Error().Msg("")
+
+	return nil
+}
+func (m *tuiMockLogger) Sync() error                            { return nil }
+func (m *tuiMockLogger) Level(_ zerolog.Level)                  {}
+func (m *tuiMockLogger) SetCaptureFunc(_ logger.LogCaptureFunc) {}
 
 // tuiMockRunner mocks the ProgramRunner interface for TUI tests.
 type tuiMockRunner struct {
@@ -51,8 +84,8 @@ func TestRunTUI(t *testing.T) {
 	type args struct {
 		dir    string
 		config Config
-		logger *logmocks.MockLogger
-		fs     *fsmocks.MockFS
+		logger logger.Logger
+		fs     *mockFS.MockFS
 		runner ProgramRunner
 	}
 
@@ -66,9 +99,9 @@ func TestRunTUI(t *testing.T) {
 			args: args{
 				dir:    "/bin",
 				config: Config{},
-				logger: logmocks.NewMockLogger(t),
-				fs: func() *fsmocks.MockFS {
-					m := fsmocks.NewMockFS(t)
+				logger: &tuiMockLogger{},
+				fs: func() *mockFS.MockFS {
+					m := mockFS.NewMockFS(t)
 					m.On("ListBinaries", "/bin").Return([]string{"vhs"})
 
 					return m
@@ -82,9 +115,9 @@ func TestRunTUI(t *testing.T) {
 			args: args{
 				dir:    "/bin",
 				config: Config{},
-				logger: logmocks.NewMockLogger(t),
-				fs: func() *fsmocks.MockFS {
-					m := fsmocks.NewMockFS(t)
+				logger: &tuiMockLogger{},
+				fs: func() *mockFS.MockFS {
+					m := mockFS.NewMockFS(t)
 					m.On("ListBinaries", "/bin").Return([]string{})
 
 					return m
@@ -98,9 +131,9 @@ func TestRunTUI(t *testing.T) {
 			args: args{
 				dir:    "/bin",
 				config: Config{},
-				logger: logmocks.NewMockLogger(t),
-				fs: func() *fsmocks.MockFS {
-					m := fsmocks.NewMockFS(t)
+				logger: &tuiMockLogger{},
+				fs: func() *mockFS.MockFS {
+					m := mockFS.NewMockFS(t)
 					m.On("ListBinaries", "/bin").Return([]string{"vhs"})
 
 					return m
@@ -123,7 +156,6 @@ func TestRunTUI(t *testing.T) {
 			}
 
 			tt.args.fs.AssertExpectations(t)
-			tt.args.logger.AssertExpectations(t)
 		})
 	}
 }
@@ -301,13 +333,9 @@ func Test_model_Update(t *testing.T) {
 				sortAscending: true,
 				width:         80,
 				height:        24,
-				logger: func() *logmocks.MockLogger {
-					m := logmocks.NewMockLogger(t)
-
-					return m
-				}(),
-				fs: func() *fsmocks.MockFS {
-					m := fsmocks.NewMockFS(t)
+				logger:        &tuiMockLogger{},
+				fs: func() *mockFS.MockFS {
+					m := mockFS.NewMockFS(t)
 					m.On("AdjustBinaryPath", "/bin", "age").Return("/bin/age")
 					m.On("RemoveBinary", "/bin/age", "age", false, mock.Anything).Return(nil)
 					m.On("ListBinaries", "/bin").Return([]string{"vhs"})
@@ -339,13 +367,9 @@ func Test_model_Update(t *testing.T) {
 				sortAscending: true,
 				width:         80,
 				height:        24,
-				logger: func() *logmocks.MockLogger {
-					m := logmocks.NewMockLogger(t)
-
-					return m
-				}(),
-				fs: func() *fsmocks.MockFS {
-					m := fsmocks.NewMockFS(t)
+				logger:        &tuiMockLogger{},
+				fs: func() *mockFS.MockFS {
+					m := mockFS.NewMockFS(t)
 					m.On("AdjustBinaryPath", "/bin", "age").Return("/bin/age")
 					m.On("RemoveBinary", "/bin/age", "age", false, mock.Anything).
 						Return(errors.New("remove failed"))
@@ -385,11 +409,11 @@ func Test_model_Update(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Set default mocks if not provided.
 			if tt.m.logger == nil {
-				tt.m.logger = logmocks.NewMockLogger(t)
+				tt.m.logger = &tuiMockLogger{}
 			}
 
 			if tt.m.fs == nil {
-				tt.m.fs = fsmocks.NewMockFS(t)
+				tt.m.fs = mockFS.NewMockFS(t)
 			}
 
 			got, gotCmd := tt.m.Update(tt.args.msg)
@@ -413,8 +437,7 @@ func Test_model_Update(t *testing.T) {
 				t.Errorf("model.Update() gotCmd = %T, want %T", gotCmd, tt.wantCmd)
 			}
 
-			tt.m.fs.(*fsmocks.MockFS).AssertExpectations(t)
-			tt.m.logger.(*logmocks.MockLogger).AssertExpectations(t)
+			tt.m.fs.(*mockFS.MockFS).AssertExpectations(t)
 		})
 	}
 }
@@ -554,8 +577,8 @@ func Test_model_View(t *testing.T) {
 					lines = append(lines, leftPaddingStr+pad("", effectiveWidth))
 				}
 
-				footerPart1 := "↑/k: up  ↓/j: down  ←/h: left  →/l: right  Enter: remove  s: toggle sort  q:"
-				footerPart2 := "quit"
+				footerPart1 := "↑/k: up  ↓/j: down  ←/h: left  →/l: right  Enter: remove  s: toggle sort  L:"
+				footerPart2 := "logs  q: quit"
 
 				lines = append(
 					lines,
@@ -596,8 +619,8 @@ func Test_model_View(t *testing.T) {
 					lines = append(lines, leftPaddingStr+pad("", effectiveWidth))
 				}
 
-				footerPart1 := "↑/k: up  ↓/j: down  ←/h: left  →/l: right  Enter: remove  s: toggle sort  q:"
-				footerPart2 := "quit"
+				footerPart1 := "↑/k: up  ↓/j: down  ←/h: left  →/l: right  Enter: remove  s: toggle sort  L:"
+				footerPart2 := "logs  q: quit"
 
 				lines = append(
 					lines,

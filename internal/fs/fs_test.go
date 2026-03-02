@@ -25,13 +25,20 @@ import (
 	"sort"
 	"testing"
 
-	"go.uber.org/zap"
+	"github.com/rs/zerolog"
 
 	"github.com/nicholas-fedor/go-remove/internal/logger"
-	logmocks "github.com/nicholas-fedor/go-remove/internal/logger/mocks"
+	"github.com/nicholas-fedor/go-remove/internal/logger/mocks"
 )
 
-// TestNewRealFS verifies the NewRealFS function’s instance creation.
+// nopLogger creates a mock logger for testing.
+func nopLogger(t *testing.T) logger.Logger {
+	t.Helper()
+
+	return mocks.NewMockLogger(t)
+}
+
+// TestNewRealFS verifies the NewRealFS function's instance creation.
 func TestNewRealFS(t *testing.T) {
 	tests := []struct {
 		name string
@@ -52,7 +59,7 @@ func TestNewRealFS(t *testing.T) {
 	}
 }
 
-// TestRealFS_DetermineBinDir verifies the DetermineBinDir method’s directory resolution.
+// TestRealFS_DetermineBinDir verifies the DetermineBinDir method's directory resolution.
 func TestRealFS_DetermineBinDir(t *testing.T) {
 	type args struct {
 		useGoroot bool
@@ -118,7 +125,7 @@ func TestRealFS_DetermineBinDir(t *testing.T) {
 				t.Setenv(k, v)
 			}
 
-			// Adjust expected path for the platform’s HOME directory.
+			// Adjust expected path for the platform's HOME directory.
 			if tt.name == "use default ~/go/bin when GOBIN and GOPATH unset" {
 				home := os.Getenv("HOME")
 				if runtime.GOOS == windowsOS {
@@ -144,7 +151,7 @@ func TestRealFS_DetermineBinDir(t *testing.T) {
 	}
 }
 
-// TestRealFS_AdjustBinaryPath verifies the AdjustBinaryPath method’s path construction.
+// TestRealFS_AdjustBinaryPath verifies the AdjustBinaryPath method's path construction.
 func TestRealFS_AdjustBinaryPath(t *testing.T) {
 	type args struct {
 		dir    string
@@ -199,13 +206,13 @@ func TestRealFS_AdjustBinaryPath(t *testing.T) {
 	}
 }
 
-// TestRealFS_RemoveBinary verifies the RemoveBinary method’s file removal behavior.
+// TestRealFS_RemoveBinary verifies the RemoveBinary method's file removal behavior.
 func TestRealFS_RemoveBinary(t *testing.T) {
 	type args struct {
 		binaryPath string
 		name       string
 		verbose    bool
-		logger     logger.Logger
+		logger     func(t *testing.T) logger.Logger // Factory function to create logger
 	}
 
 	tests := []struct {
@@ -221,12 +228,7 @@ func TestRealFS_RemoveBinary(t *testing.T) {
 			args: args{
 				name:    "testbin",
 				verbose: false,
-				logger: func() *logmocks.MockLogger {
-					m := logmocks.NewMockLogger(t)
-					m.On("Sugar").Return(zap.NewNop().Sugar()).Maybe()
-
-					return m
-				}(),
+				logger:  nopLogger,
 			},
 			setup: func() string {
 				tmpDir := t.TempDir()
@@ -244,12 +246,7 @@ func TestRealFS_RemoveBinary(t *testing.T) {
 				binaryPath: "/nonexistent/testbin",
 				name:       "testbin",
 				verbose:    false,
-				logger: func() *logmocks.MockLogger {
-					m := logmocks.NewMockLogger(t)
-					m.On("Sugar").Return(zap.NewNop().Sugar()).Maybe()
-
-					return m
-				}(),
+				logger:     nopLogger,
 			},
 			wantErr: true,
 		},
@@ -259,13 +256,17 @@ func TestRealFS_RemoveBinary(t *testing.T) {
 			args: args{
 				name:    "testbin",
 				verbose: true,
-				logger: func() *logmocks.MockLogger {
-					m := logmocks.NewMockLogger(t)
-					// Expect Sugar() to be called at least once, without strict count
-					m.On("Sugar").Return(zap.NewNop().Sugar()).Maybe()
+				logger: func(t *testing.T) logger.Logger {
+					t.Helper()
 
-					return m
-				}(),
+					// Create mock with expectations for verbose logging.
+					log := mocks.NewMockLogger(t)
+					zl := zerolog.New(nil).With().Logger()
+					log.On("Debug").Return(zl.Debug())
+					log.On("Info").Return(zl.Info())
+
+					return log
+				},
 			},
 			setup: func() string {
 				tmpDir := t.TempDir()
@@ -289,24 +290,46 @@ func TestRealFS_RemoveBinary(t *testing.T) {
 				tt.args.binaryPath,
 				tt.args.name,
 				tt.args.verbose,
-				tt.args.logger,
+				tt.args.logger(t), // Call factory to get logger
 			)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("RemoveBinary() error = %v, wantErr %v", err, tt.wantErr)
-			}
-
-			// Assert that all mock expectations were met and log detailed expectations for debugging.
-			if tt.args.logger != nil {
-				mockLogger := tt.args.logger.(*logmocks.MockLogger)
-				t.Logf("Mock expectations for %s: %v", tt.name, mockLogger.ExpectedCalls)
-				t.Logf("Mock calls made for %s: %v", tt.name, mockLogger.Calls)
-				mockLogger.AssertExpectations(t)
 			}
 		})
 	}
 }
 
-// TestRealFS_ListBinaries verifies the ListBinaries method’s directory listing.
+// TestRealFS_RemoveBinary_VerboseLogging verifies verbose logging behavior.
+func TestRealFS_RemoveBinary_VerboseLogging(t *testing.T) {
+	log := mocks.NewMockLogger(t)
+
+	zl := zerolog.New(nil).With().Logger()
+
+	// Set up expectations for verbose logging calls.
+	log.On("Debug").Return(zl.Debug())
+	log.On("Info").Return(zl.Info())
+
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "testbin")
+
+	err := os.WriteFile(tmpFile, []byte("test"), 0o600)
+	if err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	fs := &RealFS{}
+
+	err = fs.RemoveBinary(tmpFile, "testbin", true, log)
+	if err != nil {
+		t.Errorf("RemoveBinary() unexpected error = %v", err)
+	}
+
+	// Verify that Debug and Info were called.
+	log.AssertCalled(t, "Debug")
+	log.AssertCalled(t, "Info")
+}
+
+// TestRealFS_ListBinaries verifies the ListBinaries method's directory listing.
 func TestRealFS_ListBinaries(t *testing.T) {
 	type args struct {
 		dir string

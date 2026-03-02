@@ -109,10 +109,9 @@ func (r *RealFS) RemoveBinary(binaryPath, name string, verbose bool, log logger.
 	}
 
 	// Log debug and info messages if verbose mode is enabled.
-	sugar := log.Sugar()
 	if verbose {
-		sugar.Debugf("Constructed binary path: %s", binaryPath)
-		sugar.Infof("Removing binary: %s", binaryPath)
+		log.Debug().Msgf("Constructed binary path: %s", binaryPath)
+		log.Info().Msgf("Removing binary: %s", binaryPath)
 	}
 
 	// Perform the removal operation and handle any errors.
@@ -122,7 +121,7 @@ func (r *RealFS) RemoveBinary(binaryPath, name string, verbose bool, log logger.
 
 	// Log success if verbose mode is enabled.
 	if verbose {
-		sugar.Infof("Successfully removed binary: %s", name)
+		log.Info().Msgf("Successfully removed binary: %s", name)
 	}
 
 	return nil
