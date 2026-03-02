@@ -264,6 +264,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "L":
 			// Toggle log panel visibility.
 			m.showLogs = !m.showLogs
+			m.updateGrid()
 
 		case "enter":
 			// Remove the selected binary and update the TUI state.
@@ -310,6 +311,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case LogMsg:
 		// Add log message to the circular buffer.
 		m.addLogEntry(msg)
+		m.updateGrid()
 
 		// Continue polling for more log messages.
 		// This ensures all pending logs are captured.
