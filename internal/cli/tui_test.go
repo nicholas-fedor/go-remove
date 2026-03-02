@@ -39,10 +39,29 @@ type tuiMockLogger struct {
 	nopLogger zerolog.Logger
 }
 
-func (m *tuiMockLogger) Debug() *zerolog.Event                  { return m.nopLogger.Debug() }
-func (m *tuiMockLogger) Info() *zerolog.Event                   { return m.nopLogger.Info() }
-func (m *tuiMockLogger) Warn() *zerolog.Event                   { return m.nopLogger.Warn() }
-func (m *tuiMockLogger) Error() *zerolog.Event                  { return m.nopLogger.Error() }
+func (m *tuiMockLogger) Debug() *zerolog.Event {
+	m.nopLogger.Debug().Msg("")
+
+	return nil
+}
+
+func (m *tuiMockLogger) Info() *zerolog.Event {
+	m.nopLogger.Info().Msg("")
+
+	return nil
+}
+
+func (m *tuiMockLogger) Warn() *zerolog.Event {
+	m.nopLogger.Warn().Msg("")
+
+	return nil
+}
+
+func (m *tuiMockLogger) Error() *zerolog.Event {
+	m.nopLogger.Error().Msg("")
+
+	return nil
+}
 func (m *tuiMockLogger) Sync() error                            { return nil }
 func (m *tuiMockLogger) Level(_ zerolog.Level)                  {}
 func (m *tuiMockLogger) SetCaptureFunc(_ logger.LogCaptureFunc) {}

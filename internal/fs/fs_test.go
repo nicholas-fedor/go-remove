@@ -267,6 +267,7 @@ func TestRealFS_RemoveBinary(t *testing.T) {
 					dummyEvent := zl.Debug()
 					log.On("Debug").Return(dummyEvent)
 					log.On("Info").Return(dummyEvent)
+					dummyEvent.Msg("")
 
 					return log
 				},
@@ -313,6 +314,7 @@ func TestRealFS_RemoveBinary_VerboseLogging(t *testing.T) {
 	// Set up expectations for verbose logging calls.
 	log.On("Debug").Return(dummyEvent)
 	log.On("Info").Return(dummyEvent)
+	dummyEvent.Msg("")
 
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "testbin")

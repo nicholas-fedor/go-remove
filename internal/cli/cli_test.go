@@ -58,10 +58,29 @@ type mockLogger struct {
 	nopLogger  zerolog.Logger
 }
 
-func (m *mockLogger) Debug() *zerolog.Event { return m.nopLogger.Debug() }
-func (m *mockLogger) Info() *zerolog.Event  { return m.nopLogger.Info() }
-func (m *mockLogger) Warn() *zerolog.Event  { return m.nopLogger.Warn() }
-func (m *mockLogger) Error() *zerolog.Event { return m.nopLogger.Error() }
+func (m *mockLogger) Debug() *zerolog.Event {
+	m.nopLogger.Debug().Msg("")
+
+	return nil
+}
+
+func (m *mockLogger) Info() *zerolog.Event {
+	m.nopLogger.Info().Msg("")
+
+	return nil
+}
+
+func (m *mockLogger) Warn() *zerolog.Event {
+	m.nopLogger.Warn().Msg("")
+
+	return nil
+}
+
+func (m *mockLogger) Error() *zerolog.Event {
+	m.nopLogger.Error().Msg("")
+
+	return nil
+}
 func (m *mockLogger) Level(_ zerolog.Level) {}
 func (m *mockLogger) Sync() error {
 	m.syncCalled = true
@@ -198,17 +217,8 @@ func TestRun(t *testing.T) {
 
 				// Set log level based on config if verbose mode is enabled.
 				if config.Verbose {
-					zl, ok := log.(*logger.ZerologLogger)
-					if !ok {
-						return fmt.Errorf(
-							"failed to set log level: %w with type %T",
-							ErrInvalidLoggerType,
-							log,
-						)
-					}
-
 					level := logger.ParseLevel(config.LogLevel)
-					zl.Level(level)
+					log.Level(level)
 				}
 
 				binDir, err := deps.FS.DetermineBinDir(config.Goroot)

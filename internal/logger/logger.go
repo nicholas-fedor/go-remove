@@ -220,6 +220,7 @@ func (z *ZerologLogger) Debug() *zerolog.Event {
 	z.mu.RLock()
 	defer z.mu.RUnlock()
 
+	//nolint:zerologlint // Factory method returns event for chaining by design
 	return z.logger.Debug()
 }
 
@@ -228,6 +229,7 @@ func (z *ZerologLogger) Info() *zerolog.Event {
 	z.mu.RLock()
 	defer z.mu.RUnlock()
 
+	//nolint:zerologlint // Factory method returns event for chaining by design
 	return z.logger.Info()
 }
 
@@ -236,6 +238,7 @@ func (z *ZerologLogger) Warn() *zerolog.Event {
 	z.mu.RLock()
 	defer z.mu.RUnlock()
 
+	//nolint:zerologlint // Factory method returns event for chaining by design
 	return z.logger.Warn()
 }
 
@@ -244,6 +247,7 @@ func (z *ZerologLogger) Error() *zerolog.Event {
 	z.mu.RLock()
 	defer z.mu.RUnlock()
 
+	//nolint:zerologlint // Factory method returns event for chaining by design
 	return z.logger.Error()
 }
 

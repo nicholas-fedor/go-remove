@@ -102,6 +102,7 @@ linters:
     - varnamelen # Checks that the length of a variable's name matches its scope.
     - wastedassign # Finds wasted assignment statements.
     - wrapcheck # Checks that errors returned from external packages are wrapped.
+    - zerologlint # Detects the wrong usage of `zerolog` that a user forgets to dispatch with `Send` or `Msg`.
   disable:
     - cyclop # Checks function and package cyclomatic complexity.
     - depguard # Checks if package imports are in a list of acceptable packages.
@@ -125,7 +126,6 @@ linters:
     - tagliatelle # Checks the struct tags.
     - testableexamples # Linter checks if examples are testable (have an expected output). [fast]
     - testpackage # Linter that makes you use a separate _test package.
-    - zerologlint # Detects the wrong usage of `zerolog` that a user forgets to dispatch with `Send` or `Msg`.
 
   ######################################################################################################
   # Linter Settings Configuration
@@ -140,10 +140,10 @@ linters:
         - name: var-naming
           severity: warning
           disabled: false
-          exclude: [""]
+          exclude: []
           arguments:
-            - [""] # AllowList
-            - [""] # DenyList
+            - [] # AllowList
+            - [] # DenyList
             - - skip-initialism-name-checks: false
                 upper-case-const: true
                 skip-package-name-checks: true
