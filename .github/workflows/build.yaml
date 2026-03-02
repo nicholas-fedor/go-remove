@@ -28,7 +28,7 @@ jobs:
           go-version-file: "go.mod"
 
       - name: Import GPG key
-        uses: crazy-max/ghaction-import-gpg@5a30dd90ba97bcb89e03060b1d36736828e222e4
+        uses: crazy-max/ghaction-import-gpg@b9c49e887e93067387dd4ef9da7d738a3d3ffa6a
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}
