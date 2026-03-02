@@ -264,10 +264,8 @@ func TestRealFS_RemoveBinary(t *testing.T) {
 					// Create mock with expectations for verbose logging.
 					log := mocks.NewMockLogger(t)
 					zl := zerolog.New(nil).With().Logger()
-					dummyEvent := zl.Debug()
-					log.On("Debug").Return(dummyEvent)
-					log.On("Info").Return(dummyEvent)
-					dummyEvent.Msg("")
+					log.On("Debug").Return(zl.Debug())
+					log.On("Info").Return(zl.Info())
 
 					return log
 				},
@@ -307,14 +305,11 @@ func TestRealFS_RemoveBinary(t *testing.T) {
 func TestRealFS_RemoveBinary_VerboseLogging(t *testing.T) {
 	log := mocks.NewMockLogger(t)
 
-	// Create a dummy zerolog logger and event for return values.
 	zl := zerolog.New(nil).With().Logger()
-	dummyEvent := zl.Debug()
 
 	// Set up expectations for verbose logging calls.
-	log.On("Debug").Return(dummyEvent)
-	log.On("Info").Return(dummyEvent)
-	dummyEvent.Msg("")
+	log.On("Debug").Return(zl.Debug())
+	log.On("Info").Return(zl.Info())
 
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "testbin")
