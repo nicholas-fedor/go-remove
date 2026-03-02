@@ -87,7 +87,6 @@ type model struct {
 	sortAscending bool          // True for ascending sort, false for descending
 	logs          []string      // Captured log messages (circular buffer)
 	showLogs      bool          // Toggle log panel visibility
-	program       *tea.Program  // Reference to the Bubble Tea program for sending messages
 	logChan       chan LogMsg   // Channel for receiving log messages from the logger
 }
 
@@ -155,9 +154,6 @@ func RunTUI(
 	if program == nil {
 		return nil
 	}
-
-	// Store program reference for log message sending.
-	m.program = program
 
 	// Run the program and capture any runtime errors.
 	_, err = program.Run()
