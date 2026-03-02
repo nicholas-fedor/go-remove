@@ -20,12 +20,36 @@ package logger
 import (
 	"bytes"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// syncBuffer is a thread-safe wrapper around bytes.Buffer for concurrent writes.
+type syncBuffer struct {
+	buf bytes.Buffer
+	mu  sync.Mutex
+}
+
+// Write writes p to the buffer in a thread-safe manner.
+// It implements the io.Writer interface.
+func (sb *syncBuffer) Write(p []byte) (int, error) {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+
+	return sb.buf.Write(p)
+}
+
+// String returns the buffer's contents in a thread-safe manner.
+func (sb *syncBuffer) String() string {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+
+	return sb.buf.String()
+}
 
 // TestNewLogger verifies the NewLogger function creates a valid logger.
 func TestNewLogger(t *testing.T) {
@@ -327,10 +351,10 @@ func BenchmarkParseLevel(b *testing.B) {
 
 // TestZerologLogger_ConcurrentAccess verifies thread safety of logger methods.
 func TestZerologLogger_ConcurrentAccess(t *testing.T) {
-	var buf bytes.Buffer
+	buf := &syncBuffer{}
 
 	output := zerolog.ConsoleWriter{
-		Out:        &buf,
+		Out:        buf,
 		TimeFormat: "2006-01-02",
 		NoColor:    true,
 	}
