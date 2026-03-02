@@ -21,8 +21,6 @@ import (
 	"bytes"
 	"os"
 	"testing"
-
-	logmocks "github.com/nicholas-fedor/go-remove/internal/logger/mocks"
 )
 
 // TestRootCommand verifies the behavior of the root command.
@@ -42,9 +40,6 @@ func TestRootCommand(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Mock logger without Sync expectation for help flag test.
-			log := logmocks.NewMockLogger(t)
-
 			// Redirect stderr to capture output.
 			oldStderr := os.Stderr
 			r, w, _ := os.Pipe()
@@ -77,8 +72,6 @@ func TestRootCommand(t *testing.T) {
 			if gotStderr != tt.wantStderr {
 				t.Errorf("rootCmd.Execute() stderr = %q, want %q", gotStderr, tt.wantStderr)
 			}
-
-			log.AssertExpectations(t)
 		})
 	}
 }

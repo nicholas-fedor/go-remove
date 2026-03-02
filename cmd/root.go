@@ -24,34 +24,20 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 
 	"github.com/nicholas-fedor/go-remove/internal/cli"
 	"github.com/nicholas-fedor/go-remove/internal/fs"
 	"github.com/nicholas-fedor/go-remove/internal/logger"
 )
 
-// ErrInvalidLoggerType indicates that the logger is not of the expected *ZapLogger type.
-var ErrInvalidLoggerType = errors.New("logger is not a *ZapLogger")
+// ErrInvalidLoggerType indicates that the logger is not of the expected *ZerologLogger type.
+var ErrInvalidLoggerType = errors.New("logger is not a *ZerologLogger")
 
 // rootCmd defines the root command for go-remove.
 var rootCmd = &cobra.Command{
 	Use:   "go-remove [binary]",
 	Short: "A tool to remove Go binaries",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Initialize the logger for application-wide logging.
-		log, err := logger.NewZapLogger()
-		if err != nil {
-			return fmt.Errorf("failed to initialize logger: %w", err)
-		}
-
-		// Assemble dependencies with a real filesystem and the logger instance.
-		deps := cli.Dependencies{
-			FS:     fs.NewRealFS(),
-			Logger: log,
-		}
-
 		// Extract flag values to configure CLI behavior; defaults to TUI mode if no binary is given.
 		verbose, _ := cmd.Flags().GetBool("verbose")
 		goroot, _ := cmd.Flags().GetBool("goroot")
@@ -64,54 +50,53 @@ var rootCmd = &cobra.Command{
 			LogLevel: logLevel,
 		}
 
-		// Set log level based on config if verbose mode is enabled.
-		if verbose {
-			zapLogger, ok := log.(*logger.ZapLogger)
-			if !ok {
-				return fmt.Errorf(
-					"failed to set log level: %w with type %T",
-					ErrInvalidLoggerType,
-					log,
-				)
-			}
-
-			switch logLevel {
-			case "debug":
-				zapLogger.Logger = zapLogger.WithOptions(
-					zap.IncreaseLevel(zapcore.DebugLevel),
-				)
-			case "warn":
-				zapLogger.Logger = zapLogger.WithOptions(
-					zap.IncreaseLevel(zapcore.WarnLevel),
-				)
-			case "error":
-				zapLogger.Logger = zapLogger.WithOptions(
-					zap.IncreaseLevel(zapcore.ErrorLevel),
-				)
-			default:
-				zapLogger.Logger = zapLogger.WithOptions(
-					zap.IncreaseLevel(zapcore.InfoLevel),
-				)
-			}
-
-			log = zapLogger // Update the logger in deps
-			deps.Logger = log
-		}
-
 		// If a binary name is provided as an argument, run in direct removal mode.
 		if len(args) > 0 {
 			config.Binary = args[0]
+
+			// Initialize the standard logger for direct removal mode.
+			log, err := logger.NewLogger()
+			if err != nil {
+				return fmt.Errorf("failed to initialize logger: %w", err)
+			}
+
+			// Set log level based on config if verbose mode is enabled.
+			if verbose {
+				level := logger.ParseLevel(logLevel)
+				log.Level(level)
+			}
+
+			// Assemble dependencies with a real filesystem and the logger instance.
+			deps := cli.Dependencies{
+				FS:     fs.NewRealFS(),
+				Logger: log,
+			}
 
 			return cli.Run(deps, config)
 		}
 
 		// Otherwise, determine the binary directory and launch the TUI for interactive selection.
-		binDir, err := deps.FS.DetermineBinDir(config.Goroot)
+		// For TUI mode, we use a logger with capture support to display logs within the interface.
+		filesystem := fs.NewRealFS()
+
+		binDir, err := filesystem.DetermineBinDir(config.Goroot)
 		if err != nil {
 			return fmt.Errorf("failed to determine binary directory: %w", err)
 		}
 
-		return cli.RunTUI(binDir, config, deps.Logger, deps.FS, cli.DefaultRunner{})
+		// Initialize the logger with capture support for TUI mode.
+		log, _, err := logger.NewLoggerWithCapture()
+		if err != nil {
+			return fmt.Errorf("failed to initialize logger: %w", err)
+		}
+
+		// Set log level based on config if verbose mode is enabled.
+		if verbose {
+			level := logger.ParseLevel(logLevel)
+			log.Level(level)
+		}
+
+		return cli.RunTUI(binDir, config, log, filesystem, cli.DefaultRunner{})
 	},
 }
 
