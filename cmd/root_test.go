@@ -8,6 +8,7 @@ package cmd
 import (
 	"bytes"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -22,7 +23,7 @@ func TestRootCommand(t *testing.T) {
 		{
 			name:       "help flag",
 			args:       []string{"-h"},
-			wantStderr: "A tool to remove Go binaries\n\nUsage:\n  go-remove [binary] [flags]\n\nFlags:\n      --goroot             Target GOROOT/bin instead of GOBIN or GOPATH/bin\n  -h, --help               help for go-remove\n  -l, --log-level string   Set log level (debug, info, warn, error) (default \"info\")\n  -v, --verbose            Enable verbose output\n",
+			wantStderr: "A tool to remove Go binaries\n\nUsage:\n  go-remove [binary] [flags]\n\nFlags:\n      --goroot             Target GOROOT/bin instead of GOBIN or GOPATH/bin\n  -h, --help               help for go-remove\n  -l, --log-level string   Set log level (debug, info, warn, error) (default \"info\")\n  -r, --restore            Open history view for restoration\n  -u, --undo               Undo the most recent deletion\n  -v, --verbose            Enable verbose output\n",
 			wantErr:    false,
 		},
 	}
@@ -61,5 +62,22 @@ func TestRootCommand(t *testing.T) {
 				t.Errorf("rootCmd.Execute() stderr = %q, want %q", gotStderr, tt.wantStderr)
 			}
 		})
+	}
+}
+
+// TestGetStoragePath verifies the storage path calculation.
+func TestGetStoragePath(t *testing.T) {
+	// This test verifies that getStoragePath returns a non-empty string.
+	// The actual path depends on environment variables, so we just verify
+	// it doesn't return empty or panic.
+	path := getStoragePath()
+
+	if path == "" {
+		t.Error("getStoragePath() returned empty string")
+	}
+
+	// Verify it contains the expected components
+	if !strings.Contains(path, "go-remove") {
+		t.Errorf("getStoragePath() = %q, expected to contain 'go-remove'", path)
 	}
 }

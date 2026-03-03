@@ -20,12 +20,14 @@ jobs:
         uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@27fdb267c15a8835f1ead03dfa07f89be2bb741a
         with:
           check-latest: true
           go-version-file: "go.mod"
+          cache: false
 
       - name: Import GPG key
         uses: crazy-max/ghaction-import-gpg@92a10f995fd20944e1cae9a2e86e62dafe4f6171
