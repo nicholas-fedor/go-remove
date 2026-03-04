@@ -32,7 +32,7 @@ var (
 
 	// ErrUnsupportedPlatform indicates the platform is not supported.
 	ErrUnsupportedPlatform = errors.New(
-		"unsupported platform: only Linux and Windows are supported",
+		"unsupported platform: only Linux, Windows, and Darwin are supported",
 	)
 )
 
@@ -90,7 +90,7 @@ func NewExtractor() (*DefaultExtractor, error) {
 
 // isSupportedPlatform checks if the current platform is supported.
 func isSupportedPlatform() bool {
-	return runtime.GOOS == "linux" || runtime.GOOS == "windows"
+	return runtime.GOOS == "linux" || runtime.GOOS == "windows" || runtime.GOOS == "darwin"
 }
 
 // Extract retrieves build information from a Go binary.
