@@ -2,6 +2,13 @@ name: Build
 
 on:
   workflow_call:
+    secrets:
+      GPG_PRIVATE_KEY:
+        description: "GPG private key for signing releases"
+        required: true
+      GPG_PASSPHRASE:
+        description: "Passphrase for the GPG private key"
+        required: true
 
 jobs:
   build:
