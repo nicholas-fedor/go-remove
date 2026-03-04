@@ -9,16 +9,26 @@ builds:
     binary: go-remove
     goos:
       - linux
+      - darwin
       - windows
     goarch:
       - amd64
       - "386"
       - arm
       - arm64
+      - riscv64
 
     ignore:
       - goos: windows
+        goarch: riscv64
+      - goos: windows
         goarch: arm
+      - goos: darwin
+        goarch: "386"
+      - goos: darwin
+        goarch: arm
+      - goos: darwin
+        goarch: riscv64
 
 archives:
   - name_template: >-

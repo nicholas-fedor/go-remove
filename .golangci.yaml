@@ -184,6 +184,7 @@ linters:
         - r *net/http/Request
         - r *mux.Router
         - s strings.Builder
+        - s string
 
   ######################################################################################################
   # Defines a set of rules to ignore issues.

@@ -132,7 +132,7 @@ func executeRun(deps Dependencies, config Config, runner ProgramRunner) error {
 	}
 
 	if config.Binary == "" {
-		err = RunTUI(binDir, config, log, deps.FS, runner)
+		err = RunTUI(binDir, config, log, deps.FS, runner, nil)
 	} else {
 		binaryPath := deps.FS.AdjustBinaryPath(binDir, config.Binary)
 

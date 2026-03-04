@@ -23,7 +23,6 @@ jobs:
     needs:
       - Test
       - Lint
-    secrets: inherit
     permissions:
       contents: write
       packages: write

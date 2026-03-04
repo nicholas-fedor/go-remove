@@ -163,6 +163,10 @@ pkgname: "mocks"
 # Default: true
 # unroll-variadic: false
 
+# Add the license header to the generated mock files.
+template-data:
+  boilerplate-file: license-header.txt
+
 ######################################################################################################
 # File Output Configuration                                                                          #
 ######################################################################################################
