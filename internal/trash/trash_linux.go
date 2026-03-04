@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -93,6 +94,11 @@ func (t *linuxTrasher) MoveToTrash(ctx context.Context, filePath string) (string
 		uniqueName = generateUniqueName(fmt.Sprintf("%s_%d", baseName, i))
 		trashFilePath = filepath.Join(t.filesDir, uniqueName)
 		infoFilePath = filepath.Join(t.infoDir, uniqueName+".trashinfo")
+	}
+
+	// Verify we found an available path
+	if _, err := os.Stat(trashFilePath); err == nil {
+		return "", ErrTrashPathUnavailable
 	}
 
 	// Create trashinfo file first
@@ -175,8 +181,13 @@ func (t *linuxTrasher) IsInTrash(trashPath string) bool {
 		return false
 	}
 
-	// Should not start with ".." to be inside trash
-	return rel != "" && rel != "." && rel[0] != '.'
+	// Only reject parent-traversal (".." or starting with "../")
+	// Hidden files (starting with ".") are allowed
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+
+	return rel != "" && rel != "."
 }
 
 // ListTrash returns all entries in trash.
@@ -270,9 +281,27 @@ func (t *linuxTrasher) moveFile(src, dst string, info os.FileInfo) error {
 
 // copyAndDelete copies a file or directory and then deletes the source.
 func (t *linuxTrasher) copyAndDelete(src, dst string) error {
-	srcInfo, err := os.Stat(src)
+	srcInfo, err := os.Lstat(src)
 	if err != nil {
 		return fmt.Errorf("stating source: %w", err)
+	}
+
+	// Handle symlinks specially to preserve them
+	if srcInfo.Mode()&os.ModeSymlink != 0 {
+		linkTarget, err := os.Readlink(src)
+		if err != nil {
+			return fmt.Errorf("reading symlink: %w", err)
+		}
+
+		if err := os.Symlink(linkTarget, dst); err != nil {
+			return fmt.Errorf("creating symlink: %w", err)
+		}
+
+		if err := os.Remove(src); err != nil {
+			return fmt.Errorf("removing source symlink: %w", err)
+		}
+
+		return nil
 	}
 
 	if srcInfo.IsDir() {
@@ -307,6 +336,7 @@ func (t *linuxTrasher) copyFile(src, dst string, srcInfo os.FileInfo) error {
 
 	if _, err := io.Copy(dstFile, srcFile); err != nil {
 		dstFile.Close()
+		os.Remove(dst)
 
 		return fmt.Errorf("copying file content: %w", err)
 	}

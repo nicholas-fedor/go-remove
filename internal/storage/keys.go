@@ -13,13 +13,16 @@ import (
 )
 
 // ErrInvalidKeyFormat indicates the key is not in the expected format.
-var ErrInvalidKeyFormat = errors.New("invalid key format: expected '<timestamp>:<binary_name>'")
+var ErrInvalidKeyFormat = errors.New(
+	"invalid key format: expected '<zero-padded-timestamp>:<binary_name>'",
+)
 
 // ErrEmptyBinaryName indicates the binary name in the key is empty.
 var ErrEmptyBinaryName = errors.New("empty binary name in key")
 
 // GenerateKey creates a composite key for Badger storage.
-// The key format is "<timestamp>:<binary_name>" (e.g., "1709321234:golangci-lint").
+// The key format is "<zero-padded-timestamp>:<binary_name>" (e.g., "00000001709321234:golangci-lint").
+// The timestamp is zero-padded to 20 digits to ensure lexicographic order equals chronological order.
 // This format enables chronological sorting via Badger's key ordering.
 //
 // Parameters:
@@ -29,7 +32,7 @@ var ErrEmptyBinaryName = errors.New("empty binary name in key")
 // Returns:
 //   - A composite key string suitable for Badger storage
 func GenerateKey(timestamp int64, binaryName string) string {
-	return fmt.Sprintf("%d:%s", timestamp, binaryName)
+	return fmt.Sprintf("%020d:%s", timestamp, binaryName)
 }
 
 // ParseKey extracts timestamp and binary name from a key.

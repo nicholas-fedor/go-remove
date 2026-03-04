@@ -13,7 +13,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // The package supports Linux and Windows platforms and handles various
 // version formats including semantic versions (v1.2.3),
-// pseudo-versions (v0.0.0-20260302120000-abc123), and development builds ((devel)).
+// pseudo-versions (v0.0.0-20260302120000-abc123), and development builds (devel).
 //
 // Usage:
 //

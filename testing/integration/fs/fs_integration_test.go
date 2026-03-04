@@ -309,9 +309,9 @@ func (s *FSIntegrationTestSuite) TestAdjustBinaryPathVariousCombinations() {
 		},
 		{
 			name:     "empty binary",
-			dir:      "/home/user/go/bin",
+			dir:      filepath.FromSlash("/home/user/go/bin"),
 			binary:   "",
-			expected: "/home/user/go/bin",
+			expected: filepath.FromSlash("/home/user/go/bin"),
 		},
 		{
 			name:     "nested directory",

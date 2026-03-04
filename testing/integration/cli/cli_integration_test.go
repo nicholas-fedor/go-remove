@@ -514,25 +514,36 @@ func (s *CLIIntegrationTestSuite) TestRunConfigPropagation() {
 			// Capture stdout
 			getOutput := captureStdout(s.T())
 
+			// Create fresh mocks for each subtest to avoid accumulated expectations
+			fsMock := fsmocks.NewMockFS(s.T())
+			loggerMock := loggermocks.NewMockLogger(s.T())
+
+			// Setup logger expectations
+			nopLogger := zerolog.New(io.Discard)
+			loggerMock.EXPECT().Debug().Return(nopLogger.Debug()).Maybe()
+			loggerMock.EXPECT().Info().Return(nopLogger.Info()).Maybe()
+			loggerMock.EXPECT().Warn().Return(nopLogger.Warn()).Maybe()
+			loggerMock.EXPECT().Error().Return(nopLogger.Error()).Maybe()
+
 			// Setup expectations based on config
-			s.fsMock.EXPECT().
+			fsMock.EXPECT().
 				DetermineBinDir(tt.expectGoroot).
 				Return(testBinDir, nil)
 
-			s.fsMock.EXPECT().
+			fsMock.EXPECT().
 				AdjustBinaryPath(testBinDir, testBinaryName).
 				Return(testBinaryPath)
 
-			s.fsMock.EXPECT().
-				RemoveBinary(testBinaryPath, testBinaryName, tt.expectVerbose, s.loggerMock).
+			fsMock.EXPECT().
+				RemoveBinary(testBinaryPath, testBinaryName, tt.expectVerbose, loggerMock).
 				Return(nil)
 
-			s.loggerMock.EXPECT().Sync().Return(nil)
+			loggerMock.EXPECT().Sync().Return(nil)
 
 			// Execute
 			deps := cli.Dependencies{
-				FS:     s.fsMock,
-				Logger: s.loggerMock,
+				FS:     fsMock,
+				Logger: loggerMock,
 			}
 
 			err := cli.Run(deps, tt.config)
@@ -815,11 +826,41 @@ func TestErrorWrapping(t *testing.T) {
 
 	originalErr := errors.New("original error")
 
-	// Simulate error wrapping as done in cli.Run
-	wrappedErr := originalErr
+	// Create mocks
+	fsMock := fsmocks.NewMockFS(t)
+	loggerMock := loggermocks.NewMockLogger(t)
 
-	// Verify error chain
-	assert.ErrorIs(t, wrappedErr, originalErr)
+	// Setup logger expectations
+	nopLogger := zerolog.New(io.Discard)
+	loggerMock.EXPECT().Debug().Return(nopLogger.Debug()).Maybe()
+	loggerMock.EXPECT().Info().Return(nopLogger.Info()).Maybe()
+	loggerMock.EXPECT().Warn().Return(nopLogger.Warn()).Maybe()
+	loggerMock.EXPECT().Error().Return(nopLogger.Error()).Maybe()
+
+	// Setup mock expectations - fsMock returns the original error
+	fsMock.EXPECT().
+		DetermineBinDir(false).
+		Return("", originalErr)
+
+	loggerMock.EXPECT().Sync().Return(nil)
+
+	// Execute cli.Run with mocks that return the error
+	deps := cli.Dependencies{
+		FS:     fsMock,
+		Logger: loggerMock,
+	}
+
+	config := cli.Config{
+		Binary:  "test-binary",
+		Verbose: false,
+		Goroot:  false,
+	}
+
+	returnedErr := cli.Run(deps, config)
+
+	// Verify error chain - the returned error should wrap the original
+	require.Error(t, returnedErr)
+	assert.ErrorIs(t, returnedErr, originalErr)
 }
 
 // TestMultipleBinaryRemovals verifies multiple sequential removals.

@@ -427,7 +427,7 @@ func TestParseVersionType(t *testing.T) {
 		{
 			name:     "semantic version with prerelease v1.0.0-alpha",
 			version:  "v1.0.0-alpha",
-			expected: "pseudo", // Any version with hyphen is treated as pseudo-version
+			expected: "semantic", // Semver pre-release is not a Go pseudo-version
 		},
 		{
 			name:     "pseudo-version",
@@ -549,27 +549,56 @@ func TestBuildInfoData_GetInstallCommand(t *testing.T) {
 		expected string
 	}{
 		{
-			name: "reinstallable with vcs revision",
+			name: "install with tagged version (preferred over revision)",
 			data: BuildInfoData{
 				ModulePath:  "github.com/user/repo",
 				VCSRevision: "abc123def456",
 				Version:     "v1.0.0",
 			},
+			expected: "go install github.com/user/repo@v1.0.0",
+		},
+		{
+			name: "install with vcs revision when no tagged version",
+			data: BuildInfoData{
+				ModulePath:  "github.com/user/repo",
+				VCSRevision: "abc123def456",
+				Version:     "",
+			},
 			expected: "go install github.com/user/repo@abc123def456",
+		},
+		{
+			name: "install with vcs revision when devel version",
+			data: BuildInfoData{
+				ModulePath:  "github.com/user/repo",
+				VCSRevision: "abc123def456",
+				Version:     "(devel)",
+			},
+			expected: "go install github.com/user/repo@abc123def456",
+		},
+		{
+			name: "install at latest when only module path available",
+			data: BuildInfoData{
+				ModulePath:  "github.com/user/repo",
+				VCSRevision: "",
+				Version:     "",
+			},
+			expected: "go install github.com/user/repo@latest",
 		},
 		{
 			name: "not reinstallable - missing module path",
 			data: BuildInfoData{
 				ModulePath:  "",
 				VCSRevision: "abc123def456",
+				Version:     "v1.0.0",
 			},
 			expected: "",
 		},
 		{
-			name: "not reinstallable - missing vcs revision",
+			name: "not reinstallable - all fields empty",
 			data: BuildInfoData{
-				ModulePath:  "github.com/user/repo",
+				ModulePath:  "",
 				VCSRevision: "",
+				Version:     "",
 			},
 			expected: "",
 		},

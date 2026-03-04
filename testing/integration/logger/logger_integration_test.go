@@ -600,7 +600,11 @@ func (s *LoggerIntegrationTestSuite) TestCaptureFuncCalledMultipleTimes() {
 	mu.Lock()
 	defer mu.Unlock()
 
-	s.GreaterOrEqual(callCount, numMessages/2, "expected capture to be called for most messages")
+	s.GreaterOrEqual(
+		callCount,
+		numMessages*9/10,
+		"expected capture to be called for at least 90% of messages",
+	)
 }
 
 // TestNilCaptureFuncDisablesCapture verifies that setting nil capture func disables capture.
@@ -628,7 +632,16 @@ func (s *LoggerIntegrationTestSuite) TestNilCaptureFuncDisablesCapture() {
 	// Now disable capture
 	loggerInstance.SetCaptureFunc(nil)
 
+	// Set up a new capture function that increments capturedAfter
 	var capturedAfter int
+
+	captureFuncAfter := func(level, msg string) {
+		capturedAfter++
+	}
+
+	// Verify the new capture function is NOT called since we set nil
+	loggerInstance.SetCaptureFunc(captureFuncAfter)
+	loggerInstance.SetCaptureFunc(nil) // Disable again
 
 	for range 10 {
 		loggerInstance.Info().Msg("message without capture")

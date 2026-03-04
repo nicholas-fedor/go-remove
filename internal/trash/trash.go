@@ -40,6 +40,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -62,6 +64,12 @@ var (
 
 	// ErrMissingPath indicates missing Path in trashinfo.
 	ErrMissingPath = errors.New("missing Path in trashinfo")
+
+	// ErrInvalidPercentEncoding indicates invalid percent encoding in a path.
+	ErrInvalidPercentEncoding = errors.New("invalid percent encoding")
+
+	// ErrTrashPathUnavailable indicates could not find an available trash path.
+	ErrTrashPathUnavailable = errors.New("could not find available trash path")
 )
 
 // Trasher defines operations for XDG-compliant trash management.
@@ -154,16 +162,20 @@ func decodeTrashPath(encoded string) (string, error) {
 	var result []byte
 
 	for i := 0; i < len(encoded); i++ {
-		if encoded[i] == '%' && i+2 < len(encoded) {
-			// Decode percent-encoded byte
-			var b byte
-
-			_, err := fmt.Sscanf(encoded[i+1:i+3], "%02X", &b)
-			if err != nil {
-				return "", fmt.Errorf("invalid percent encoding: %w", err)
+		if encoded[i] == '%' {
+			// Validate that we have two following hex digits
+			if i+2 >= len(encoded) {
+				return "", fmt.Errorf("%w: incomplete sequence", ErrInvalidPercentEncoding)
 			}
 
-			result = append(result, b)
+			hexChars := encoded[i+1 : i+3]
+
+			decodedByte, err := strconv.ParseUint(hexChars, 16, 8)
+			if err != nil {
+				return "", fmt.Errorf("%w: %w", ErrInvalidPercentEncoding, err)
+			}
+
+			result = append(result, byte(decodedByte))
 			i += 2
 		} else {
 			result = append(result, encoded[i])
@@ -176,7 +188,8 @@ func decodeTrashPath(encoded string) (string, error) {
 // generateTrashInfo creates the content for a .trashinfo file.
 func generateTrashInfo(originalPath string, deletionTime time.Time) string {
 	encodedPath := encodeTrashPath(originalPath)
-	timestamp := deletionTime.Format(time.RFC3339)
+	// Use ISO8601 without timezone per XDG spec
+	timestamp := deletionTime.Local().Format("2006-01-02T15:04:05")
 
 	return fmt.Sprintf("[Trash Info]\nPath=%s\nDeletionDate=%s\n", encodedPath, timestamp)
 }
@@ -196,10 +209,10 @@ func parseTrashInfo(content string) (originalPath string, deletionTime time.Time
 		lines := splitLines(content)
 
 		for _, line := range lines {
-			if len(line) > 5 && line[:5] == "Path=" {
-				pathLine = line[5:]
-			} else if len(line) > 14 && line[:14] == "DeletionDate=" {
-				timeLine = line[14:]
+			if strings.HasPrefix(line, "Path=") {
+				pathLine = strings.TrimPrefix(line, "Path=")
+			} else if strings.HasPrefix(line, "DeletionDate=") {
+				timeLine = strings.TrimPrefix(line, "DeletionDate=")
 			}
 		}
 	}

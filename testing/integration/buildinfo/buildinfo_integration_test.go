@@ -13,6 +13,7 @@ package buildinfo_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -540,7 +541,7 @@ func TestParseVersionType(t *testing.T) {
 		{
 			name:     "semantic version with prerelease",
 			version:  "v1.2.3-beta.1",
-			expected: "pseudo",
+			expected: "semantic",
 		},
 		{
 			name:     "pseudo-version",
@@ -684,7 +685,7 @@ func TestGetInstallCommand(t *testing.T) {
 		expected  string
 	}{
 		{
-			name: "full metadata - install at revision",
+			name: "full metadata - install at tagged version",
 			buildInfo: &buildinfo.BuildInfoData{
 				ModulePath:  testModulePath,
 				Version:     testVersion,
@@ -692,31 +693,31 @@ func TestGetInstallCommand(t *testing.T) {
 				Settings:    map[string]string{},
 				RawJSON:     []byte(`{}`),
 			},
-			expected: "go install " + testModulePath + "@" + testVCSRevision,
+			expected: "go install " + testModulePath + "@" + testVersion,
 		},
 		{
-			name: "no vcs revision - not reinstallable",
+			name: "no vcs revision but has version - install at version",
 			buildInfo: &buildinfo.BuildInfoData{
 				ModulePath: testModulePath,
 				Version:    testVersion,
 				Settings:   map[string]string{},
 				RawJSON:    []byte(`{}`),
 			},
-			expected: "",
+			expected: "go install " + testModulePath + "@" + testVersion,
 		},
 		{
-			name: "devel version no revision - not reinstallable",
+			name: "devel version with revision - install at revision",
 			buildInfo: &buildinfo.BuildInfoData{
 				ModulePath:  testModulePath,
 				Version:     testDevelVersion,
-				VCSRevision: "",
+				VCSRevision: testVCSRevision,
 				Settings:    map[string]string{},
 				RawJSON:     []byte(`{}`),
 			},
-			expected: "",
+			expected: "go install " + testModulePath + "@" + testVCSRevision,
 		},
 		{
-			name: "not reinstallable - empty command",
+			name: "no module path - empty command",
 			buildInfo: &buildinfo.BuildInfoData{
 				ModulePath: "",
 				Version:    testVersion,
@@ -726,13 +727,13 @@ func TestGetInstallCommand(t *testing.T) {
 			expected: "",
 		},
 		{
-			name: "only module path no revision - not reinstallable",
+			name: "only module path no version or revision - install at latest",
 			buildInfo: &buildinfo.BuildInfoData{
 				ModulePath: testModulePath,
 				Settings:   map[string]string{},
 				RawJSON:    []byte(`{}`),
 			},
-			expected: "",
+			expected: "go install " + testModulePath + "@latest",
 		},
 	}
 
@@ -998,14 +999,14 @@ func TestVersionTypeEdgeCases(t *testing.T) {
 		want    string
 	}{
 		{
-			name:    "version with multiple hyphens",
+			name:    "version with multiple hyphens (invalid pseudo)",
 			version: "v0.0.0-20260302-abc123",
-			want:    "pseudo",
+			want:    "semantic",
 		},
 		{
 			name:    "version starting with hyphen after v",
 			version: "v-1.2.3",
-			want:    "pseudo",
+			want:    "unknown",
 		},
 		{
 			name:    "long semantic version",
@@ -1015,12 +1016,12 @@ func TestVersionTypeEdgeCases(t *testing.T) {
 		{
 			name:    "just v0",
 			version: "v0",
-			want:    "semantic",
+			want:    "unknown",
 		},
 		{
 			name:    "v with only hyphens",
 			version: "v---",
-			want:    "pseudo",
+			want:    "unknown",
 		},
 		{
 			name:    "whitespace version",
@@ -1054,25 +1055,25 @@ func TestGetInstallCommandVariations(t *testing.T) {
 		expected   string
 	}{
 		{
-			name:       "everything present - uses revision",
+			name:       "everything present - uses tagged version",
 			modulePath: "github.com/test/app",
 			version:    "v1.0.0",
 			revision:   "abc123",
-			expected:   "go install github.com/test/app@abc123",
+			expected:   "go install github.com/test/app@v1.0.0",
 		},
 		{
-			name:       "no revision - not reinstallable",
+			name:       "no revision but has version - uses version",
 			modulePath: "github.com/test/app",
 			version:    "v2.0.0",
 			revision:   "",
-			expected:   "",
+			expected:   "go install github.com/test/app@v2.0.0",
 		},
 		{
-			name:       "devel version no revision - not reinstallable",
+			name:       "devel version with revision - uses revision",
 			modulePath: "github.com/test/app",
 			version:    "(devel)",
-			revision:   "",
-			expected:   "",
+			revision:   "abc123",
+			expected:   "go install github.com/test/app@abc123",
 		},
 		{
 			name:       "no module path - empty",
@@ -1087,6 +1088,13 @@ func TestGetInstallCommandVariations(t *testing.T) {
 			version:    "",
 			revision:   "def456",
 			expected:   "go install github.com/test/app@def456",
+		},
+		{
+			name:       "devel version no revision - uses latest",
+			modulePath: "github.com/test/app",
+			version:    "(devel)",
+			revision:   "",
+			expected:   "go install github.com/test/app@latest",
 		},
 	}
 
@@ -1139,9 +1147,33 @@ func (s *BuildInfoIntegrationTestSuite) TestConcurrentExtractOperations() {
 		Extract(mock.Anything, testBinaryPath2).
 		Return(buildData2, nil)
 
-	// Execute both operations (simulating concurrent usage)
-	result1, err1 := s.extractor.Extract(ctx, testBinaryPath)
-	result2, err2 := s.extractor.Extract(ctx, testBinaryPath2)
+	// Execute both operations concurrently using goroutines
+	var (
+		result1 *buildinfo.BuildInfoData
+		result2 *buildinfo.BuildInfoData
+		err1    error
+		err2    error
+	)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// First goroutine for testBinaryPath
+	go func() {
+		defer wg.Done()
+
+		result1, err1 = s.extractor.Extract(ctx, testBinaryPath)
+	}()
+
+	// Second goroutine for testBinaryPath2
+	go func() {
+		defer wg.Done()
+
+		result2, err2 = s.extractor.Extract(ctx, testBinaryPath2)
+	}()
+
+	// Wait for both goroutines to complete
+	wg.Wait()
 
 	// Verify both succeeded
 	s.Require().NoError(err1)

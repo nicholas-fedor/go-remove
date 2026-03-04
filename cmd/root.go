@@ -57,30 +57,46 @@ var (
 const dirPermissions = 0o750
 
 // getStoragePath returns the path for the history storage database.
-// It uses XDG-compliant paths:
-//   - Linux: $XDG_DATA_HOME/go-remove/history.badger
+// It uses platform-specific paths:
+//   - Linux: $XDG_DATA_HOME/go-remove/history.badger or ~/.local/share/go-remove/history.badger
+//   - macOS: ~/Library/Application Support/go-remove/history.badger
 //   - Windows: %LOCALAPPDATA%/go-remove/history.badger
 func getStoragePath() string {
 	var dataHome string
 
-	if runtime.GOOS == "windows" {
+	switch runtime.GOOS {
+	case "windows":
 		dataHome = os.Getenv("LOCALAPPDATA")
 		if dataHome == "" {
 			dataHome = os.Getenv("USERPROFILE")
 		}
-	} else {
+	case "darwin":
+		userHome, err := os.UserHomeDir()
+		if err == nil {
+			dataHome = filepath.Join(userHome, "Library", "Application Support")
+		}
+	default: // Linux and other Unix-like systems
 		dataHome = os.Getenv("XDG_DATA_HOME")
 		if dataHome == "" {
-			home, err := os.UserHomeDir()
+			userHome, err := os.UserHomeDir()
 			if err == nil {
-				dataHome = filepath.Join(home, ".local", "share")
+				dataHome = filepath.Join(userHome, ".local", "share")
 			}
 		}
 	}
 
 	if dataHome == "" {
-		// Fallback to current directory
-		return "go-remove-history.badger"
+		// Fallback to executable directory for a stable location
+		exePath, err := os.Executable()
+		if err == nil {
+			dataHome = filepath.Dir(exePath)
+		} else {
+			// Last resort: use user's home directory
+			userHome, err := os.UserHomeDir()
+			if err == nil {
+				dataHome = userHome
+			}
+		}
 	}
 
 	return filepath.Join(dataHome, "go-remove", "history.badger")
@@ -113,6 +129,15 @@ func initHistoryManager(log logger.Logger) (history.Manager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("initializing storage: %w", err)
 	}
+
+	// Ensure storer is closed if subsequent initialization fails
+	defer func() {
+		if err != nil {
+			if closeErr := storer.Close(); closeErr != nil {
+				log.Warn().Err(closeErr).Msg("Failed to close storage after initialization error")
+			}
+		}
+	}()
 
 	// Create build info extractor
 	extractor, err := buildinfo.NewExtractor()

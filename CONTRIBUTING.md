@@ -222,7 +222,7 @@ Comprehensive testing is **MANDATORY**. All tests must pass before submission.
   - Test from outside the package
   - Use Mockery-generated mocks
   - No external calls allowed
-  - Package name:  <package>_test
+  - Package name: <package>_test
 - **Purpose**: Verify component interactions
 
 #### E2E Tests

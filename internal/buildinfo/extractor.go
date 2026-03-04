@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"runtime"
 )
 
@@ -216,6 +217,15 @@ func (e *DefaultExtractor) IsGoBinary(binaryPath string) bool {
 	return true
 }
 
+// pseudoVersionRegex matches Go pseudo-version format:
+// vX.Y.Z-yyyymmddhhmmss-abcdefabcdef or vX.Y.Z-0.yyyymmddhhmmss-abcdefabcdef.
+var pseudoVersionRegex = regexp.MustCompile(`^v\d+\.\d+\.\d+-(?:0\.)?\d{14}-[a-f0-9]+$`)
+
+// semanticVersionRegex matches semantic version with optional pre-release/build metadata.
+var semanticVersionRegex = regexp.MustCompile(
+	`^v\d+\.\d+\.\d+(?:-[a-zA-Z0-9._-]+)?(?:\+[a-zA-Z0-9._-]+)?$`,
+)
+
 // ParseVersionType determines the type of version string.
 // Returns one of: "semantic", "pseudo", "devel", or "unknown".
 func ParseVersionType(version string) string {
@@ -230,20 +240,15 @@ func ParseVersionType(version string) string {
 
 	// Check for semantic version (vX.Y.Z)
 	if len(version) > 1 && version[0] == 'v' {
-		// Check for pseudo-version pattern: v0.0.0-yyyymmddhhmmss-abcdefabcdef
-		// Contains a timestamp segment with hyphen separators
-		for i := 1; i < len(version); i++ {
-			if version[i] == '-' {
-				// Has hyphen after version prefix - check if it's a pseudo-version
-				// Pseudo-versions have format: vX.Y.Z-yyyymmddhhmmss-commithash
-				if i < len(version)-1 {
-					return "pseudo"
-				}
-			}
+		// Check for pseudo-version pattern: vX.Y.Z-yyyymmddhhmmss-abcdefabcdef
+		if pseudoVersionRegex.MatchString(version) {
+			return "pseudo"
 		}
 
-		// No hyphen or valid semantic version format
-		return "semantic"
+		// Check for semantic version format (allows pre-release like v1.2.3-beta)
+		if semanticVersionRegex.MatchString(version) {
+			return "semantic"
+		}
 	}
 
 	return "unknown"
@@ -260,8 +265,14 @@ func (b *BuildInfoData) IsReinstallable() bool {
 // if sufficient information is available.
 // Returns empty string if not reinstallable.
 func (b *BuildInfoData) GetInstallCommand() string {
-	if !b.IsReinstallable() {
+	// Cannot construct install command without module path
+	if b.ModulePath == "" {
 		return ""
+	}
+
+	// Prefer tagged versions for reproducible installs
+	if b.Version != "" && b.Version != "(devel)" {
+		return fmt.Sprintf("go install %s@%s", b.ModulePath, b.Version)
 	}
 
 	// For pseudo-versions or specific commits, install at the revision
@@ -269,11 +280,6 @@ func (b *BuildInfoData) GetInstallCommand() string {
 		return fmt.Sprintf("go install %s@%s", b.ModulePath, b.VCSRevision)
 	}
 
-	// For tagged versions, install at the version
-	if b.Version != "" && b.Version != "(devel)" {
-		return fmt.Sprintf("go install %s@%s", b.ModulePath, b.Version)
-	}
-
-	// Fallback to latest
+	// Fallback to latest if we have module path but no version/revision
 	return fmt.Sprintf("go install %s@latest", b.ModulePath)
 }

@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -369,9 +370,36 @@ func (m *HistoryManager) restoreRecord(
 	}
 
 	// Check if file exists at original location
-	if m.trasher.IsInTrash(record.OriginalPath) || record.OriginalPath == "" {
-		// Original path is invalid or occupied
-		return nil, fmt.Errorf("%w: %s", ErrRestoreCollision, record.OriginalPath)
+	if record.OriginalPath == "" {
+		return nil, fmt.Errorf("%w: original path is empty", ErrRestoreCollision)
+	}
+
+	// Check if a file already exists at the original location
+	// Only treat as collision if the file is different from the one in trash
+	if stat, err := os.Stat(record.OriginalPath); err == nil {
+		// File exists at original location - check if it's the same file (already restored)
+		trashStat, trashErr := os.Stat(record.TrashPath)
+		if trashErr != nil {
+			// Can't access trash file, assume collision to be safe
+			return nil, fmt.Errorf("%w: %s", ErrRestoreCollision, record.OriginalPath)
+		}
+
+		// Compare device and inode to determine if files are the same
+		// If they are the same file, it's already restored, not a collision
+		if !os.SameFile(stat, trashStat) {
+			return nil, fmt.Errorf("%w: %s", ErrRestoreCollision, record.OriginalPath)
+		}
+
+		// Files are the same - already restored, update record and return error
+		record.TrashAvailable = false
+
+		if updateErr := m.storer.UpdateRecord(ctx, record); updateErr != nil {
+			m.logger.Warn().
+				Err(updateErr).
+				Msg("Failed to update record after detecting already restored file")
+		}
+
+		return nil, fmt.Errorf("%w: %s", ErrAlreadyRestored, record.BinaryName)
 	}
 
 	// Restore from trash

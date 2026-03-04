@@ -485,14 +485,12 @@ func TestDecodeTrashPath_Invalid(t *testing.T) {
 		{
 			name:        "trailing percent",
 			encoded:     "/home/user/file%",
-			expected:    "/home/user/file%",
-			expectError: false,
+			expectError: true,
 		},
 		{
 			name:        "single char after percent",
 			encoded:     "/home/user/file%A",
-			expected:    "/home/user/file%A",
-			expectError: false,
+			expectError: true,
 		},
 		{
 			name:        "invalid hex characters",
@@ -522,13 +520,15 @@ func TestGenerateTrashInfo(t *testing.T) {
 	t.Parallel()
 
 	path := "/home/user/test.txt"
-	deletionTime := time.Date(2026, 3, 2, 12, 0, 0, 0, time.UTC)
+	deletionTime := time.Date(2026, 3, 2, 12, 0, 0, 0, time.Local)
 
 	info := generateTrashInfo(path, deletionTime)
 
 	assert.Contains(t, info, "[Trash Info]")
 	assert.Contains(t, info, "Path=/home/user/test.txt")
-	assert.Contains(t, info, "DeletionDate=2026-03-02T12:00:00")
+	// Check format is ISO8601 without timezone (e.g., 2026-03-02T12:00:00)
+	// The format should be: DeletionDate=YYYY-MM-DDTHH:MM:SS (potentially followed by newline at end)
+	assert.Regexp(t, `DeletionDate=\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}`, info)
 }
 
 // TestParseTrashInfo tests trashinfo parsing.

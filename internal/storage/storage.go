@@ -10,8 +10,8 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 // sortable keys for efficient time-based queries.
 //
 // Key Format:
-//   - Keys use the format "<timestamp>:<binary_name>" (e.g., "1709321234:golangci-lint")
-//   - This enables chronological sorting via Badger's key ordering
+//   - Keys use the format "<zero-padded-timestamp>:<binary_name>" (e.g., "00000001709321234:golangci-lint")
+//   - The timestamp is zero-padded to 20 digits to ensure lexicographic order equals chronological order
 //   - Unix timestamps ensure sortability and uniqueness
 //
 // Storage Location:
@@ -42,6 +42,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	badger "github.com/dgraph-io/badger/v4"
@@ -163,7 +164,7 @@ type Storer interface {
 type BadgerStore struct {
 	database *badger.DB
 	path     string
-	closed   bool
+	closed   atomic.Bool
 }
 
 // ValueLogSizeExponent defines the exponent for value log file size calculation (1 << 20 = 1MB).
@@ -196,7 +197,6 @@ func NewBadgerStore(path string) (*BadgerStore, error) {
 	return &BadgerStore{
 		database: database,
 		path:     path,
-		closed:   false,
 	}, nil
 }
 
@@ -204,7 +204,7 @@ func NewBadgerStore(path string) (*BadgerStore, error) {
 // The record's Timestamp and BinaryName fields are used to generate the key.
 // Returns ErrInvalidRecord if the record is missing required fields.
 func (s *BadgerStore) SaveRecord(ctx context.Context, record *HistoryRecord) error {
-	if s.closed {
+	if s.closed.Load() {
 		return ErrDatabaseClosed
 	}
 
@@ -257,7 +257,7 @@ func (s *BadgerStore) SaveRecord(ctx context.Context, record *HistoryRecord) err
 func (s *BadgerStore) GetRecord(ctx context.Context, key string) (HistoryRecord, error) {
 	var record HistoryRecord
 
-	if s.closed {
+	if s.closed.Load() {
 		return record, ErrDatabaseClosed
 	}
 
@@ -309,7 +309,7 @@ func (s *BadgerStore) GetRecord(ctx context.Context, key string) (HistoryRecord,
 func (s *BadgerStore) GetMostRecent(ctx context.Context) (HistoryRecord, error) {
 	var record HistoryRecord
 
-	if s.closed {
+	if s.closed.Load() {
 		return record, ErrDatabaseClosed
 	}
 
@@ -360,7 +360,7 @@ func (s *BadgerStore) GetMostRecent(ctx context.Context) (HistoryRecord, error) 
 // Records are returned in reverse chronological order (newest first).
 // Supports filtering by availability and pagination via limit/offset.
 func (s *BadgerStore) ListRecords(ctx context.Context, opts ListOptions) ([]HistoryRecord, error) {
-	if s.closed {
+	if s.closed.Load() {
 		return nil, ErrDatabaseClosed
 	}
 
@@ -445,7 +445,7 @@ func (s *BadgerStore) ListRecords(ctx context.Context, opts ListOptions) ([]Hist
 // UpdateRecord updates an existing history record.
 // The record must have a valid key derived from Timestamp and BinaryName.
 func (s *BadgerStore) UpdateRecord(ctx context.Context, record *HistoryRecord) error {
-	if s.closed {
+	if s.closed.Load() {
 		return ErrDatabaseClosed
 	}
 
@@ -509,7 +509,7 @@ func (s *BadgerStore) UpdateRecord(ctx context.Context, record *HistoryRecord) e
 // DeleteRecord removes a history record from storage.
 // Returns ErrRecordNotFound if the key does not exist.
 func (s *BadgerStore) DeleteRecord(ctx context.Context, key string) error {
-	if s.closed {
+	if s.closed.Load() {
 		return ErrDatabaseClosed
 	}
 
@@ -558,7 +558,7 @@ func (s *BadgerStore) DeleteRecord(ctx context.Context, key string) error {
 // DeleteAllRecords removes all history records.
 // This operation cannot be undone.
 func (s *BadgerStore) DeleteAllRecords(ctx context.Context) error {
-	if s.closed {
+	if s.closed.Load() {
 		return ErrDatabaseClosed
 	}
 
@@ -625,7 +625,7 @@ func (s *BadgerStore) DeleteAllRecords(ctx context.Context) error {
 // Close closes the Badger database.
 // Returns an error if the database is already closed.
 func (s *BadgerStore) Close() error {
-	if s.closed {
+	if s.closed.Load() {
 		return ErrDatabaseClosed
 	}
 
@@ -633,7 +633,7 @@ func (s *BadgerStore) Close() error {
 		return fmt.Errorf("closing database: %w", err)
 	}
 
-	s.closed = true
+	s.closed.Store(true)
 
 	return nil
 }

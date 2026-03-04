@@ -25,12 +25,14 @@ import (
 )
 
 // Layout constants for TUI rendering.
+// These constants must be kept consistent between updateGrid() and the view functions.
 const (
 	colWidthPadding          = 3                  // Padding added to column width for spacing
 	availWidthAdjustment     = 4                  // Adjustment to width for border and padding
-	minAvailHeightAdjustment = 7                  // Minimum height adjustment for UI elements
+	minAvailHeightAdjustment = 8                  // Minimum height adjustment for UI elements (title + footer + padding)
 	visibleLenPrefix         = 2                  // Prefix length for cursor visibility
-	totalHeightBase          = 4                  // Base height for non-grid UI components
+	totalHeightBase          = 8                  // Base height for non-grid UI components (must match minAvailHeightAdjustment)
+	footerHeight             = 1                  // Height reserved for footer/instructions
 	leftPadding              = 2                  // Left padding for the entire TUI
 	maxLogLines              = 50                 // Maximum number of log lines to retain
 	maxVisibleLogLines       = 5                  // Maximum number of log lines to display
@@ -38,7 +40,8 @@ const (
 	maxHistoryEntries        = 100                // Maximum number of history entries to display
 	dateTimeFormat           = "2006-01-02 15:04" // Format for displaying timestamps
 	separatorAdjustment      = 2                  // Extra width for column separator
-	baseContentHeight        = 3                  // Base height for content area
+	baseContentHeight        = 3                  // Base height for content area (title + empty lines)
+	historyTableHeaderLines  = 2                  // Number of lines for history table header (header + separator)
 )
 
 // Mode constants for TUI state.
@@ -428,6 +431,8 @@ func (m *model) executeConfirmation() (tea.Model, tea.Cmd) {
 				m.status = fmt.Sprintf("Error deleting permanently: %v", err)
 			} else {
 				m.status = "Permanently deleted " + entry.BinaryName
+				// Clear confirmation state before refreshing history
+				m.confirmation = confirmNone
 				// Refresh history
 				cmd := m.loadHistory()
 
@@ -790,18 +795,27 @@ func (m *model) updateGrid() {
 	// Calculate column width and available space for the grid.
 	colWidth := maxNameLen + colWidthPadding
 	availWidth := m.width - availWidthAdjustment
-	availHeight := maximum(m.height-minAvailHeightAdjustment, 1)
+
+	// Account for status line when calculating available height.
+	// The status line takes 1 line when present, but minAvailHeightAdjustment
+	// is a constant that doesn't account for dynamic status display.
+	statusAdjustment := 0
+	if m.status != "" {
+		statusAdjustment = 1
+	}
+
+	availHeight := maximum(m.height-minAvailHeightAdjustment-statusAdjustment, 1)
 
 	// Adjust available height for log panel if visible
 	if m.showLogs {
-		// Reserve up to maxVisibleLogLines lines for log panel (plus 1 for separator)
+		// Reserve up to maxVisibleLogLines lines for log panel (plus separator lines)
 		visibleLogCount := minimum(len(m.logs), maxVisibleLogLines)
 		if visibleLogCount == 0 {
 			// Empty log panel: header + placeholder
 			visibleLogCount = 1
 		}
 
-		logPanelHeight := visibleLogCount + 1
+		logPanelHeight := visibleLogCount + logPanelSeparatorLines
 		availHeight = maximum(availHeight-logPanelHeight, 1)
 	}
 
@@ -995,7 +1009,15 @@ func (m *model) viewHistory() tea.View {
 	s.WriteString(titleStyle.Render("Deletion History\n"))
 	s.WriteString("\n")
 
+	// Calculate visible count first for use in both rendering and height calculation
+	var (
+		visibleCount      int
+		entryCount        int
+		maxVisibleEntries int
+	)
+
 	// Show loading state or history entries
+
 	switch {
 	case m.historyLoading:
 		s.WriteString("Loading history...\n")
@@ -1031,9 +1053,9 @@ func (m *model) viewHistory() tea.View {
 			reservedHeight += visibleLogCount + logPanelSeparatorLines
 		}
 
-		maxVisibleEntries := maximum(m.height-reservedHeight, 1)
-		entryCount := len(m.historyEntries)
-		visibleCount := minimum(entryCount, maxVisibleEntries)
+		maxVisibleEntries = maximum(m.height-reservedHeight, 1)
+		entryCount = len(m.historyEntries)
+		visibleCount = minimum(entryCount, maxVisibleEntries)
 
 		// Adjust if we need to show "...and X more" message
 		showMoreIndicator := entryCount > maxVisibleEntries
@@ -1153,10 +1175,19 @@ func (m *model) viewHistory() tea.View {
 
 	footer := footerStyle.Render(footerText)
 
-	// Calculate total height
+	// Calculate total height using actual displayed rows, not adjusted visibleCount
+	// The visibleCount variable may have been decremented for the "show more" indicator,
+	// so we calculate the actual displayed rows separately
 	contentHeight := baseContentHeight
+
 	if !m.historyLoading && len(m.historyEntries) > 0 {
-		contentHeight += len(m.historyEntries) + 1 // header + rows + separator
+		// Calculate actual displayed rows (before visibleCount was potentially decremented)
+		actualVisibleCount := minimum(entryCount, maxVisibleEntries)
+		contentHeight += actualVisibleCount + historyTableHeaderLines
+		// Account for the "...and X more" indicator line if it will be displayed
+		if entryCount > maxVisibleEntries {
+			contentHeight++
+		}
 	}
 
 	lenStatus := 0

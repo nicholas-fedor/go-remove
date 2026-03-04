@@ -28,13 +28,15 @@ const (
 )
 
 // shFileOpStruct represents the SHFILEOPSTRUCTW structure.
+// Field types carefully matched to Windows SHFILEOPSTRUCTW layout for 64-bit compatibility.
 type shFileOpStruct struct {
 	hwnd                  uintptr
-	wFunc                 uintptr
+	wFunc                 uint32
 	pFrom                 uintptr
 	pTo                   uintptr
-	fileOpFlags           uintptr
-	fAnyOperationsAborted uintptr
+	fileOpFlags           uint16
+	_                     uint16 // padding field
+	fAnyOperationsAborted uint32
 	hNameMappings         uintptr
 	lpszProgressTitle     uintptr
 }
@@ -140,14 +142,13 @@ func (t *windowsTrasher) RestoreFromTrash(
 }
 
 // IsInTrash checks if a file exists in the Windows Recycle Bin.
-// Note: This is a heuristic check as Windows doesn't expose a direct API.
+// Note: Reliable detection is not feasible via the current API. Windows does not
+// provide a direct API to check if a specific file is in the Recycle Bin without
+// using COM interfaces (IShellFolder). This function returns false as a
+// deterministic result, since non-existence of a file does not mean it's "in the
+// recycle bin" - the file could have never existed or been permanently deleted.
 func (t *windowsTrasher) IsInTrash(trashPath string) bool {
-	// Windows Recycle Bin is at %USERPROFILE%\$Recycle.Bin
-	// but checking if a specific file is there is complex.
-	// We check if the original file no longer exists.
-	_, err := os.Stat(trashPath)
-
-	return os.IsNotExist(err)
+	return false
 }
 
 // ListTrash returns entries from Windows Recycle Bin.
@@ -173,8 +174,24 @@ func (t *windowsTrasher) DeletePermanently(ctx context.Context, trashPath string
 		return ctx.Err()
 	}
 
+	// Verify source exists
+	_, err := os.Stat(trashPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%w: %s", ErrPathNotFound, trashPath)
+		}
+
+		return fmt.Errorf("checking file: %w", err)
+	}
+
+	// Get absolute path
+	absPath, err := filepath.Abs(trashPath)
+	if err != nil {
+		absPath = trashPath
+	}
+
 	// Convert to UTF-16 with double null terminator
-	utf16Path, err := syscall.UTF16FromString(trashPath)
+	utf16Path, err := syscall.UTF16FromString(absPath)
 	if err != nil {
 		return fmt.Errorf("converting path to UTF-16: %w", err)
 	}
@@ -188,11 +205,11 @@ func (t *windowsTrasher) DeletePermanently(ctx context.Context, trashPath string
 	}
 
 	// Call SHFileOperationW
-	ret, _, err := t.shFileOperation.Call(uintptr(unsafe.Pointer(param)))
+	ret, _, _ := t.shFileOperation.Call(uintptr(unsafe.Pointer(param)))
 
-	// SHFileOperation returns 0 on success
+	// SHFileOperation returns 0 on success, non-zero on failure
 	if ret != 0 {
-		return fmt.Errorf("SHFileOperation failed with code %d: %w", ret, err)
+		return fmt.Errorf("SHFileOperation failed with code %d", ret)
 	}
 
 	return nil

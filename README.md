@@ -196,7 +196,6 @@ go-remove -r
 | `--restore`   | `-r`  | Open the deletion history view                      |
 | `--goroot`    |       | Target `GOROOT/bin` instead of `GOBIN`/`GOPATH/bin` |
 | `--log-level` |       | Set log level (`debug`, `info`, `warn`, `error`)    |
-| `--version`   | `-v`  | Show version information                            |
 | `--help`      | `-h`  | Show help message                                   |
 
 ## Filesystem Locations
@@ -247,7 +246,7 @@ Run locally:
 
 ## Requirements
 
-- Go 1.26 or later
+- Go 1.26.0 or later
 
 ## Contributing
 

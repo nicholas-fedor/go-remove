@@ -582,7 +582,7 @@ func Test_model_View(t *testing.T) {
 					leftPaddingStr+pad("❯ vhs", effectiveWidth),
 					leftPaddingStr+pad("", effectiveWidth),
 				)
-				for range 19 {
+				for range 15 { // Adjusted for totalHeightBase=8
 					lines = append(lines, leftPaddingStr+pad("", effectiveWidth))
 				}
 
@@ -624,7 +624,7 @@ func Test_model_View(t *testing.T) {
 					leftPaddingStr+pad("", effectiveWidth),
 					leftPaddingStr+pad("Removed tool", effectiveWidth),
 				)
-				for range 17 { // Adjusted for rows=2
+				for range 13 { // Adjusted for rows=2, totalHeightBase=8, and status line
 					lines = append(lines, leftPaddingStr+pad("", effectiveWidth))
 				}
 
@@ -1593,11 +1593,11 @@ func Test_model_Update_EmptyBinaryList(t *testing.T) {
 		sortAscending: true,
 	}
 
-	// Try to remove with empty list - should quit
+	// Try to remove with empty list - no action expected
 	got, cmd := m.Update(keyPressString(keyEnter))
 	gotModel := got.(*model)
 
-	// Should return quit command when no binaries remain
+	// Should return no command when list is empty (nothing to remove)
 	assert.NotNil(t, gotModel)
 	assert.Nil(t, cmd) // No command when list is empty
 }

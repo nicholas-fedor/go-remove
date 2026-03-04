@@ -64,7 +64,7 @@ func TestNewBadgerStore(t *testing.T) {
 
 		assert.NotNil(t, store)
 		assert.NotNil(t, store.database)
-		assert.False(t, store.closed)
+		assert.False(t, store.closed.Load())
 	})
 
 	t.Run("fails with invalid path", func(t *testing.T) {
@@ -604,7 +604,7 @@ func TestBadgerStore_Close(t *testing.T) {
 
 		err := store.Close()
 		require.NoError(t, err)
-		assert.True(t, store.closed)
+		assert.True(t, store.closed.Load())
 
 		// Cleanup temp directory
 		cleanup()
@@ -633,31 +633,31 @@ func TestGenerateKey(t *testing.T) {
 			name:       "standard key",
 			timestamp:  1709321234,
 			binaryName: "golangci-lint",
-			expected:   "1709321234:golangci-lint",
+			expected:   "00000000001709321234:golangci-lint",
 		},
 		{
 			name:       "binary with hyphen",
 			timestamp:  1709321234,
 			binaryName: "my-binary",
-			expected:   "1709321234:my-binary",
+			expected:   "00000000001709321234:my-binary",
 		},
 		{
 			name:       "binary with dot",
 			timestamp:  1709321234,
 			binaryName: "my.binary",
-			expected:   "1709321234:my.binary",
+			expected:   "00000000001709321234:my.binary",
 		},
 		{
 			name:       "zero timestamp",
 			timestamp:  0,
 			binaryName: "test",
-			expected:   "0:test",
+			expected:   "00000000000000000000:test",
 		},
 		{
 			name:       "empty binary name",
 			timestamp:  1709321234,
 			binaryName: "",
-			expected:   "1709321234:",
+			expected:   "00000000001709321234:",
 		},
 	}
 
@@ -679,28 +679,28 @@ func TestParseKey(t *testing.T) {
 	}{
 		{
 			name:               "valid key",
-			key:                "1709321234:golangci-lint",
+			key:                "00000000001709321234:golangci-lint",
 			expectedTimestamp:  1709321234,
 			expectedBinaryName: "golangci-lint",
 			expectedErr:        false,
 		},
 		{
 			name:               "binary with hyphen",
-			key:                "1709321234:my-binary",
+			key:                "00000000001709321234:my-binary",
 			expectedTimestamp:  1709321234,
 			expectedBinaryName: "my-binary",
 			expectedErr:        false,
 		},
 		{
 			name:               "multiple colons in binary name",
-			key:                "1709321234:my:binary:name",
+			key:                "00000000001709321234:my:binary:name",
 			expectedTimestamp:  1709321234,
 			expectedBinaryName: "my:binary:name",
 			expectedErr:        false,
 		},
 		{
 			name:        "missing colon",
-			key:         "1709321234",
+			key:         "00000001709321234",
 			expectedErr: true,
 		},
 		{
@@ -715,7 +715,7 @@ func TestParseKey(t *testing.T) {
 		},
 		{
 			name:        "empty binary name",
-			key:         "1709321234:",
+			key:         "00000000001709321234:",
 			expectedErr: true,
 		},
 	}

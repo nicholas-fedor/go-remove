@@ -51,6 +51,7 @@ const (
 	testTimestamp   = int64(1709321234)
 	testTrashPath   = "/tmp/trash/test-binary"
 	testOriginalDir = "/usr/local/bin"
+	testVCSTime     = "2026-01-15T10:30:00Z"
 )
 
 // StorageIntegrationTestSuite provides integration tests for the storage Storer interface.
@@ -88,6 +89,8 @@ func (s *StorageIntegrationTestSuite) createHistoryRecord(
 	binaryName string,
 	trashAvailable bool,
 ) storage.HistoryRecord {
+	vcsTime, _ := time.Parse(time.RFC3339, testVCSTime)
+
 	return storage.HistoryRecord{
 		Timestamp:      timestamp,
 		BinaryName:     binaryName,
@@ -96,7 +99,7 @@ func (s *StorageIntegrationTestSuite) createHistoryRecord(
 		ModulePath:     testModulePath,
 		Version:        testVersion,
 		VCSRevision:    testVCSRevision,
-		VCSTime:        time.Now(),
+		VCSTime:        vcsTime,
 		GoVersion:      testGoVersion,
 		BuildInfo:      `{"path":"github.com/test/` + binaryName + `","version":"v1.0.0"}`,
 		Checksum:       testChecksum,
@@ -836,6 +839,7 @@ func (s *StorageIntegrationTestSuite) TestMultipleSequentialOperations() {
 func TestHistoryRecordFields(t *testing.T) {
 	t.Parallel()
 
+	vcsTime, _ := time.Parse(time.RFC3339, testVCSTime)
 	record := storage.HistoryRecord{
 		Timestamp:      testTimestamp,
 		BinaryName:     testBinaryName,
@@ -844,7 +848,7 @@ func TestHistoryRecordFields(t *testing.T) {
 		ModulePath:     testModulePath,
 		Version:        testVersion,
 		VCSRevision:    testVCSRevision,
-		VCSTime:        time.Now(),
+		VCSTime:        vcsTime,
 		GoVersion:      testGoVersion,
 		BuildInfo:      `{"test":"data"}`,
 		Checksum:       testChecksum,

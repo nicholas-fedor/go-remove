@@ -121,6 +121,7 @@ benchmark:
 .PHONY: build
 build:
 	@echo "Building $(BINARY_NAME)..."
+	@mkdir -p $(dir $(BINARY_PATH))
 	$(GO) build $(GO_BUILD_FLAGS) -o $(BINARY_PATH) $(MAIN_PACKAGE)
 
 # Install the binary to $GOPATH/bin
