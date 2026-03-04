@@ -28,6 +28,9 @@ jobs:
       packages: write
       attestations: write
       id-token: write
+    secrets:
+      GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
 
   Update-Go-Docs:
     uses: ./.github/workflows/update-go-docs.yaml
