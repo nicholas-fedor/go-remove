@@ -242,6 +242,13 @@ func parseTrashInfo(content string) (originalPath string, deletionTime time.Time
 	return originalPath, deletionTime, nil
 }
 
+// generateUniqueName creates a unique name for the trash entry.
+func generateUniqueName(base string) string {
+	timestamp := time.Now().Unix()
+
+	return fmt.Sprintf("%s_%d", base, timestamp)
+}
+
 // splitLines splits a string into lines, handling various line endings.
 func splitLines(s string) []string {
 	var (

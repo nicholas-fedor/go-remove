@@ -68,8 +68,8 @@ func TestNewBadgerStore(t *testing.T) {
 	})
 
 	t.Run("fails with invalid path", func(t *testing.T) {
-		// Try to create store in a path that cannot be created
-		_, err := NewBadgerStore("/nonexistent/path/that/cannot/be/created/test.db")
+		// Try to create store with an empty path, which is invalid on all platforms
+		_, err := NewBadgerStore("")
 		assert.Error(t, err)
 	})
 }

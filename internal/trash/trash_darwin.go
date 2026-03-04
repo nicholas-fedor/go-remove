@@ -1,4 +1,4 @@
-//go:build linux
+//go:build darwin
 
 /*
 Copyright © 2026 Nicholas Fedor <nick@nickfedor.com>
@@ -26,21 +26,21 @@ const (
 	filePermission = 0o600
 )
 
-// linuxTrasher implements Trasher for Linux using XDG Trash specification.
-type linuxTrasher struct {
+// darwinTrasher implements Trasher for Darwin (macOS) using XDG Trash specification.
+type darwinTrasher struct {
 	trashPath string
 	filesDir  string
 	infoDir   string
 }
 
-// newTrasher creates a new Linux-specific trash manager.
+// newTrasher creates a new Darwin-specific trash manager.
 func newTrasher() (Trasher, error) {
 	trashPath := getXDGTrashPath()
 	if trashPath == "" {
 		return nil, fmt.Errorf("%w: could not determine trash path", ErrTrashFull)
 	}
 
-	trasher := &linuxTrasher{
+	trasher := &darwinTrasher{
 		trashPath: trashPath,
 		filesDir:  filepath.Join(trashPath, "files"),
 		infoDir:   filepath.Join(trashPath, "info"),
@@ -60,7 +60,7 @@ func newTrasher() (Trasher, error) {
 
 // MoveToTrash moves a file to the XDG trash directory.
 // Returns the path to the file in trash.
-func (t *linuxTrasher) MoveToTrash(ctx context.Context, filePath string) (string, error) {
+func (t *darwinTrasher) MoveToTrash(ctx context.Context, filePath string) (string, error) {
 	if ctx.Err() != nil {
 		return "", fmt.Errorf("context cancelled: %w", ctx.Err())
 	}
@@ -127,7 +127,7 @@ func (t *linuxTrasher) MoveToTrash(ctx context.Context, filePath string) (string
 }
 
 // RestoreFromTrash restores a file from trash to its original location.
-func (t *linuxTrasher) RestoreFromTrash(ctx context.Context, trashPath, originalPath string) error {
+func (t *darwinTrasher) RestoreFromTrash(ctx context.Context, trashPath, originalPath string) error {
 	if ctx.Err() != nil {
 		return fmt.Errorf("context cancelled: %w", ctx.Err())
 	}
@@ -169,7 +169,7 @@ func (t *linuxTrasher) RestoreFromTrash(ctx context.Context, trashPath, original
 }
 
 // IsInTrash checks if a file exists in trash.
-func (t *linuxTrasher) IsInTrash(trashPath string) bool {
+func (t *darwinTrasher) IsInTrash(trashPath string) bool {
 	_, err := os.Stat(trashPath)
 	if err != nil {
 		return false
@@ -191,7 +191,7 @@ func (t *linuxTrasher) IsInTrash(trashPath string) bool {
 }
 
 // ListTrash returns all entries in trash.
-func (t *linuxTrasher) ListTrash() ([]TrashEntry, error) {
+func (t *darwinTrasher) ListTrash() ([]TrashEntry, error) {
 	entries, err := os.ReadDir(t.filesDir)
 	if err != nil {
 		return nil, fmt.Errorf("reading trash directory: %w", err)
@@ -222,7 +222,7 @@ func (t *linuxTrasher) ListTrash() ([]TrashEntry, error) {
 }
 
 // DeletePermanently removes a file from trash permanently.
-func (t *linuxTrasher) DeletePermanently(ctx context.Context, trashPath string) error {
+func (t *darwinTrasher) DeletePermanently(ctx context.Context, trashPath string) error {
 	if ctx.Err() != nil {
 		return fmt.Errorf("context cancelled: %w", ctx.Err())
 	}
@@ -244,19 +244,19 @@ func (t *linuxTrasher) DeletePermanently(ctx context.Context, trashPath string) 
 }
 
 // GetTrashPath returns the XDG trash files directory path.
-func (t *linuxTrasher) GetTrashPath() string {
+func (t *darwinTrasher) GetTrashPath() string {
 	return t.filesDir
 }
 
 // getInfoPath returns the path to the trashinfo file for a given trash file.
-func (t *linuxTrasher) getInfoPath(trashPath string) string {
+func (t *darwinTrasher) getInfoPath(trashPath string) string {
 	baseName := filepath.Base(trashPath)
 
 	return filepath.Join(t.infoDir, baseName+".trashinfo")
 }
 
 // readTrashInfo reads and parses a trashinfo file.
-func (t *linuxTrasher) readTrashInfo(infoPath string) (string, time.Time, error) {
+func (t *darwinTrasher) readTrashInfo(infoPath string) (string, time.Time, error) {
 	content, err := os.ReadFile(infoPath)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("reading trashinfo file: %w", err)
@@ -268,7 +268,7 @@ func (t *linuxTrasher) readTrashInfo(infoPath string) (string, time.Time, error)
 // moveFile moves a file or directory to trash, handling cross-device moves.
 //
 //nolint:unparam // info parameter is kept for API consistency
-func (t *linuxTrasher) moveFile(src, dst string, info os.FileInfo) error {
+func (t *darwinTrasher) moveFile(src, dst string, info os.FileInfo) error {
 	// Try simple rename first
 	err := os.Rename(src, dst)
 	if err == nil {
@@ -280,7 +280,7 @@ func (t *linuxTrasher) moveFile(src, dst string, info os.FileInfo) error {
 }
 
 // copyAndDelete copies a file or directory and then deletes the source.
-func (t *linuxTrasher) copyAndDelete(src, dst string) error {
+func (t *darwinTrasher) copyAndDelete(src, dst string) error {
 	srcInfo, err := os.Lstat(src)
 	if err != nil {
 		return fmt.Errorf("stating source: %w", err)
@@ -322,7 +322,7 @@ func (t *linuxTrasher) copyAndDelete(src, dst string) error {
 }
 
 // copyFile copies a single file.
-func (t *linuxTrasher) copyFile(src, dst string, srcInfo os.FileInfo) error {
+func (t *darwinTrasher) copyFile(src, dst string, srcInfo os.FileInfo) error {
 	srcFile, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("opening source file: %w", err)
@@ -358,7 +358,7 @@ func (t *linuxTrasher) copyFile(src, dst string, srcInfo os.FileInfo) error {
 }
 
 // copyDir recursively copies a directory.
-func (t *linuxTrasher) copyDir(src, dst string) error {
+func (t *darwinTrasher) copyDir(src, dst string) error {
 	// Use Lstat to avoid following symlinks when checking source
 	srcInfo, err := os.Lstat(src)
 	if err != nil {
