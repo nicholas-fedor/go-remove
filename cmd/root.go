@@ -51,6 +51,9 @@ var (
 
 	// ErrRestoreCollision indicates a file already exists at the restore location.
 	ErrRestoreCollisionCLI = errors.New("a file already exists at the restore location")
+
+	// ErrNoWritableStorage indicates no writable directory was found for storage.
+	ErrNoWritableStorage = errors.New("no writable directory found for storage")
 )
 
 // dirPermissions defines the permissions for creating directories.
@@ -61,45 +64,116 @@ const dirPermissions = 0o750
 //   - Linux: $XDG_DATA_HOME/go-remove/history.badger or ~/.local/share/go-remove/history.badger
 //   - macOS: ~/Library/Application Support/go-remove/history.badger
 //   - Windows: %LOCALAPPDATA%/go-remove/history.badger
-func getStoragePath() string {
-	var dataHome string
+//
+// The function attempts os.UserHomeDir() first, then falls back to os.Executable().
+// It verifies that the chosen directory is writable before returning.
+// Returns an error if no writable directory can be found.
+func getStoragePath() (string, error) {
+	// Try to get a writable data home directory
+	dataHome, err := getWritableDataHome()
+	if err != nil {
+		return "", fmt.Errorf("finding writable storage directory: %w", err)
+	}
+
+	return filepath.Join(dataHome, "go-remove", "history.badger"), nil
+}
+
+// getWritableDataHome attempts to find a writable directory for storing data.
+// It tries platform-specific paths first, then falls back to user home directory
+// and executable directory.
+// Returns an error if no writable directory can be found.
+func getWritableDataHome() (string, error) {
+	// Try platform-specific paths first
+	candidates := getPlatformDataHomeCandidates()
+
+	// Check each candidate for writability
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+
+		if isDirWritable(candidate) {
+			return candidate, nil
+		}
+	}
+
+	// Fallback: try user home directory
+	userHome, err := os.UserHomeDir()
+	if err == nil && isDirWritable(userHome) {
+		return userHome, nil
+	}
+
+	// Last resort: try executable directory
+	exePath, err := os.Executable()
+	if err == nil {
+		exeDir := filepath.Dir(exePath)
+		if isDirWritable(exeDir) {
+			return exeDir, nil
+		}
+	}
+
+	return "", ErrNoWritableStorage
+}
+
+// getPlatformDataHomeCandidates returns a list of potential data home directories
+// based on the current operating system.
+func getPlatformDataHomeCandidates() []string {
+	var candidates []string
 
 	switch runtime.GOOS {
 	case "windows":
-		dataHome = os.Getenv("LOCALAPPDATA")
-		if dataHome == "" {
-			dataHome = os.Getenv("USERPROFILE")
+		// Try LOCALAPPDATA first, then USERPROFILE
+		if dataHome := os.Getenv("LOCALAPPDATA"); dataHome != "" {
+			candidates = append(candidates, dataHome)
+		}
+
+		if userProfile := os.Getenv("USERPROFILE"); userProfile != "" {
+			candidates = append(candidates, userProfile)
 		}
 	case "darwin":
+		// Try ~/Library/Application Support
 		userHome, err := os.UserHomeDir()
 		if err == nil {
-			dataHome = filepath.Join(userHome, "Library", "Application Support")
+			candidates = append(
+				candidates,
+				filepath.Join(userHome, "Library", "Application Support"),
+			)
 		}
 	default: // Linux and other Unix-like systems
-		dataHome = os.Getenv("XDG_DATA_HOME")
-		if dataHome == "" {
-			userHome, err := os.UserHomeDir()
-			if err == nil {
-				dataHome = filepath.Join(userHome, ".local", "share")
-			}
+		// Try $XDG_DATA_HOME first, then ~/.local/share
+		if dataHome := os.Getenv("XDG_DATA_HOME"); dataHome != "" {
+			candidates = append(candidates, dataHome)
 		}
-	}
 
-	if dataHome == "" {
-		// Fallback to executable directory for a stable location
-		exePath, err := os.Executable()
+		userHome, err := os.UserHomeDir()
 		if err == nil {
-			dataHome = filepath.Dir(exePath)
-		} else {
-			// Last resort: use user's home directory
-			userHome, err := os.UserHomeDir()
-			if err == nil {
-				dataHome = userHome
-			}
+			candidates = append(candidates, filepath.Join(userHome, ".local", "share"))
 		}
 	}
 
-	return filepath.Join(dataHome, "go-remove", "history.badger")
+	return candidates
+}
+
+// isDirWritable checks if a directory is writable by attempting to create
+// a temporary file in it.
+func isDirWritable(dir string) bool {
+	// Create the directory if it doesn't exist
+	if err := os.MkdirAll(dir, dirPermissions); err != nil {
+		return false
+	}
+
+	// Try to create a temporary file to verify writability
+	tmpFile, err := os.CreateTemp(dir, ".write_test_*")
+	if err != nil {
+		return false
+	}
+
+	// Clean up the temporary file
+	_ = tmpFile.Close()
+	//nolint:gosec // tmpFile was created by CreateTemp in this function, safe to remove
+	_ = os.Remove(tmpFile.Name())
+
+	return true
 }
 
 // initHistoryManager creates and initializes a history manager with all dependencies.
@@ -118,7 +192,10 @@ func initHistoryManager(log logger.Logger) (history.Manager, error) {
 	}
 
 	// Create storage
-	dbPath := getStoragePath()
+	dbPath, err := getStoragePath()
+	if err != nil {
+		return nil, fmt.Errorf("determining storage path: %w", err)
+	}
 
 	// Ensure directory exists
 	if err := os.MkdirAll(filepath.Dir(dbPath), dirPermissions); err != nil {

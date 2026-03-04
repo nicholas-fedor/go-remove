@@ -67,10 +67,13 @@ func TestRootCommand(t *testing.T) {
 
 // TestGetStoragePath verifies the storage path calculation.
 func TestGetStoragePath(t *testing.T) {
-	// This test verifies that getStoragePath returns a non-empty string.
+	// This test verifies that getStoragePath returns a non-empty string and no error.
 	// The actual path depends on environment variables, so we just verify
 	// it doesn't return empty or panic.
-	path := getStoragePath()
+	path, err := getStoragePath()
+	if err != nil {
+		t.Errorf("getStoragePath() returned error: %v", err)
+	}
 
 	if path == "" {
 		t.Error("getStoragePath() returned empty string")

@@ -359,7 +359,8 @@ func (t *linuxTrasher) copyFile(src, dst string, srcInfo os.FileInfo) error {
 
 // copyDir recursively copies a directory.
 func (t *linuxTrasher) copyDir(src, dst string) error {
-	srcInfo, err := os.Stat(src)
+	// Use Lstat to avoid following symlinks when checking source
+	srcInfo, err := os.Lstat(src)
 	if err != nil {
 		return fmt.Errorf("stating source directory: %w", err)
 	}
@@ -377,12 +378,27 @@ func (t *linuxTrasher) copyDir(src, dst string) error {
 		srcPath := filepath.Join(src, entry.Name())
 		dstPath := filepath.Join(dst, entry.Name())
 
-		info, err := entry.Info()
+		// Use Lstat to detect symlinks without following them
+		info, err := os.Lstat(srcPath)
 		if err != nil {
 			return fmt.Errorf("getting entry info: %w", err)
 		}
 
-		if entry.IsDir() {
+		// Handle symlinks specially to preserve them
+		if info.Mode()&os.ModeSymlink != 0 {
+			linkTarget, err := os.Readlink(srcPath)
+			if err != nil {
+				return fmt.Errorf("reading symlink: %w", err)
+			}
+
+			if err := os.Symlink(linkTarget, dstPath); err != nil {
+				return fmt.Errorf("creating symlink: %w", err)
+			}
+
+			continue
+		}
+
+		if info.IsDir() {
 			if err := t.copyDir(srcPath, dstPath); err != nil {
 				return err
 			}

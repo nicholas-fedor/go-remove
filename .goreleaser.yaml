@@ -27,6 +27,8 @@ builds:
         goarch: "386"
       - goos: darwin
         goarch: arm
+      - goos: darwin
+        goarch: riscv64
 
 archives:
   - name_template: >-
