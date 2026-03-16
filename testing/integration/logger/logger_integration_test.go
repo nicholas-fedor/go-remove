@@ -436,9 +436,7 @@ func (s *LoggerIntegrationTestSuite) TestConcurrentLevelChanges() {
 
 	// Concurrent logging
 	for range 50 {
-
 		wg.Go(func() {
-
 			event := s.mockLogger.Info()
 			s.NotNil(event)
 		})
@@ -446,9 +444,7 @@ func (s *LoggerIntegrationTestSuite) TestConcurrentLevelChanges() {
 
 	// Concurrent level changes
 	for range 50 {
-
 		wg.Go(func() {
-
 			s.mockLogger.Level(zerolog.DebugLevel)
 		})
 	}
