@@ -209,10 +209,10 @@ func parseTrashInfo(content string) (originalPath string, deletionTime time.Time
 		lines := splitLines(content)
 
 		for _, line := range lines {
-			if strings.HasPrefix(line, "Path=") {
-				pathLine = strings.TrimPrefix(line, "Path=")
-			} else if strings.HasPrefix(line, "DeletionDate=") {
-				timeLine = strings.TrimPrefix(line, "DeletionDate=")
+			if after, ok := strings.CutPrefix(line, "Path="); ok {
+				pathLine = after
+			} else if after, ok := strings.CutPrefix(line, "DeletionDate="); ok {
+				timeLine = after
 			}
 		}
 	}
