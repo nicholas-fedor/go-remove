@@ -384,35 +384,25 @@ func (s *LoggerIntegrationTestSuite) TestConcurrentLogging() {
 
 	// Launch concurrent goroutines for each log level
 	for range 50 {
-		wg.Add(4)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			event := s.mockLogger.Debug()
 			s.NotNil(event)
-		}()
+		})
 
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			event := s.mockLogger.Info()
 			s.NotNil(event)
-		}()
+		})
 
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			event := s.mockLogger.Warn()
 			s.NotNil(event)
-		}()
+		})
 
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			event := s.mockLogger.Error()
 			s.NotNil(event)
-		}()
+		})
 	}
 
 	// Wait for all goroutines to complete
