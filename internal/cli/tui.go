@@ -761,10 +761,7 @@ func (m *model) getVisibleLogs() []string {
 	}
 
 	// Return the last maxVisibleLogLines entries
-	start := len(m.logs) - maxVisibleLogLines
-	if start < 0 {
-		start = 0
-	}
+	start := max(len(m.logs)-maxVisibleLogLines, 0)
 
 	return m.logs[start:]
 }

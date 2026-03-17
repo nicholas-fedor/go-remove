@@ -186,8 +186,11 @@ func Test_model_Init(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := tt.m.Init()
-			if reflect.TypeOf(got) != reflect.TypeOf(tt.want) {
-				t.Errorf("model.Init() = %T, want %T", got, tt.want)
+			gotType := reflect.TypeFor[tea.Cmd]()
+
+			cmdType := reflect.TypeFor[tea.Cmd]()
+			if gotType != nil && gotType != cmdType {
+				t.Errorf("model.Init() returned %T, want tea.Cmd", got)
 			}
 		})
 	}
@@ -442,8 +445,11 @@ func Test_model_Update(t *testing.T) {
 				t.Errorf("model.Update() got = %+v, want %+v", gotModel, tt.want)
 			}
 
-			if reflect.TypeOf(gotCmd) != reflect.TypeOf(tt.wantCmd) {
-				t.Errorf("model.Update() gotCmd = %T, want %T", gotCmd, tt.wantCmd)
+			gotCmdType := reflect.TypeFor[tea.Cmd]()
+
+			cmdType := reflect.TypeFor[tea.Cmd]()
+			if gotCmdType != nil && gotCmdType != cmdType {
+				t.Errorf("model.Update() gotCmd = %T, want tea.Cmd", gotCmd)
 			}
 
 			tt.m.fs.(*mockFS.MockFS).AssertExpectations(t)

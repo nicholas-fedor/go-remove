@@ -170,7 +170,7 @@ func isDirWritable(dir string) bool {
 
 	// Clean up the temporary file
 	_ = tmpFile.Close()
-	//nolint:gosec // tmpFile was created by CreateTemp in this function, safe to remove
+
 	_ = os.Remove(tmpFile.Name())
 
 	return true
