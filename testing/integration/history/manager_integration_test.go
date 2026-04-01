@@ -13,6 +13,7 @@ package history_test
 import (
 	"context"
 	"errors"
+	"io"
 	"testing"
 	"time"
 
@@ -95,15 +96,14 @@ func (s *ManagerIntegrationTestSuite) SetupTest() {
 // This allows the manager to log as needed without requiring explicit expectations
 // in every test case.
 func (s *ManagerIntegrationTestSuite) setupLoggerExpectations() {
-	// Create a properly initialized zerolog event
-	// We need to use a real logger to get valid events
-	logger := zerolog.New(nil).With().Logger()
+	// Use RunAndReturn to create a new event on each call, since
+	// zerolog events are consumed after Msg/Msgf and cannot be reused.
+	zl := zerolog.New(io.Discard).With().Logger()
 
-	// Allow any logging calls and return a valid event from the logger
-	s.logger.EXPECT().Debug().Return(logger.Debug()).Maybe()
-	s.logger.EXPECT().Info().Return(logger.Info()).Maybe()
-	s.logger.EXPECT().Warn().Return(logger.Warn()).Maybe()
-	s.logger.EXPECT().Error().Return(logger.Error()).Maybe()
+	s.logger.EXPECT().Debug().RunAndReturn(zl.Debug).Maybe()
+	s.logger.EXPECT().Info().RunAndReturn(zl.Info).Maybe()
+	s.logger.EXPECT().Warn().RunAndReturn(zl.Warn).Maybe()
+	s.logger.EXPECT().Error().RunAndReturn(zl.Error).Maybe()
 }
 
 // createBuildInfoData creates a standard BuildInfoData for testing.
@@ -969,9 +969,12 @@ func TestRecordDeletionWithVCSTimeParsing(t *testing.T) {
 	mockLogger := loggermocks.NewMockLogger(t)
 
 	// Setup logger expectations with a valid logger
-	logger := zerolog.New(nil).With().Logger()
-	mockLogger.EXPECT().Debug().Return(logger.Debug()).Maybe()
-	mockLogger.EXPECT().Info().Return(logger.Info()).Maybe()
+	// Use RunAndReturn to create a new event on each call, since
+	// zerolog events are consumed after Msg/Msgf and cannot be reused.
+	zl := zerolog.New(io.Discard).With().Logger()
+
+	mockLogger.EXPECT().Debug().RunAndReturn(zl.Debug).Maybe()
+	mockLogger.EXPECT().Info().RunAndReturn(zl.Info).Maybe()
 
 	mockExtractor.EXPECT().
 		Extract(mock.Anything, testBinaryPath).
@@ -1023,9 +1026,12 @@ func TestRestoreResultFields(t *testing.T) {
 	mockLogger := loggermocks.NewMockLogger(t)
 
 	// Setup logger expectations with a valid logger
-	logger := zerolog.New(nil).With().Logger()
-	mockLogger.EXPECT().Debug().Return(logger.Debug()).Maybe()
-	mockLogger.EXPECT().Info().Return(logger.Info()).Maybe()
+	// Use RunAndReturn to create a new event on each call, since
+	// zerolog events are consumed after Msg/Msgf and cannot be reused.
+	zl := zerolog.New(io.Discard).With().Logger()
+
+	mockLogger.EXPECT().Debug().RunAndReturn(zl.Debug).Maybe()
+	mockLogger.EXPECT().Info().RunAndReturn(zl.Info).Maybe()
 
 	entryID := history.GenerateKey(record.Timestamp, record.BinaryName)
 
@@ -1077,8 +1083,11 @@ func TestGetHistoryEmpty(t *testing.T) {
 	mockLogger := loggermocks.NewMockLogger(t)
 
 	// Setup logger expectations with a valid logger
-	logger := zerolog.New(nil).With().Logger()
-	mockLogger.EXPECT().Debug().Return(logger.Debug()).Maybe()
+	// Use RunAndReturn to create a new event on each call, since
+	// zerolog events are consumed after Msg/Msgf and cannot be reused.
+	zl := zerolog.New(io.Discard).With().Logger()
+
+	mockLogger.EXPECT().Debug().RunAndReturn(zl.Debug).Maybe()
 
 	mockStorer.EXPECT().
 		ListRecords(mock.Anything, storage.ListOptions{Limit: 10}).
@@ -1114,9 +1123,12 @@ func TestDeletePermanentlyTrashDeleteFailureIgnored(t *testing.T) {
 	mockLogger := loggermocks.NewMockLogger(t)
 
 	// Setup logger expectations with a valid logger
-	logger := zerolog.New(nil).With().Logger()
-	mockLogger.EXPECT().Debug().Return(logger.Debug()).Maybe()
-	mockLogger.EXPECT().Info().Return(logger.Info()).Maybe()
+	// Use RunAndReturn to create a new event on each call, since
+	// zerolog events are consumed after Msg/Msgf and cannot be reused.
+	zl := zerolog.New(io.Discard).With().Logger()
+
+	mockLogger.EXPECT().Debug().RunAndReturn(zl.Debug).Maybe()
+	mockLogger.EXPECT().Info().RunAndReturn(zl.Info).Maybe()
 
 	entryID := history.GenerateKey(record.Timestamp, record.BinaryName)
 
@@ -1154,8 +1166,11 @@ func TestCloseFailure(t *testing.T) {
 	mockLogger := loggermocks.NewMockLogger(t)
 
 	// Setup logger expectations with a valid logger
-	logger := zerolog.New(nil).With().Logger()
-	mockLogger.EXPECT().Debug().Return(logger.Debug()).Maybe()
+	// Use RunAndReturn to create a new event on each call, since
+	// zerolog events are consumed after Msg/Msgf and cannot be reused.
+	zl := zerolog.New(io.Discard).With().Logger()
+
+	mockLogger.EXPECT().Debug().RunAndReturn(zl.Debug).Maybe()
 
 	mockStorer.EXPECT().
 		Close().
@@ -1188,9 +1203,12 @@ func TestClearEntryNotInTrash(t *testing.T) {
 	mockLogger := loggermocks.NewMockLogger(t)
 
 	// Setup logger expectations with a valid logger
-	logger := zerolog.New(nil).With().Logger()
-	mockLogger.EXPECT().Debug().Return(logger.Debug()).Maybe()
-	mockLogger.EXPECT().Info().Return(logger.Info()).Maybe()
+	// Use RunAndReturn to create a new event on each call, since
+	// zerolog events are consumed after Msg/Msgf and cannot be reused.
+	zl := zerolog.New(io.Discard).With().Logger()
+
+	mockLogger.EXPECT().Debug().RunAndReturn(zl.Debug).Maybe()
+	mockLogger.EXPECT().Info().RunAndReturn(zl.Info).Maybe()
 
 	entryID := history.GenerateKey(record.Timestamp, record.BinaryName)
 
