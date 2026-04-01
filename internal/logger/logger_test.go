@@ -7,6 +7,7 @@ package logger
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -151,7 +152,7 @@ func TestZerologLogger_Sync(t *testing.T) {
 		{
 			name: "sync with valid logger",
 			setup: func() *ZerologLogger {
-				zl := zerolog.New(nil).With().Logger()
+				zl := zerolog.New(io.Discard).With().Logger()
 
 				return &ZerologLogger{logger: zl}
 			},
@@ -302,7 +303,7 @@ func TestParseLevel(t *testing.T) {
 
 // BenchmarkZerologLogger_Debug benchmarks the Debug method.
 func BenchmarkZerologLogger_Debug(b *testing.B) {
-	zl := zerolog.New(nil).With().Logger()
+	zl := zerolog.New(io.Discard).With().Logger()
 	logger := &ZerologLogger{logger: zl}
 
 	b.ResetTimer()
@@ -314,7 +315,7 @@ func BenchmarkZerologLogger_Debug(b *testing.B) {
 
 // BenchmarkZerologLogger_Info benchmarks the Info method.
 func BenchmarkZerologLogger_Info(b *testing.B) {
-	zl := zerolog.New(nil).With().Logger()
+	zl := zerolog.New(io.Discard).With().Logger()
 	logger := &ZerologLogger{logger: zl}
 
 	b.ResetTimer()

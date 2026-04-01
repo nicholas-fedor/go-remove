@@ -6,6 +6,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 package fs
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -248,10 +249,13 @@ func TestRealFS_RemoveBinary(t *testing.T) {
 					t.Helper()
 
 					// Create mock with expectations for verbose logging.
+					// Use RunAndReturn to create a new event on each call, since
+					// zerolog events are consumed after Msg/Msgf and cannot be reused.
 					log := mocks.NewMockLogger(t)
-					zl := zerolog.New(nil).With().Logger()
-					log.On("Debug").Return(zl.Debug())
-					log.On("Info").Return(zl.Info())
+					zl := zerolog.New(io.Discard).With().Logger()
+
+					log.EXPECT().Debug().RunAndReturn(zl.Debug).Maybe()
+					log.EXPECT().Info().RunAndReturn(zl.Info).Maybe()
 
 					return log
 				},
@@ -291,11 +295,12 @@ func TestRealFS_RemoveBinary(t *testing.T) {
 func TestRealFS_RemoveBinary_VerboseLogging(t *testing.T) {
 	log := mocks.NewMockLogger(t)
 
-	zl := zerolog.New(nil).With().Logger()
+	// Use RunAndReturn to create a new event on each call, since
+	// zerolog events are consumed after Msg/Msgf and cannot be reused.
+	zl := zerolog.New(io.Discard).With().Logger()
 
-	// Set up expectations for verbose logging calls.
-	log.On("Debug").Return(zl.Debug())
-	log.On("Info").Return(zl.Info())
+	log.EXPECT().Debug().RunAndReturn(zl.Debug).Maybe()
+	log.EXPECT().Info().RunAndReturn(zl.Info).Maybe()
 
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "testbin")
