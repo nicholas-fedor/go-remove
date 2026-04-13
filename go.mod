@@ -3,7 +3,7 @@ module github.com/nicholas-fedor/go-remove
 go 1.26.2
 
 require (
-	charm.land/bubbletea/v2 v2.0.2
+	charm.land/bubbletea/v2 v2.0.3
 	charm.land/lipgloss/v2 v2.0.2
 	github.com/dgraph-io/badger/v4 v4.9.1
 	github.com/rs/zerolog v1.35.0
@@ -14,7 +14,7 @@ require (
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
-	github.com/charmbracelet/ultraviolet v0.0.0-20260413093707-31eb6d613d11 // indirect
+	github.com/charmbracelet/ultraviolet v0.0.0-20260413133134-73592393e1ad // indirect
 	github.com/charmbracelet/x/ansi v0.11.6 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
