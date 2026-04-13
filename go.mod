@@ -3,7 +3,7 @@ module github.com/nicholas-fedor/go-remove
 go 1.26.2
 
 require (
-	charm.land/bubbletea/v2 v2.0.2
+	charm.land/bubbletea/v2 v2.0.3
 	charm.land/lipgloss/v2 v2.0.2
 	github.com/dgraph-io/badger/v4 v4.9.1
 	github.com/rs/zerolog v1.35.0
