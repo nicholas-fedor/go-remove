@@ -25,13 +25,5 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Download actionlint
-        id: get_actionlint
-        run: bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
-        shell: bash
-
-      - name: Check workflow files
-        run: ${STEPS_GET_ACTIONLINT_OUTPUTS_EXECUTABLE} -color
-        shell: bash
-        env:
-          STEPS_GET_ACTIONLINT_OUTPUTS_EXECUTABLE: ${{ steps.get_actionlint.outputs.executable }}
+      - name: Run actionlint
+        uses: nicholas-fedor/actionlint-action@cfb3d059a17ba00c4b5717a9fa057fa434abb44f # v1.0.3
