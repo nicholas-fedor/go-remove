@@ -11,7 +11,6 @@ A CLI tool to safely remove Go binaries with undo and history support
 [![CircleCI](https://dl.circleci.com/status-badge/img/gh/nicholas-fedor/go-remove/tree/main.svg?style=shield)](https://dl.circleci.com/status-badge/redirect/gh/nicholas-fedor/go-remove/tree/main)
 [![Codecov](https://codecov.io/gh/nicholas-fedor/go-remove/branch/main/graph/badge.svg)](https://codecov.io/gh/nicholas-fedor/go-remove)
 [![GoDoc](https://godoc.org/github.com/nicholas-fedor/go-remove?status.svg)](https://godoc.org/github.com/nicholas-fedor/go-remove)
-[![Go Report Card](https://goreportcard.com/badge/github.com/nicholas-fedor/go-remove)](https://goreportcard.com/report/github.com/nicholas-fedor/go-remove)
 ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/nicholas-fedor/go-remove)
 [![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
