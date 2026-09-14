@@ -249,15 +249,6 @@ Comprehensive testing is **MANDATORY**. All tests must pass before submission.
 # Run all tests with race detection
 make test
 
-# Run unit tests only
-make test-unit
-
-# Run integration tests
-make test-integration
-
-# Run E2E tests
-make test-e2e
-
 # Generate coverage report
 make coverage
 

@@ -14,13 +14,13 @@ import (
 
 // getXDGTrashPath returns the XDG trash path for the current environment.
 //
-// It uses $XDG_DATA_HOME/Trash, falling back to ~/.local/share/Trash.
+// It uses $XDG_DATA_HOME/Trash when that value is an absolute path, otherwise ~/.local/share/Trash.
 //
 // Returns:
 //   - Absolute trash directory path, or empty if the home directory cannot be resolved.
 func getXDGTrashPath() string {
 	xdgDataHome := os.Getenv("XDG_DATA_HOME")
-	if xdgDataHome == "" {
+	if xdgDataHome == "" || !filepath.IsAbs(xdgDataHome) {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return ""

@@ -227,7 +227,7 @@ func NewLoggerWithCapture() (Logger, *captureWriter, error) {
 	consoleWriter := zerolog.ConsoleWriter{
 		Out:        captureWriter,
 		TimeFormat: time.RFC3339,
-		NoColor:    false,
+		NoColor:    true,
 	}
 
 	// Create the base logger with info level.
