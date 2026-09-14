@@ -20,49 +20,43 @@ var ErrInvalidKeyFormat = errors.New(
 // ErrEmptyBinaryName indicates the binary name in the key is empty.
 var ErrEmptyBinaryName = errors.New("empty binary name in key")
 
-// GenerateKey creates a composite key for Badger storage.
-// The key format is "<zero-padded-timestamp>:<binary_name>" (e.g., "00000001709321234:golangci-lint").
-// The timestamp is zero-padded to 20 digits to ensure lexicographic order equals chronological order.
-// This format enables chronological sorting via Badger's key ordering.
+// GenerateKey creates a composite Badger key.
+//
+// The key format is "<zero-padded-timestamp>:<binary_name>".
 //
 // Parameters:
-//   - timestamp: Unix timestamp (seconds since epoch)
-//   - binaryName: Name of the binary file
+//   - timestamp: Unix timestamp of the deletion.
+//   - binaryName: Name of the deleted binary.
 //
 // Returns:
-//   - A composite key string suitable for Badger storage
+//   - Composite storage key.
 func GenerateKey(timestamp int64, binaryName string) string {
 	return fmt.Sprintf("%020d:%s", timestamp, binaryName)
 }
 
-// ParseKey extracts timestamp and binary name from a key.
-// The key must be in the format "<timestamp>:<binary_name>".
+// ParseKey extracts the timestamp and binary name from a composite key.
 //
 // Parameters:
-//   - key: The composite key to parse
+//   - key: Composite storage key to parse.
 //
 // Returns:
-//   - timestamp: The Unix timestamp extracted from the key
-//   - binaryName: The binary name extracted from the key
-//   - err: An error if the key format is invalid
-//
-//nolint:nonamedreturns // Named returns improve clarity for this function
-func ParseKey(key string) (timestamp int64, binaryName string, err error) {
-	//nolint:mnd // Split into 2 parts: timestamp and binary_name
-	parts := strings.SplitN(key, ":", 2)
-	//nolint:mnd // Expect exactly 2 parts
-	if len(parts) != 2 {
+//   - Unix timestamp encoded in the key.
+//   - Binary name encoded in the key.
+//   - An error if the key format is invalid.
+func ParseKey(key string) (int64, string, error) {
+	timestampPart, binaryName, ok := strings.Cut(key, ":")
+	if !ok {
 		return 0, "", fmt.Errorf("%w: got %q", ErrInvalidKeyFormat, key)
 	}
 
-	timestamp, err = strconv.ParseInt(parts[0], 10, 64)
+	timestamp, err := strconv.ParseInt(timestampPart, 10, 64)
 	if err != nil {
 		return 0, "", fmt.Errorf("invalid timestamp in key %q: %w", key, err)
 	}
 
-	if parts[1] == "" {
+	if binaryName == "" {
 		return 0, "", ErrEmptyBinaryName
 	}
 
-	return timestamp, parts[1], nil
+	return timestamp, binaryName, nil
 }

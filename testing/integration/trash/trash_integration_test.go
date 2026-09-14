@@ -108,7 +108,7 @@ func TestTrashIntegrationTestSuite(t *testing.T) {
 // 2. Returning the correct trash path
 // 3. Handling context properly.
 func (s *TrashIntegrationTestSuite) TestMoveToTrashWorkflow() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	s.mockTrasher.EXPECT().
 		MoveToTrash(mock.Anything, testFilePath).
@@ -125,7 +125,7 @@ func (s *TrashIntegrationTestSuite) TestMoveToTrashWorkflow() {
 //
 // An empty file path should return an error.
 func (s *TrashIntegrationTestSuite) TestMoveToTrashWithEmptyPath() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	s.mockTrasher.EXPECT().
 		MoveToTrash(mock.Anything, "").
@@ -142,7 +142,7 @@ func (s *TrashIntegrationTestSuite) TestMoveToTrashWithEmptyPath() {
 //
 // When the source file does not exist, MoveToTrash should return ErrPathNotFound.
 func (s *TrashIntegrationTestSuite) TestMoveToTrashPathNotFound() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 	nonExistentPath := "/non/existent/file"
 
 	s.mockTrasher.EXPECT().
@@ -160,7 +160,7 @@ func (s *TrashIntegrationTestSuite) TestMoveToTrashPathNotFound() {
 //
 // When the trash directory is full or inaccessible, MoveToTrash should return ErrTrashFull.
 func (s *TrashIntegrationTestSuite) TestMoveToTrashFull() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	s.mockTrasher.EXPECT().
 		MoveToTrash(mock.Anything, testFilePath).
@@ -180,7 +180,7 @@ func (s *TrashIntegrationTestSuite) TestMoveToTrashFull() {
 // 2. Validating the trash path
 // 3. Handling context properly.
 func (s *TrashIntegrationTestSuite) TestRestoreFromTrashWorkflow() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	s.mockTrasher.EXPECT().
 		RestoreFromTrash(mock.Anything, testTrashPath, testFilePath).
@@ -197,7 +197,7 @@ func (s *TrashIntegrationTestSuite) TestRestoreFromTrashWorkflow() {
 // When a file already exists at the restore location, RestoreFromTrash should
 // return ErrRestoreCollision.
 func (s *TrashIntegrationTestSuite) TestRestoreFromTrashCollision() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	s.mockTrasher.EXPECT().
 		RestoreFromTrash(mock.Anything, testTrashPath, testFilePath).
@@ -213,7 +213,7 @@ func (s *TrashIntegrationTestSuite) TestRestoreFromTrashCollision() {
 //
 // When the file is not in the trash, RestoreFromTrash should return ErrFileNotInTrash.
 func (s *TrashIntegrationTestSuite) TestRestoreFromTrashNotInTrash() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 	invalidTrashPath := "/not/in/trash/file"
 
 	s.mockTrasher.EXPECT().
@@ -345,7 +345,7 @@ func (s *TrashIntegrationTestSuite) TestListTrashError() {
 // 2. Removes the file permanently
 // 3. Cleans up associated metadata.
 func (s *TrashIntegrationTestSuite) TestDeletePermanentlyWorkflow() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	s.mockTrasher.EXPECT().
 		DeletePermanently(mock.Anything, testTrashPath).
@@ -362,7 +362,7 @@ func (s *TrashIntegrationTestSuite) TestDeletePermanentlyWorkflow() {
 // When attempting to delete a file that is not in trash, DeletePermanently
 // should return ErrFileNotInTrash.
 func (s *TrashIntegrationTestSuite) TestDeletePermanentlyNotInTrash() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 	outsidePath := "/home/user/documents/file.txt"
 
 	s.mockTrasher.EXPECT().
@@ -379,7 +379,7 @@ func (s *TrashIntegrationTestSuite) TestDeletePermanentlyNotInTrash() {
 //
 // An empty path should return an appropriate error.
 func (s *TrashIntegrationTestSuite) TestDeletePermanentlyWithEmptyPath() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	s.mockTrasher.EXPECT().
 		DeletePermanently(mock.Anything, "").
@@ -438,7 +438,7 @@ func (s *TrashIntegrationTestSuite) TestGetTrashPathWindows() {
 func (s *TrashIntegrationTestSuite) TestContextCancellation() {
 	// Test MoveToTrash with canceled context
 	s.Run("MoveToTrash", func() {
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(s.T().Context())
 		cancel() // Cancel immediately
 
 		s.mockTrasher.EXPECT().
@@ -452,7 +452,7 @@ func (s *TrashIntegrationTestSuite) TestContextCancellation() {
 
 	// Test RestoreFromTrash with canceled context
 	s.Run("RestoreFromTrash", func() {
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(s.T().Context())
 		cancel()
 
 		s.mockTrasher.EXPECT().
@@ -466,7 +466,7 @@ func (s *TrashIntegrationTestSuite) TestContextCancellation() {
 
 	// Test DeletePermanently with canceled context
 	s.Run("DeletePermanently", func() {
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(s.T().Context())
 		cancel()
 
 		s.mockTrasher.EXPECT().
@@ -484,7 +484,7 @@ func (s *TrashIntegrationTestSuite) TestContextCancellation() {
 // When the context times out during an operation, the operation should
 // return context.DeadlineExceeded.
 func (s *TrashIntegrationTestSuite) TestContextTimeout() {
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
+	ctx, cancel := context.WithTimeout(s.T().Context(), 1*time.Nanosecond)
 	defer cancel()
 
 	// Wait for context to expire
@@ -509,7 +509,7 @@ func (s *TrashIntegrationTestSuite) TestContextTimeout() {
 // 5. Verify file is no longer in trash
 // 6. Delete permanently (should fail since file was restored).
 func (s *TrashIntegrationTestSuite) TestFullTrashLifecycle() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 	now := time.Now()
 
 	// Step 1: Move file to trash
@@ -573,7 +573,7 @@ func (s *TrashIntegrationTestSuite) TestFullTrashLifecycle() {
 // This test ensures that errors from the underlying filesystem are wrapped
 // and returned correctly to the caller.
 func (s *TrashIntegrationTestSuite) TestErrorPropagation() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 	customError := errors.New("custom filesystem error")
 
 	s.Run("MoveToTrash error propagation", func() {
@@ -621,7 +621,7 @@ func (s *TrashIntegrationTestSuite) TestErrorPropagation() {
 //
 // This test uses table-driven testing to cover platform-specific scenarios.
 func (s *TrashIntegrationTestSuite) TestCrossPlatformMoveToTrash() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	tests := []struct {
 		name         string
@@ -698,7 +698,7 @@ func (s *TrashIntegrationTestSuite) TestTrashEntryCreation() {
 // This test simulates a realistic workflow of multiple trash operations
 // to ensure the trash layer behaves correctly across multiple calls.
 func (s *TrashIntegrationTestSuite) TestMultipleSequentialOperations() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 	now := time.Now()
 
 	files := []struct {
@@ -827,7 +827,7 @@ func TestTrasherInterface(t *testing.T) {
 func TestContextWithTimeout(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Nanosecond)
 	defer cancel()
 
 	// Wait for context to expire

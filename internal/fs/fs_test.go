@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
-	"sort"
+	"slices"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -19,6 +19,26 @@ import (
 	"github.com/nicholas-fedor/go-remove/internal/logger"
 	"github.com/nicholas-fedor/go-remove/internal/logger/mocks"
 )
+
+// writeGoBinary copies the current test executable to path so ListBinaries
+// can detect it as a real Go binary.
+func writeGoBinary(t *testing.T, path string) {
+	t.Helper()
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolving test executable: %v", err)
+	}
+
+	data, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatalf("reading test executable: %v", err)
+	}
+
+	if err := os.WriteFile(path, data, 0o755); err != nil {
+		t.Fatalf("writing go binary %s: %v", path, err)
+	}
+}
 
 // nopLogger creates a mock logger for testing.
 func nopLogger(t *testing.T) logger.Logger {
@@ -347,11 +367,11 @@ func TestRealFS_ListBinaries(t *testing.T) {
 					ext = windowsExt
 				}
 
-				os.WriteFile(filepath.Join(tmpDir, "tool2"+ext), []byte("test"), 0o755)
-				os.WriteFile(filepath.Join(tmpDir, "tool1"+ext), []byte("test"), 0o755)
+				writeGoBinary(t, filepath.Join(tmpDir, "tool2"+ext))
+				writeGoBinary(t, filepath.Join(tmpDir, "tool1"+ext))
 
 				if runtime.GOOS == windowsOS {
-					os.WriteFile(filepath.Join(tmpDir, "tool3.exe"), []byte("test"), 0o755)
+					writeGoBinary(t, filepath.Join(tmpDir, "tool3.exe"))
 				}
 
 				os.Mkdir(filepath.Join(tmpDir, "dir"), 0o755)
@@ -367,6 +387,33 @@ func TestRealFS_ListBinaries(t *testing.T) {
 			}(),
 		},
 		{
+			name: "filters non-go files",
+			r:    &RealFS{},
+			args: args{},
+			setup: func() string {
+				tmpDir := t.TempDir()
+
+				ext := ""
+				if runtime.GOOS == windowsOS {
+					ext = windowsExt
+				}
+
+				writeGoBinary(t, filepath.Join(tmpDir, "tool1"+ext))
+				os.WriteFile(filepath.Join(tmpDir, "gup.lock"), []byte("lock"), 0o644)
+				os.WriteFile(filepath.Join(tmpDir, "notes.txt"), []byte("text"), 0o644)
+				os.WriteFile(filepath.Join(tmpDir, "README"), []byte("docs"), 0o755)
+
+				return tmpDir
+			},
+			want: func() []string {
+				if runtime.GOOS == windowsOS {
+					return []string{"tool1.exe"}
+				}
+
+				return []string{"tool1"}
+			}(),
+		},
+		{
 			name: "empty dir",
 			r:    &RealFS{},
 			args: args{},
@@ -379,7 +426,7 @@ func TestRealFS_ListBinaries(t *testing.T) {
 			name: "non-existent dir",
 			r:    &RealFS{},
 			args: args{dir: "/nonexistent"},
-			want: []string{},
+			want: nil,
 		},
 	}
 	for _, tt := range tests {
@@ -392,9 +439,8 @@ func TestRealFS_ListBinaries(t *testing.T) {
 			got := tt.r.ListBinaries(tt.args.dir)
 
 			if tt.name == "list binaries" {
-				sortedGot := make([]string, len(got))
-				copy(sortedGot, got)
-				sort.Strings(sortedGot)
+				sortedGot := slices.Clone(got)
+				slices.Sort(sortedGot)
 				got = sortedGot
 			}
 

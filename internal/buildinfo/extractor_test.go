@@ -137,7 +137,7 @@ func TestDefaultExtractor_Extract(t *testing.T) {
 			t.Parallel()
 
 			binaryPath := tt.setup(t)
-			ctx := context.Background()
+			ctx := t.Context()
 
 			data, err := extractor.Extract(ctx, binaryPath)
 
@@ -172,7 +172,7 @@ func TestDefaultExtractor_Extract_ContextCancellation(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create cancelled context
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	_, err = extractor.Extract(ctx, testBinaryPath)
@@ -405,215 +405,6 @@ func TestDefaultExtractor_IsGoBinary(t *testing.T) {
 	}
 }
 
-// TestParseVersionType tests the ParseVersionType function.
-func TestParseVersionType(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		version  string
-		expected string
-	}{
-		{
-			name:     "semantic version v1.2.3",
-			version:  "v1.2.3",
-			expected: "semantic",
-		},
-		{
-			name:     "semantic version v0.0.1",
-			version:  "v0.0.1",
-			expected: "semantic",
-		},
-		{
-			name:     "semantic version with prerelease v1.0.0-alpha",
-			version:  "v1.0.0-alpha",
-			expected: "semantic", // Semver pre-release is not a Go pseudo-version
-		},
-		{
-			name:     "pseudo-version",
-			version:  "v0.0.0-20260302120000-abc123def456",
-			expected: "pseudo",
-		},
-		{
-			name:     "pseudo-version with module path",
-			version:  "v1.2.3-0.20260302120000-abc123def456",
-			expected: "pseudo",
-		},
-		{
-			name:     "development version",
-			version:  "(devel)",
-			expected: "devel",
-		},
-		{
-			name:     "empty string",
-			version:  "",
-			expected: "unknown",
-		},
-		{
-			name:     "random string",
-			version:  "not-a-version",
-			expected: "unknown",
-		},
-		{
-			name:     "version without v prefix",
-			version:  "1.2.3",
-			expected: "unknown",
-		},
-		{
-			name:     "v prefix only",
-			version:  "v",
-			expected: "unknown", // Single "v" is not a valid version
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			result := ParseVersionType(tt.version)
-			assert.Equal(t, tt.expected, result,
-				"ParseVersionType(%q) = %q, want %q", tt.version, result, tt.expected)
-		})
-	}
-}
-
-// TestBuildInfoData_IsReinstallable tests the IsReinstallable method.
-func TestBuildInfoData_IsReinstallable(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		data     BuildInfoData
-		expected bool
-	}{
-		{
-			name: "has module path and vcs revision",
-			data: BuildInfoData{
-				ModulePath:  "github.com/user/repo",
-				VCSRevision: "abc123def456",
-			},
-			expected: true,
-		},
-		{
-			name: "missing module path",
-			data: BuildInfoData{
-				ModulePath:  "",
-				VCSRevision: "abc123def456",
-			},
-			expected: false,
-		},
-		{
-			name: "missing vcs revision",
-			data: BuildInfoData{
-				ModulePath:  "github.com/user/repo",
-				VCSRevision: "",
-			},
-			expected: false,
-		},
-		{
-			name: "both fields empty",
-			data: BuildInfoData{
-				ModulePath:  "",
-				VCSRevision: "",
-			},
-			expected: false,
-		},
-		{
-			name: "has version but no vcs revision",
-			data: BuildInfoData{
-				ModulePath:  "github.com/user/repo",
-				Version:     "v1.0.0",
-				VCSRevision: "",
-			},
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			result := tt.data.IsReinstallable()
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-// TestBuildInfoData_GetInstallCommand tests the GetInstallCommand method.
-func TestBuildInfoData_GetInstallCommand(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		data     BuildInfoData
-		expected string
-	}{
-		{
-			name: "install with tagged version (preferred over revision)",
-			data: BuildInfoData{
-				ModulePath:  "github.com/user/repo",
-				VCSRevision: "abc123def456",
-				Version:     "v1.0.0",
-			},
-			expected: "go install github.com/user/repo@v1.0.0",
-		},
-		{
-			name: "install with vcs revision when no tagged version",
-			data: BuildInfoData{
-				ModulePath:  "github.com/user/repo",
-				VCSRevision: "abc123def456",
-				Version:     "",
-			},
-			expected: "go install github.com/user/repo@abc123def456",
-		},
-		{
-			name: "install with vcs revision when devel version",
-			data: BuildInfoData{
-				ModulePath:  "github.com/user/repo",
-				VCSRevision: "abc123def456",
-				Version:     "(devel)",
-			},
-			expected: "go install github.com/user/repo@abc123def456",
-		},
-		{
-			name: "install at latest when only module path available",
-			data: BuildInfoData{
-				ModulePath:  "github.com/user/repo",
-				VCSRevision: "",
-				Version:     "",
-			},
-			expected: "go install github.com/user/repo@latest",
-		},
-		{
-			name: "not reinstallable - missing module path",
-			data: BuildInfoData{
-				ModulePath:  "",
-				VCSRevision: "abc123def456",
-				Version:     "v1.0.0",
-			},
-			expected: "",
-		},
-		{
-			name: "not reinstallable - all fields empty",
-			data: BuildInfoData{
-				ModulePath:  "",
-				VCSRevision: "",
-				Version:     "",
-			},
-			expected: "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			result := tt.data.GetInstallCommand()
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 // TestErrors tests the exported error variables.
 func TestErrors(t *testing.T) {
 	t.Parallel()
@@ -697,7 +488,7 @@ func TestDefaultExtractor_Extract_WithBuildSettings(t *testing.T) {
 	testBinaryPath, err := os.Executable()
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	data, err := extractor.Extract(ctx, testBinaryPath)
 	require.NoError(t, err)
 	require.NotNil(t, data)
@@ -725,11 +516,8 @@ func BenchmarkCalculateChecksum(b *testing.B) {
 	err = os.WriteFile(testFile, content, 0o644)
 	require.NoError(b, err)
 
-	b.ResetTimer()
-
-	for range b.N {
-		_, err := extractor.CalculateChecksum(testFile)
-		if err != nil {
+	for b.Loop() {
+		if _, err := extractor.CalculateChecksum(testFile); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -743,28 +531,8 @@ func BenchmarkIsGoBinary(b *testing.B) {
 	testBinaryPath, err := os.Executable()
 	require.NoError(b, err)
 
-	b.ResetTimer()
-
-	for range b.N {
+	for b.Loop() {
 		_ = extractor.IsGoBinary(testBinaryPath)
-	}
-}
-
-// BenchmarkParseVersionType benchmarks version type parsing.
-func BenchmarkParseVersionType(b *testing.B) {
-	versions := []string{
-		"v1.2.3",
-		"v0.0.0-20260302120000-abc123def456",
-		"(devel)",
-		"not-a-version",
-	}
-
-	b.ResetTimer()
-
-	for range b.N {
-		for _, v := range versions {
-			_ = ParseVersionType(v)
-		}
 	}
 }
 

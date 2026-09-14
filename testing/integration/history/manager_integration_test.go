@@ -11,7 +11,6 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 package history_test
 
 import (
-	"context"
 	"errors"
 	"io"
 	"testing"
@@ -168,7 +167,7 @@ func TestManagerIntegrationTestSuite(t *testing.T) {
 //
 // The workflow should return a complete HistoryEntry on success.
 func (s *ManagerIntegrationTestSuite) TestFullDeletionWorkflow() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	// Setup
 	buildData := s.createBuildInfoData()
@@ -202,7 +201,7 @@ func (s *ManagerIntegrationTestSuite) TestFullDeletionWorkflow() {
 	s.Equal(buildData.Version, entry.Version)
 	s.Equal(buildData.VCSRevision, entry.VCSRevision)
 	s.True(entry.InTrash)
-	s.True(entry.CanRestore)
+	s.True(entry.InTrash)
 	s.NotEmpty(entry.ID)
 }
 
@@ -217,7 +216,7 @@ func (s *ManagerIntegrationTestSuite) TestFullDeletionWorkflow() {
 //
 // The workflow should return a RestoreResult on success.
 func (s *ManagerIntegrationTestSuite) TestFullRestoreWorkflow() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	// Setup
 	now := time.Now()
@@ -264,7 +263,7 @@ func (s *ManagerIntegrationTestSuite) TestFullRestoreWorkflow() {
 // 3. Restoring from trash
 // 4. Updating the history record.
 func (s *ManagerIntegrationTestSuite) TestUndoMostRecentWorkflow() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	// Setup
 	now := time.Now()
@@ -308,7 +307,7 @@ func (s *ManagerIntegrationTestSuite) TestUndoMostRecentWorkflow() {
 // - Positive limit
 // - Limit larger than available records.
 func (s *ManagerIntegrationTestSuite) TestGetHistoryLimits() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	// Setup
 	now := time.Now()
@@ -362,7 +361,7 @@ func (s *ManagerIntegrationTestSuite) TestGetHistoryLimits() {
 // 3. Deleting from trash
 // 4. Deleting the history entry.
 func (s *ManagerIntegrationTestSuite) TestDeletePermanentlyWorkflow() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	// Setup
 	now := time.Now()
@@ -396,7 +395,7 @@ func (s *ManagerIntegrationTestSuite) TestDeletePermanentlyWorkflow() {
 // This test ensures that ClearHistory with clearTrash=false only deletes
 // history records without affecting files in trash.
 func (s *ManagerIntegrationTestSuite) TestClearHistoryWithoutTrashClearing() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	s.storer.EXPECT().
 		DeleteAllRecords(mock.Anything).
@@ -414,7 +413,7 @@ func (s *ManagerIntegrationTestSuite) TestClearHistoryWithoutTrashClearing() {
 // 2. Deletes each binary from trash if available
 // 3. Deletes all history entries.
 func (s *ManagerIntegrationTestSuite) TestClearHistoryWithTrashClearing() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	// Setup
 	now := time.Now()
@@ -461,7 +460,7 @@ func (s *ManagerIntegrationTestSuite) TestClearHistoryWithTrashClearing() {
 // When build info extraction fails, the deletion should fail early without
 // modifying trash or storage.
 func (s *ManagerIntegrationTestSuite) TestErrorHandlingExtractorFailure() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	// Setup
 	s.extractor.EXPECT().
@@ -480,7 +479,7 @@ func (s *ManagerIntegrationTestSuite) TestErrorHandlingExtractorFailure() {
 //
 // When moving to trash fails, the deletion should fail without saving to storage.
 func (s *ManagerIntegrationTestSuite) TestErrorHandlingTrasherFailure() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	// Setup
 	buildData := s.createBuildInfoData()
@@ -510,7 +509,7 @@ func (s *ManagerIntegrationTestSuite) TestErrorHandlingTrasherFailure() {
 // When saving to storage fails, the manager should attempt to restore the file
 // from trash to maintain consistency.
 func (s *ManagerIntegrationTestSuite) TestErrorHandlingStorageFailure() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	// Setup
 	buildData := s.createBuildInfoData()
@@ -550,7 +549,7 @@ func (s *ManagerIntegrationTestSuite) TestErrorHandlingStorageFailure() {
 // This test ensures state consistency by verifying that attempting to restore
 // an already-restored entry returns ErrAlreadyRestored.
 func (s *ManagerIntegrationTestSuite) TestStateConsistencyRestoredBinaryCannotBeRestoredAgain() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	// Setup
 	now := time.Now()
@@ -574,7 +573,7 @@ func (s *ManagerIntegrationTestSuite) TestStateConsistencyRestoredBinaryCannotBe
 // When a binary is no longer in trash, the manager should update the record
 // to reflect this state.
 func (s *ManagerIntegrationTestSuite) TestStateConsistencyNotInTrashUpdatesRecord() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	// Setup
 	now := time.Now()
@@ -608,7 +607,7 @@ func (s *ManagerIntegrationTestSuite) TestStateConsistencyNotInTrashUpdatesRecor
 // this integration test cannot easily simulate a collision without creating actual
 // files. Collision detection is thoroughly tested in unit tests.
 func (s *ManagerIntegrationTestSuite) TestStateConsistencyRestoreCollisionDetection() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	// Setup
 	now := time.Now()
@@ -647,7 +646,7 @@ func (s *ManagerIntegrationTestSuite) TestStateConsistencyRestoreCollisionDetect
 // TestDeletePermanentlyNotInTrashSkipsTrashDeletion verifies that deleting
 // permanently skips trash deletion when binary is not available in trash.
 func (s *ManagerIntegrationTestSuite) TestDeletePermanentlyNotInTrashSkipsTrashDeletion() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	// Setup
 	now := time.Now()
@@ -674,7 +673,7 @@ func (s *ManagerIntegrationTestSuite) TestDeletePermanentlyNotInTrashSkipsTrashD
 //
 // This test uses table-driven testing to verify both scenarios.
 func (s *ManagerIntegrationTestSuite) TestClearEntryWithAndWithoutTrashDeletion() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 	now := time.Now()
 
 	tests := []struct {
@@ -747,7 +746,7 @@ func (s *ManagerIntegrationTestSuite) TestCloseWorkflow() {
 //
 // An empty path should return ErrInvalidBinaryPath immediately.
 func (s *ManagerIntegrationTestSuite) TestRecordDeletionEmptyPath() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	entry, err := s.manager.RecordDeletion(ctx, "")
 
@@ -759,7 +758,7 @@ func (s *ManagerIntegrationTestSuite) TestRecordDeletionEmptyPath() {
 //
 // When no history records exist, UndoMostRecent should return ErrNoHistory.
 func (s *ManagerIntegrationTestSuite) TestUndoMostRecentNoHistory() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	s.storer.EXPECT().
 		GetMostRecent(mock.Anything).
@@ -775,7 +774,7 @@ func (s *ManagerIntegrationTestSuite) TestUndoMostRecentNoHistory() {
 //
 // When the entry ID doesn't exist, Restore should return ErrEntryNotFound.
 func (s *ManagerIntegrationTestSuite) TestRestoreEntryNotFound() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	s.storer.EXPECT().
 		GetRecord(mock.Anything, "nonexistent:id").
@@ -790,7 +789,7 @@ func (s *ManagerIntegrationTestSuite) TestRestoreEntryNotFound() {
 // TestDeletePermanentlyEntryNotFound verifies error handling when entry
 // to delete permanently is not found.
 func (s *ManagerIntegrationTestSuite) TestDeletePermanentlyEntryNotFound() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	s.storer.EXPECT().
 		GetRecord(mock.Anything, "nonexistent:id").
@@ -803,7 +802,7 @@ func (s *ManagerIntegrationTestSuite) TestDeletePermanentlyEntryNotFound() {
 
 // TestClearEntryNotFound verifies error handling when entry to clear is not found.
 func (s *ManagerIntegrationTestSuite) TestClearEntryNotFound() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	s.storer.EXPECT().
 		GetRecord(mock.Anything, "nonexistent:id").
@@ -821,7 +820,7 @@ func (s *ManagerIntegrationTestSuite) TestClearEntryNotFound() {
 // individual files from trash should be logged but not prevent the operation
 // from completing.
 func (s *ManagerIntegrationTestSuite) TestClearHistoryTrashDeletionFailureContinues() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	// Setup
 	now := time.Now()
@@ -859,7 +858,7 @@ func (s *ManagerIntegrationTestSuite) TestClearHistoryTrashDeletionFailureContin
 // This test simulates a realistic workflow of multiple deletions and restorations
 // to ensure state consistency across multiple operations.
 func (s *ManagerIntegrationTestSuite) TestMultipleDeletionsAndRestores() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 	now := time.Now()
 	buildData := s.createBuildInfoData()
 
@@ -951,7 +950,7 @@ func minInt(a, b int) int {
 func TestRecordDeletionWithVCSTimeParsing(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Build data with valid VCS time
 	buildData := &buildinfo.BuildInfoData{
@@ -1005,7 +1004,7 @@ func TestRecordDeletionWithVCSTimeParsing(t *testing.T) {
 func TestRestoreResultFields(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	now := time.Now()
 
 	record := storage.HistoryRecord{
@@ -1033,7 +1032,7 @@ func TestRestoreResultFields(t *testing.T) {
 	mockLogger.EXPECT().Debug().RunAndReturn(zl.Debug).Maybe()
 	mockLogger.EXPECT().Info().RunAndReturn(zl.Info).Maybe()
 
-	entryID := history.GenerateKey(record.Timestamp, record.BinaryName)
+	entryID := storage.GenerateKey(record.Timestamp, record.BinaryName)
 
 	mockStorer.EXPECT().
 		GetRecord(mock.Anything, entryID).
@@ -1075,7 +1074,7 @@ func TestRestoreResultFields(t *testing.T) {
 func TestGetHistoryEmpty(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	mockTrasher := trashmocks.NewMockTrasher(t)
 	mockStorer := storagemocks.NewMockStorer(t)
@@ -1107,7 +1106,7 @@ func TestGetHistoryEmpty(t *testing.T) {
 func TestDeletePermanentlyTrashDeleteFailureIgnored(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	now := time.Now()
 
 	record := storage.HistoryRecord{
@@ -1130,7 +1129,7 @@ func TestDeletePermanentlyTrashDeleteFailureIgnored(t *testing.T) {
 	mockLogger.EXPECT().Debug().RunAndReturn(zl.Debug).Maybe()
 	mockLogger.EXPECT().Info().RunAndReturn(zl.Info).Maybe()
 
-	entryID := history.GenerateKey(record.Timestamp, record.BinaryName)
+	entryID := storage.GenerateKey(record.Timestamp, record.BinaryName)
 
 	mockStorer.EXPECT().
 		GetRecord(mock.Anything, entryID).
@@ -1187,7 +1186,7 @@ func TestCloseFailure(t *testing.T) {
 func TestClearEntryNotInTrash(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	now := time.Now()
 
 	record := storage.HistoryRecord{
@@ -1210,7 +1209,7 @@ func TestClearEntryNotInTrash(t *testing.T) {
 	mockLogger.EXPECT().Debug().RunAndReturn(zl.Debug).Maybe()
 	mockLogger.EXPECT().Info().RunAndReturn(zl.Info).Maybe()
 
-	entryID := history.GenerateKey(record.Timestamp, record.BinaryName)
+	entryID := storage.GenerateKey(record.Timestamp, record.BinaryName)
 
 	mockStorer.EXPECT().
 		GetRecord(mock.Anything, entryID).

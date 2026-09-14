@@ -10,12 +10,11 @@ import (
 	"crypto/sha256"
 	"debug/buildinfo"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"regexp"
 	"runtime"
 )
 
@@ -39,15 +38,33 @@ var (
 // Extractor defines operations for extracting build information from Go binaries.
 type Extractor interface {
 	// Extract retrieves build information from a binary file.
-	// Returns structured build info or an error if extraction fails.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation.
+	//   - binaryPath: Path to the Go binary.
+	//
+	// Returns:
+	//   - Structured build info.
+	//   - An error if extraction fails.
 	Extract(ctx context.Context, binaryPath string) (*BuildInfoData, error)
 
-	// CalculateChecksum computes SHA256 checksum of a binary.
-	// Returns hex-encoded string representation of the hash.
+	// CalculateChecksum computes the SHA256 checksum of a binary.
+	//
+	// Parameters:
+	//   - binaryPath: Path to the file to hash.
+	//
+	// Returns:
+	//   - Hex-encoded SHA256 digest.
+	//   - An error if the file cannot be read.
 	CalculateChecksum(binaryPath string) (string, error)
 
-	// IsGoBinary checks if a file is a Go binary with build info.
-	// Returns true if the file contains valid Go build information.
+	// IsGoBinary reports whether a file contains valid Go build information.
+	//
+	// Parameters:
+	//   - binaryPath: Path to the file to inspect.
+	//
+	// Returns:
+	//   - True if the file is a Go binary with build info.
 	IsGoBinary(binaryPath string) bool
 }
 
@@ -78,8 +95,13 @@ type BuildInfoData struct {
 // DefaultExtractor implements the Extractor interface using debug/buildinfo.
 type DefaultExtractor struct{}
 
+var _ Extractor = (*DefaultExtractor)(nil)
+
 // NewExtractor creates a new build info extractor.
-// Returns an error if the current platform is not supported.
+//
+// Returns:
+//   - Extractor implementation for the current platform.
+//   - ErrUnsupportedPlatform if the OS is not Linux, Windows, or Darwin.
 func NewExtractor() (*DefaultExtractor, error) {
 	if !isSupportedPlatform() {
 		return nil, ErrUnsupportedPlatform
@@ -88,13 +110,25 @@ func NewExtractor() (*DefaultExtractor, error) {
 	return &DefaultExtractor{}, nil
 }
 
-// isSupportedPlatform checks if the current platform is supported.
+// isSupportedPlatform reports whether the current OS is supported.
+//
+// Returns:
+//   - True for Linux, Windows, or Darwin.
 func isSupportedPlatform() bool {
 	return runtime.GOOS == "linux" || runtime.GOOS == "windows" || runtime.GOOS == "darwin"
 }
 
 // Extract retrieves build information from a Go binary.
-// Uses debug/buildinfo.ReadFile for direct extraction without os/exec.
+//
+// It uses debug/buildinfo.ReadFile rather than invoking go version.
+//
+// Parameters:
+//   - ctx: Context for cancellation.
+//   - binaryPath: Path to the Go binary.
+//
+// Returns:
+//   - Structured build info.
+//   - An error if the file is missing, not a Go binary, or extraction fails.
 func (e *DefaultExtractor) Extract(ctx context.Context, binaryPath string) (*BuildInfoData, error) {
 	// Check context cancellation
 	if err := ctx.Err(); err != nil {
@@ -155,7 +189,13 @@ func (e *DefaultExtractor) Extract(ctx context.Context, binaryPath string) (*Bui
 }
 
 // CalculateChecksum computes the SHA256 hash of a binary file.
-// Returns hex-encoded string representation of the hash.
+//
+// Parameters:
+//   - binaryPath: Path to the file to hash.
+//
+// Returns:
+//   - Hex-encoded SHA256 digest.
+//   - An error if the file cannot be read.
 func (e *DefaultExtractor) CalculateChecksum(binaryPath string) (string, error) {
 	// Open the binary file
 	file, err := os.Open(binaryPath)
@@ -167,119 +207,33 @@ func (e *DefaultExtractor) CalculateChecksum(binaryPath string) (string, error) 
 		return "", fmt.Errorf("opening binary file: %w", err)
 	}
 
-	defer func() {
-		if closeErr := file.Close(); closeErr != nil {
-			// Log would go here if we had a logger
-			_ = closeErr
-		}
-	}()
+	defer file.Close()
 
-	// Create SHA256 hasher
 	hasher := sha256.New()
-
-	// Copy file content to hasher
 	if _, err := io.Copy(hasher, file); err != nil {
 		return "", fmt.Errorf("hashing binary file: %w", err)
 	}
 
-	// Get hash sum and encode to hex
-	hashSum := hasher.Sum(nil)
-	checksum := hex.EncodeToString(hashSum)
-
-	return checksum, nil
+	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
-// IsGoBinary checks if a file is a Go binary by attempting to read its build info.
-// Returns true if build information can be extracted, false otherwise.
+// IsGoBinary reports whether a file contains valid Go build information.
+//
+// Parameters:
+//   - binaryPath: Path to the file to inspect.
+//
+// Returns:
+//   - True if the file is a regular Go binary with a Go version string.
 func (e *DefaultExtractor) IsGoBinary(binaryPath string) bool {
-	// Quick check: file must exist and be a regular file
 	fileInfo, err := os.Stat(binaryPath)
-	if err != nil {
+	if err != nil || !fileInfo.Mode().IsRegular() {
 		return false
 	}
 
-	// Must be a regular file (not directory, symlink, etc.)
-	if !fileInfo.Mode().IsRegular() {
-		return false
-	}
-
-	// Attempt to read build info
 	info, err := buildinfo.ReadFile(binaryPath)
 	if err != nil {
 		return false
 	}
 
-	// Must have valid Go version
-	if info.GoVersion == "" {
-		return false
-	}
-
-	return true
-}
-
-// pseudoVersionRegex matches Go pseudo-version format:
-// vX.Y.Z-yyyymmddhhmmss-abcdefabcdef or vX.Y.Z-0.yyyymmddhhmmss-abcdefabcdef.
-var pseudoVersionRegex = regexp.MustCompile(`^v\d+\.\d+\.\d+-(?:0\.)?\d{14}-[a-f0-9]+$`)
-
-// semanticVersionRegex matches semantic version with optional pre-release/build metadata.
-var semanticVersionRegex = regexp.MustCompile(
-	`^v\d+\.\d+\.\d+(?:-[a-zA-Z0-9._-]+)?(?:\+[a-zA-Z0-9._-]+)?$`,
-)
-
-// ParseVersionType determines the type of version string.
-// Returns one of: "semantic", "pseudo", "devel", or "unknown".
-func ParseVersionType(version string) string {
-	if version == "" {
-		return "unknown"
-	}
-
-	// Check for development build marker
-	if version == "(devel)" {
-		return "devel"
-	}
-
-	// Check for semantic version (vX.Y.Z)
-	if len(version) > 1 && version[0] == 'v' {
-		// Check for pseudo-version pattern: vX.Y.Z-yyyymmddhhmmss-abcdefabcdef
-		if pseudoVersionRegex.MatchString(version) {
-			return "pseudo"
-		}
-
-		// Check for semantic version format (allows pre-release like v1.2.3-beta)
-		if semanticVersionRegex.MatchString(version) {
-			return "semantic"
-		}
-	}
-
-	return "unknown"
-}
-
-// IsReinstallable checks if the build info contains enough information
-// for potential reinstallation from source.
-// Requires both module path and VCS revision.
-func (b *BuildInfoData) IsReinstallable() bool {
-	return b.ModulePath != "" && b.VCSRevision != ""
-}
-
-// GetInstallCommand returns a go install command for reinstalling this binary
-// if sufficient information is available.
-// Returns empty string if not reinstallable.
-func (b *BuildInfoData) GetInstallCommand() string {
-	// Cannot construct install command without module path
-	if b.ModulePath == "" {
-		return ""
-	}
-
-	// Prefer tagged versions for reproducible installs
-	if b.Version != "" && b.Version != "(devel)" {
-		return fmt.Sprintf("go install %s@%s", b.ModulePath, b.Version)
-	}
-
-	// For pseudo-versions or specific commits, install at the revision
-	if b.VCSRevision != "" {
-		return fmt.Sprintf("go install %s@%s", b.ModulePath, b.VCSRevision)
-	}
-
-	// Fallback to latest if we have module path but no version/revision
-	return fmt.Sprintf("go install %s@latest", b.ModulePath)
+	return info.GoVersion != ""
 }

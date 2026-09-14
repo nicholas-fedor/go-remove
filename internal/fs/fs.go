@@ -12,8 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 
+	"github.com/nicholas-fedor/go-remove/internal/buildinfo"
 	"github.com/nicholas-fedor/go-remove/internal/logger"
 )
 
@@ -23,6 +23,8 @@ const (
 	windowsExt = ".exe"    // File extension for Windows executables
 )
 
+var goBinaryExtractor = &buildinfo.DefaultExtractor{}
+
 // ErrGorootNotSet indicates that GOROOT is not set when required.
 var ErrGorootNotSet = errors.New("GOROOT is not set")
 
@@ -31,23 +33,72 @@ var ErrBinaryNotFound = errors.New("binary not found")
 
 // FS defines filesystem operations for go-remove.
 type FS interface {
+	// DetermineBinDir resolves the binary directory based on GOROOT or GOPATH/GOBIN.
+	//
+	// Parameters:
+	//   - useGoroot: When true, use GOROOT/bin instead of GOBIN or GOPATH/bin.
+	//
+	// Returns:
+	//   - Absolute path to the binary directory.
+	//   - An error if GOROOT is requested but not set.
 	DetermineBinDir(useGoroot bool) (string, error)
+
+	// AdjustBinaryPath constructs a full binary path, adding .exe on Windows if needed.
+	//
+	// Parameters:
+	//   - dir: Directory containing the binary.
+	//   - binary: Binary file name.
+	//
+	// Returns:
+	//   - Absolute path to the binary.
 	AdjustBinaryPath(dir, binary string) string
+
+	// RemoveBinary deletes a binary file from the filesystem.
+	//
+	// Parameters:
+	//   - binaryPath: Full path to the binary.
+	//   - name: Binary name used in log messages.
+	//   - verbose: When true, emit debug and info logs.
+	//   - logger: Logger used for verbose output.
+	//
+	// Returns:
+	//   - An error if the binary does not exist or cannot be removed.
 	RemoveBinary(binaryPath, name string, verbose bool, logger logger.Logger) error
+
+	// ListBinaries retrieves removable binaries from a directory.
+	//
+	// Directories, lock files, and non-executable files are omitted.
+	//
+	// Parameters:
+	//   - dir: Directory to scan.
+	//
+	// Returns:
+	//   - Names of Go binaries in the directory.
 	ListBinaries(dir string) []string
 }
 
 // RealFS implements the FS interface using real filesystem operations.
 type RealFS struct{}
 
-// NewRealFS creates a new RealFS instance.
+var _ FS = (*RealFS)(nil)
+
+// NewRealFS creates a RealFS instance.
+//
+// Returns:
+//   - Filesystem implementation backed by the local OS.
 func NewRealFS() FS {
 	return &RealFS{}
 }
 
 // DetermineBinDir resolves the binary directory based on GOROOT or GOPATH/GOBIN.
+//
+// Parameters:
+//   - useGoroot: When true, use GOROOT/bin instead of GOBIN or GOPATH/bin.
+//
+// Returns:
+//   - Absolute path to the binary directory.
+//   - An error if GOROOT is requested but not set.
 func (r *RealFS) DetermineBinDir(useGoroot bool) (string, error) {
-	// Use GOROOT/bin if specified and available.
 	if useGoroot {
 		gorootDir := os.Getenv("GOROOT")
 		if gorootDir == "" {
@@ -57,7 +108,6 @@ func (r *RealFS) DetermineBinDir(useGoroot bool) (string, error) {
 		return filepath.Join(gorootDir, "bin"), nil
 	}
 
-	// Fall back to GOBIN or GOPATH/bin, defaulting to ~/go/bin if neither is set.
 	goBin := os.Getenv("GOBIN")
 	if goBin == "" {
 		gopath := os.Getenv("GOPATH")
@@ -77,11 +127,15 @@ func (r *RealFS) DetermineBinDir(useGoroot bool) (string, error) {
 }
 
 // AdjustBinaryPath constructs a full binary path, adding .exe on Windows if needed.
+//
+// Parameters:
+//   - dir: Directory containing the binary.
+//   - binary: Binary file name.
+//
+// Returns:
+//   - Absolute path to the binary.
 func (r *RealFS) AdjustBinaryPath(dir, binary string) string {
-	// Join the directory and binary name into a single path.
 	path := filepath.Join(dir, binary)
-
-	// Append .exe extension on Windows if the binary lacks it.
 	if binary != "" && runtime.GOOS == windowsOS && filepath.Ext(binary) != windowsExt {
 		path += windowsExt
 	}
@@ -90,24 +144,29 @@ func (r *RealFS) AdjustBinaryPath(dir, binary string) string {
 }
 
 // RemoveBinary deletes a binary file from the filesystem.
+//
+// Parameters:
+//   - binaryPath: Full path to the binary.
+//   - name: Binary name used in log messages.
+//   - verbose: When true, emit debug and info logs.
+//   - log: Logger used for verbose output.
+//
+// Returns:
+//   - An error if the binary does not exist or cannot be removed.
 func (r *RealFS) RemoveBinary(binaryPath, name string, verbose bool, log logger.Logger) error {
-	// Verify the binary exists before attempting removal.
 	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
 		return fmt.Errorf("%w: %s at %s", ErrBinaryNotFound, name, binaryPath)
 	}
 
-	// Log debug and info messages if verbose mode is enabled.
 	if verbose {
 		log.Debug().Msgf("Constructed binary path: %s", binaryPath)
 		log.Info().Msgf("Removing binary: %s", binaryPath)
 	}
 
-	// Perform the removal operation and handle any errors.
 	if err := os.Remove(binaryPath); err != nil {
-		return fmt.Errorf("failed to remove %s: %w", binaryPath, err)
+		return fmt.Errorf("removing %s: %w", binaryPath, err)
 	}
 
-	// Log success if verbose mode is enabled.
 	if verbose {
 		log.Info().Msgf("Successfully removed binary: %s", name)
 	}
@@ -115,23 +174,44 @@ func (r *RealFS) RemoveBinary(binaryPath, name string, verbose bool, log logger.
 	return nil
 }
 
-// ListBinaries retrieves a list of executable binaries from a directory.
+// ListBinaries retrieves Go binaries from a directory.
+//
+// Only regular files with valid Go build information are included.
+//
+// Parameters:
+//   - dir: Directory to scan.
+//
+// Returns:
+//   - Names of Go binaries in the directory, or nil if the directory cannot be read.
 func (r *RealFS) ListBinaries(dir string) []string {
-	// Read directory contents, returning an empty list on error.
 	files, err := os.ReadDir(dir)
 	if err != nil {
-		return []string{}
+		return nil
 	}
 
-	// Filter for executable files, including .exe on Windows.
 	var choices []string
 
 	for _, file := range files {
-		if !file.IsDir() &&
-			(runtime.GOOS != windowsOS || strings.HasSuffix(file.Name(), windowsExt)) {
+		if isRemovableBinary(dir, file) {
 			choices = append(choices, file.Name())
 		}
 	}
 
 	return choices
+}
+
+// isRemovableBinary reports whether a directory entry is a Go binary.
+//
+// Parameters:
+//   - dir: Parent directory path.
+//   - file: Directory entry to inspect.
+//
+// Returns:
+//   - True if the file contains valid Go build information.
+func isRemovableBinary(dir string, file os.DirEntry) bool {
+	if file.IsDir() {
+		return false
+	}
+
+	return goBinaryExtractor.IsGoBinary(filepath.Join(dir, file.Name()))
 }

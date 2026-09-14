@@ -6,7 +6,6 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 package history
 
 import (
-	"context"
 	"errors"
 	"testing"
 	"time"
@@ -38,7 +37,7 @@ const (
 )
 
 // testEntryID is the expected entry ID with 20-digit zero-padded timestamp.
-var testEntryID = GenerateKey(1709321234, testBinaryName)
+var testEntryID = storage.GenerateKey(1709321234, testBinaryName)
 
 // setupManagerTest creates a new HistoryManager with mock dependencies for testing.
 func setupManagerTest(
@@ -85,7 +84,7 @@ func TestNewManager(t *testing.T) {
 func TestHistoryManager_RecordDeletion(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	buildData := &buildinfo.BuildInfoData{
 		ModulePath:  testModulePath,
@@ -128,7 +127,6 @@ func TestHistoryManager_RecordDeletion(t *testing.T) {
 		assert.Equal(t, buildData.Version, entry.Version)
 		assert.Equal(t, buildData.VCSRevision, entry.VCSRevision)
 		assert.True(t, entry.InTrash)
-		assert.True(t, entry.CanRestore)
 	})
 
 	t.Run("empty path", func(t *testing.T) {
@@ -234,7 +232,7 @@ func TestHistoryManager_RecordDeletion(t *testing.T) {
 func TestHistoryManager_UndoMostRecent(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	now := time.Now()
 
 	record := storage.HistoryRecord{
@@ -392,7 +390,7 @@ func TestHistoryManager_UndoMostRecent(t *testing.T) {
 func TestHistoryManager_Restore(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	now := time.Now()
 
 	record := storage.HistoryRecord{
@@ -431,7 +429,7 @@ func TestHistoryManager_Restore(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, result)
 		// EntryID should match the generated key from the record
-		assert.Equal(t, GenerateKey(record.Timestamp, record.BinaryName), result.EntryID)
+		assert.Equal(t, storage.GenerateKey(record.Timestamp, record.BinaryName), result.EntryID)
 		assert.Equal(t, testBinaryName, result.BinaryName)
 	})
 
@@ -472,7 +470,7 @@ func TestHistoryManager_Restore(t *testing.T) {
 func TestHistoryManager_GetHistory(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	now := time.Now()
 
 	records := []storage.HistoryRecord{
@@ -543,7 +541,7 @@ func TestHistoryManager_GetHistory(t *testing.T) {
 func TestHistoryManager_DeletePermanently(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	now := time.Now()
 
 	record := storage.HistoryRecord{
@@ -645,7 +643,7 @@ func TestHistoryManager_DeletePermanently(t *testing.T) {
 func TestHistoryManager_ClearHistory(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	now := time.Now()
 
 	records := []storage.HistoryRecord{
@@ -729,7 +727,7 @@ func TestHistoryManager_ClearHistory(t *testing.T) {
 func TestHistoryManager_ClearEntry(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	now := time.Now()
 
 	record := storage.HistoryRecord{
@@ -869,7 +867,7 @@ func TestEntryFromRecord(t *testing.T) {
 
 	entry := entryFromRecord(&record)
 
-	assert.Equal(t, GenerateKey(record.Timestamp, record.BinaryName), entry.ID)
+	assert.Equal(t, storage.GenerateKey(record.Timestamp, record.BinaryName), entry.ID)
 	assert.Equal(t, now.Unix(), entry.Timestamp.Unix())
 	assert.Equal(t, testBinaryName, entry.BinaryName)
 	assert.Equal(t, testBinaryPath, entry.BinaryPath)
@@ -877,7 +875,6 @@ func TestEntryFromRecord(t *testing.T) {
 	assert.Equal(t, testVersion, entry.Version)
 	assert.Equal(t, "abc123", entry.VCSRevision)
 	assert.True(t, entry.InTrash)
-	assert.True(t, entry.CanRestore)
 }
 
 func TestEntriesFromRecords(t *testing.T) {
@@ -907,11 +904,4 @@ func TestEntriesFromRecords(t *testing.T) {
 	assert.True(t, entries[0].InTrash)
 	assert.Equal(t, "binary2", entries[1].BinaryName)
 	assert.False(t, entries[1].InTrash)
-}
-
-func TestGenerateKey(t *testing.T) {
-	t.Parallel()
-
-	key := GenerateKey(1709321234, testBinaryName)
-	assert.Equal(t, testEntryID, key)
 }
