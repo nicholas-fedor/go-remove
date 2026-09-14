@@ -10,8 +10,8 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 // moving files to trash, restoring files from trash, and permanent deletion.
 //
 // The package follows the XDG Base Directory Specification:
-//   - Linux: $XDG_DATA_HOME/Trash (fallback: ~/.local/share/Trash)
-//   - Windows: Uses system Recycle Bin via SHFileOperationW
+//   - Linux: $XDG_DATA_HOME/Trash (fallback: ~/.local/share/Trash).
+//   - Windows: Uses system Recycle Bin via SHFileOperationW.
 //
 // Usage:
 //
@@ -37,9 +37,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -74,24 +71,58 @@ var (
 
 // Trasher defines operations for XDG-compliant trash management.
 type Trasher interface {
-	// MoveToTrash moves a file to the XDG trash directory.
-	// Returns the trash path and any error encountered.
+	// MoveToTrash moves a file to the trash directory.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation.
+	//   - filePath: Path of the file to trash.
+	//
+	// Returns:
+	//   - Path of the file in trash.
+	//   - An error if the move fails.
 	MoveToTrash(ctx context.Context, filePath string) (string, error)
 
 	// RestoreFromTrash moves a file from trash back to its original location.
-	// The original path is determined from the history record.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation.
+	//   - trashPath: Current path of the file in trash.
+	//   - originalPath: Destination path for restoration.
+	//
+	// Returns:
+	//   - An error if restoration fails.
 	RestoreFromTrash(ctx context.Context, trashPath, originalPath string) error
 
-	// IsInTrash checks if a file exists in the trash.
+	// IsInTrash reports whether a file exists in trash.
+	//
+	// Parameters:
+	//   - trashPath: Path to check.
+	//
+	// Returns:
+	//   - True if the file is present in trash.
 	IsInTrash(trashPath string) bool
 
-	// ListTrash returns all go-remove managed entries in trash.
+	// ListTrash returns go-remove managed entries in trash.
+	//
+	// Returns:
+	//   - Trash entries.
+	//   - An error if the trash directory cannot be read.
 	ListTrash() ([]TrashEntry, error)
 
-	// DeletePermanently removes a file from trash permanently.
+	// DeletePermanently removes a file from trash.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation.
+	//   - trashPath: Path of the file in trash.
+	//
+	// Returns:
+	//   - An error if deletion fails.
 	DeletePermanently(ctx context.Context, trashPath string) error
 
-	// GetTrashPath returns the XDG trash files directory path.
+	// GetTrashPath returns the trash files directory path.
+	//
+	// Returns:
+	//   - Absolute path to the trash files directory.
 	GetTrashPath() string
 }
 
@@ -110,35 +141,24 @@ type TrashEntry struct {
 	DeletionTime time.Time
 }
 
-// NewTrasher creates a new platform-specific trash manager.
-// Returns an error if the trash directory cannot be determined or created.
+// NewTrasher creates a platform-specific trash manager.
+//
+// Returns:
+//   - Trash implementation for the current OS.
+//   - An error if the trash directory cannot be determined or created.
 func NewTrasher() (Trasher, error) {
 	return newTrasher()
 }
 
-// getXDGTrashPath returns the XDG trash path based on the environment.
-// On Linux: $XDG_DATA_HOME/Trash or ~/.local/share/Trash
-// On Windows: Returns empty string (uses system Recycle Bin).
-func getXDGTrashPath() string {
-	if runtime.GOOS == "windows" {
-		return ""
-	}
-
-	xdgDataHome := os.Getenv("XDG_DATA_HOME")
-	if xdgDataHome == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return ""
-		}
-
-		xdgDataHome = filepath.Join(home, ".local", "share")
-	}
-
-	return filepath.Join(xdgDataHome, "Trash")
-}
-
 // encodeTrashPath encodes a path for storage in .trashinfo files.
-// Special characters are percent-encoded per the XDG spec.
+//
+// Bytes outside printable ASCII and percent signs are percent-encoded.
+//
+// Parameters:
+//   - path: Original filesystem path.
+//
+// Returns:
+//   - Encoded path suitable for a .trashinfo file.
 func encodeTrashPath(path string) string {
 	// URL-encode special characters
 	var result []byte
@@ -146,9 +166,8 @@ func encodeTrashPath(path string) string {
 	for i := range len(path) {
 		c := path[i]
 
-		// Percent-encode non-printable characters and percent sign
-		if c < 0x20 || c == '%' {
-			result = append(result, fmt.Sprintf("%%%02X", c)...)
+		if c <= 0x20 || c >= 0x7f || c == '%' {
+			result = fmt.Appendf(result, "%%%02X", c)
 		} else {
 			result = append(result, c)
 		}
@@ -158,6 +177,13 @@ func encodeTrashPath(path string) string {
 }
 
 // decodeTrashPath decodes a path from .trashinfo file format.
+//
+// Parameters:
+//   - encoded: Percent-encoded path from a .trashinfo file.
+//
+// Returns:
+//   - Decoded filesystem path.
+//   - An error if a percent sequence is invalid.
 func decodeTrashPath(encoded string) (string, error) {
 	var result []byte
 
@@ -186,6 +212,13 @@ func decodeTrashPath(encoded string) (string, error) {
 }
 
 // generateTrashInfo creates the content for a .trashinfo file.
+//
+// Parameters:
+//   - originalPath: Path of the file before it was trashed.
+//   - deletionTime: Time the file was moved to trash.
+//
+// Returns:
+//   - .trashinfo file contents.
 func generateTrashInfo(originalPath string, deletionTime time.Time) string {
 	encodedPath := encodeTrashPath(originalPath)
 	// Use ISO8601 without timezone per XDG spec
@@ -196,19 +229,19 @@ func generateTrashInfo(originalPath string, deletionTime time.Time) string {
 
 // parseTrashInfo parses a .trashinfo file content.
 //
-//nolint:nonamedreturns // Named returns improve clarity for this function
-func parseTrashInfo(content string) (originalPath string, deletionTime time.Time, err error) {
-	var (
-		pathLine string
-		timeLine string
-	)
+// Parameters:
+//   - content: Raw .trashinfo file text.
+//
+// Returns:
+//   - Original filesystem path.
+//   - Deletion timestamp, or zero if it cannot be parsed.
+//   - An error if the Path field is missing or invalid.
+func parseTrashInfo(content string) (string, time.Time, error) {
+	var pathLine, timeLine string
 
-	_, err = fmt.Sscanf(content, "[Trash Info]\nPath=%s\nDeletionDate=%s\n", &pathLine, &timeLine)
+	_, err := fmt.Sscanf(content, "[Trash Info]\nPath=%s\nDeletionDate=%s\n", &pathLine, &timeLine)
 	if err != nil {
-		// Try with looser parsing
-		lines := splitLines(content)
-
-		for _, line := range lines {
+		for line := range strings.SplitSeq(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
 			if after, ok := strings.CutPrefix(line, "Path="); ok {
 				pathLine = after
 			} else if after, ok := strings.CutPrefix(line, "DeletionDate="); ok {
@@ -221,19 +254,17 @@ func parseTrashInfo(content string) (originalPath string, deletionTime time.Time
 		return "", time.Time{}, ErrMissingPath
 	}
 
-	originalPath, err = decodeTrashPath(pathLine)
+	originalPath, err := decodeTrashPath(pathLine)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("decoding path: %w", err)
 	}
 
+	var deletionTime time.Time
 	if timeLine != "" {
-		// Try RFC3339 format first
 		deletionTime, err = time.Parse(time.RFC3339, timeLine)
 		if err != nil {
-			// Fall back to date-only format
 			deletionTime, err = time.Parse("2006-01-02T15:04:05", timeLine)
 			if err != nil {
-				// Ignore time parsing errors
 				deletionTime = time.Time{}
 			}
 		}
@@ -242,34 +273,13 @@ func parseTrashInfo(content string) (originalPath string, deletionTime time.Time
 	return originalPath, deletionTime, nil
 }
 
-// generateUniqueName creates a unique name for the trash entry.
+// generateUniqueName creates a unique trash entry name from a base file name.
+//
+// Parameters:
+//   - base: Original file name.
+//
+// Returns:
+//   - Name with a Unix timestamp suffix.
 func generateUniqueName(base string) string {
-	timestamp := time.Now().Unix()
-
-	return fmt.Sprintf("%s_%d", base, timestamp)
-}
-
-// splitLines splits a string into lines, handling various line endings.
-func splitLines(s string) []string {
-	var (
-		lines []string
-		start int
-	)
-
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			lines = append(lines, s[start:i])
-			start = i + 1
-		} else if s[i] == '\r' && i+1 < len(s) && s[i+1] == '\n' {
-			lines = append(lines, s[start:i])
-			start = i + 2 //nolint:mnd // Windows line ending is 2 bytes
-			i++
-		}
-	}
-
-	if start < len(s) {
-		lines = append(lines, s[start:])
-	}
-
-	return lines
+	return fmt.Sprintf("%s_%d", base, time.Now().Unix())
 }

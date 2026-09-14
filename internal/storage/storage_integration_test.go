@@ -125,7 +125,7 @@ func TestStorageIntegrationTestSuite(t *testing.T) {
 //
 // Each operation should maintain data integrity and return appropriate errors.
 func (s *StorageIntegrationTestSuite) TestFullRecordLifecycle() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 	timestamp := time.Now().Unix()
 	binaryName := "lifecycle-test"
 	key := storage.GenerateKey(timestamp, binaryName)
@@ -178,7 +178,7 @@ func (s *StorageIntegrationTestSuite) TestFullRecordLifecycle() {
 //
 // The storage layer should return an error when attempting to save a nil record.
 func (s *StorageIntegrationTestSuite) TestSaveRecordWithNilRecord() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	s.mockStorer.EXPECT().
 		SaveRecord(mock.Anything, (*storage.HistoryRecord)(nil)).
@@ -193,7 +193,7 @@ func (s *StorageIntegrationTestSuite) TestSaveRecordWithNilRecord() {
 //
 // Records must have a valid non-zero timestamp to ensure proper key generation.
 func (s *StorageIntegrationTestSuite) TestSaveRecordWithZeroTimestamp() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 	record := s.createHistoryRecord(0, testBinaryName, true)
 
 	s.mockStorer.EXPECT().
@@ -209,7 +209,7 @@ func (s *StorageIntegrationTestSuite) TestSaveRecordWithZeroTimestamp() {
 //
 // Binary name is a required field for key generation and record identification.
 func (s *StorageIntegrationTestSuite) TestSaveRecordWithEmptyBinaryName() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 	record := s.createHistoryRecord(testTimestamp, "", true)
 
 	s.mockStorer.EXPECT().
@@ -225,7 +225,7 @@ func (s *StorageIntegrationTestSuite) TestSaveRecordWithEmptyBinaryName() {
 //
 // When a key does not exist, GetRecord should return ErrRecordNotFound.
 func (s *StorageIntegrationTestSuite) TestGetRecordNotFound() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 	key := storage.GenerateKey(testTimestamp, "non-existent")
 
 	s.mockStorer.EXPECT().
@@ -241,7 +241,7 @@ func (s *StorageIntegrationTestSuite) TestGetRecordNotFound() {
 //
 // Keys must be in the format "<timestamp>:<binary_name>".
 func (s *StorageIntegrationTestSuite) TestGetRecordInvalidKey() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 	invalidKey := "invalid-key-format"
 
 	s.mockStorer.EXPECT().
@@ -258,7 +258,7 @@ func (s *StorageIntegrationTestSuite) TestGetRecordInvalidKey() {
 // When multiple records exist, GetMostRecent should return the one with the
 // highest timestamp (most recent).
 func (s *StorageIntegrationTestSuite) TestGetMostRecentWithMultipleRecords() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 	now := time.Now()
 
 	// Create records with different timestamps
@@ -294,7 +294,7 @@ func (s *StorageIntegrationTestSuite) TestGetMostRecentWithMultipleRecords() {
 //
 // When the storage is empty, GetMostRecent should return ErrNoHistory.
 func (s *StorageIntegrationTestSuite) TestGetMostRecentNoHistory() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	s.mockStorer.EXPECT().
 		GetMostRecent(mock.Anything).
@@ -314,7 +314,7 @@ func (s *StorageIntegrationTestSuite) TestGetMostRecentNoHistory() {
 // - Combined limit and offset
 // - OnlyAvailable filter.
 func (s *StorageIntegrationTestSuite) TestListRecordsWithVariousOptions() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 	now := time.Now()
 
 	// Create test records
@@ -399,7 +399,7 @@ func (s *StorageIntegrationTestSuite) TestListRecordsWithVariousOptions() {
 //
 // When the storage is empty, ListRecords should return an empty slice.
 func (s *StorageIntegrationTestSuite) TestListRecordsEmpty() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	s.mockStorer.EXPECT().
 		ListRecords(mock.Anything, storage.ListOptions{}).
@@ -415,7 +415,7 @@ func (s *StorageIntegrationTestSuite) TestListRecordsEmpty() {
 //
 // When the record key does not exist, UpdateRecord should return ErrRecordNotFound.
 func (s *StorageIntegrationTestSuite) TestUpdateRecordNotFound() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 	record := s.createHistoryRecord(testTimestamp, "non-existent", true)
 
 	s.mockStorer.EXPECT().
@@ -431,7 +431,7 @@ func (s *StorageIntegrationTestSuite) TestUpdateRecordNotFound() {
 //
 // When the record key does not exist, DeleteRecord should return ErrRecordNotFound.
 func (s *StorageIntegrationTestSuite) TestDeleteRecordNotFound() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 	key := storage.GenerateKey(testTimestamp, "non-existent")
 
 	s.mockStorer.EXPECT().
@@ -447,7 +447,7 @@ func (s *StorageIntegrationTestSuite) TestDeleteRecordNotFound() {
 //
 // DeleteAllRecords should remove all history records from storage.
 func (s *StorageIntegrationTestSuite) TestDeleteAllRecords() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	s.mockStorer.EXPECT().
 		DeleteAllRecords(mock.Anything).
@@ -462,7 +462,7 @@ func (s *StorageIntegrationTestSuite) TestDeleteAllRecords() {
 //
 // Errors from the underlying storage should be properly returned.
 func (s *StorageIntegrationTestSuite) TestDeleteAllRecordsError() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 	dbError := errors.New("database write error")
 
 	s.mockStorer.EXPECT().
@@ -481,7 +481,7 @@ func (s *StorageIntegrationTestSuite) TestDeleteAllRecordsError() {
 func (s *StorageIntegrationTestSuite) TestContextCancellation() {
 	// Test SaveRecord with canceled context
 	s.Run("SaveRecord", func() {
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(s.T().Context())
 		cancel() // Cancel immediately
 
 		record := s.createHistoryRecord(testTimestamp, testBinaryName, true)
@@ -497,7 +497,7 @@ func (s *StorageIntegrationTestSuite) TestContextCancellation() {
 
 	// Test GetRecord with canceled context
 	s.Run("GetRecord", func() {
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(s.T().Context())
 		cancel()
 
 		key := storage.GenerateKey(testTimestamp, testBinaryName)
@@ -513,7 +513,7 @@ func (s *StorageIntegrationTestSuite) TestContextCancellation() {
 
 	// Test GetMostRecent with canceled context
 	s.Run("GetMostRecent", func() {
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(s.T().Context())
 		cancel()
 
 		s.mockStorer.EXPECT().
@@ -527,7 +527,7 @@ func (s *StorageIntegrationTestSuite) TestContextCancellation() {
 
 	// Test ListRecords with canceled context
 	s.Run("ListRecords", func() {
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(s.T().Context())
 		cancel()
 
 		s.mockStorer.EXPECT().
@@ -541,7 +541,7 @@ func (s *StorageIntegrationTestSuite) TestContextCancellation() {
 
 	// Test UpdateRecord with canceled context
 	s.Run("UpdateRecord", func() {
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(s.T().Context())
 		cancel()
 
 		record := s.createHistoryRecord(testTimestamp, testBinaryName, true)
@@ -557,7 +557,7 @@ func (s *StorageIntegrationTestSuite) TestContextCancellation() {
 
 	// Test DeleteRecord with canceled context
 	s.Run("DeleteRecord", func() {
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(s.T().Context())
 		cancel()
 
 		key := storage.GenerateKey(testTimestamp, testBinaryName)
@@ -573,7 +573,7 @@ func (s *StorageIntegrationTestSuite) TestContextCancellation() {
 
 	// Test DeleteAllRecords with canceled context
 	s.Run("DeleteAllRecords", func() {
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(s.T().Context())
 		cancel()
 
 		s.mockStorer.EXPECT().
@@ -591,7 +591,7 @@ func (s *StorageIntegrationTestSuite) TestContextCancellation() {
 // This test ensures that errors from the underlying storage are wrapped
 // and returned correctly to the caller.
 func (s *StorageIntegrationTestSuite) TestErrorPropagation() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 	customError := errors.New("custom storage error")
 
 	s.Run("SaveRecord error propagation", func() {
@@ -694,7 +694,7 @@ func (s *StorageIntegrationTestSuite) TestCloseError() {
 //
 // When the database is closed, all operations should return ErrDatabaseClosed.
 func (s *StorageIntegrationTestSuite) TestDatabaseClosedError() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 	key := storage.GenerateKey(testTimestamp, testBinaryName)
 	record := s.createHistoryRecord(testTimestamp, testBinaryName, true)
 
@@ -774,7 +774,7 @@ func (s *StorageIntegrationTestSuite) TestDatabaseClosedError() {
 // This test simulates a realistic workflow of multiple save, list, and delete
 // operations to ensure the storage layer behaves correctly across multiple calls.
 func (s *StorageIntegrationTestSuite) TestMultipleSequentialOperations() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 	now := time.Now()
 
 	// Save first record
@@ -978,7 +978,7 @@ func TestGenerateAndParseKey(t *testing.T) {
 func TestContextTimeout(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Nanosecond)
 	defer cancel()
 
 	// Wait for context to expire

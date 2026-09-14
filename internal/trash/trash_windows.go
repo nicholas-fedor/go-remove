@@ -13,9 +13,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
-	"time"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 // Windows API constants from shellapi.h
@@ -43,13 +43,19 @@ type shFileOpStruct struct {
 
 // windowsTrasher implements Trasher for Windows using Shell API.
 type windowsTrasher struct {
-	shell32         *syscall.LazyDLL
-	shFileOperation *syscall.LazyProc
+	shell32         *windows.LazyDLL
+	shFileOperation *windows.LazyProc
 }
 
-// newTrasher creates a new Windows-specific trash manager.
+var _ Trasher = (*windowsTrasher)(nil)
+
+// newTrasher creates a Windows trash manager using the Shell API.
+//
+// Returns:
+//   - Windows trash implementation.
+//   - Always nil error.
 func newTrasher() (Trasher, error) {
-	shell32 := syscall.NewLazyDLL("Shell32.dll")
+	shell32 := windows.NewLazySystemDLL("shell32.dll")
 	shFileOperation := shell32.NewProc("SHFileOperationW")
 
 	return &windowsTrasher{
@@ -59,7 +65,16 @@ func newTrasher() (Trasher, error) {
 }
 
 // MoveToTrash moves a file to the Windows Recycle Bin.
-// Returns the original path since Windows manages trash internally.
+//
+// The original path is returned because Windows manages trash internally.
+//
+// Parameters:
+//   - ctx: Context for cancellation.
+//   - filePath: Path of the file to trash.
+//
+// Returns:
+//   - Original absolute path of the trashed file.
+//   - An error if the move fails.
 func (t *windowsTrasher) MoveToTrash(ctx context.Context, filePath string) (string, error) {
 	if ctx.Err() != nil {
 		return "", ctx.Err()
@@ -82,7 +97,7 @@ func (t *windowsTrasher) MoveToTrash(ctx context.Context, filePath string) (stri
 	}
 
 	// Convert to UTF-16 with double null terminator
-	utf16Path, err := syscall.UTF16FromString(absPath)
+	utf16Path, err := windows.UTF16FromString(absPath)
 	if err != nil {
 		return "", fmt.Errorf("converting path to UTF-16: %w", err)
 	}
@@ -108,9 +123,17 @@ func (t *windowsTrasher) MoveToTrash(ctx context.Context, filePath string) (stri
 	return absPath, nil
 }
 
-// RestoreFromTrash restores a file from Windows Recycle Bin.
-// Note: Windows does not provide a direct API to restore from Recycle Bin
-// by original path. This is a best-effort implementation.
+// RestoreFromTrash restores a file from the Windows Recycle Bin.
+//
+// Windows does not expose a restore-by-path API, so this is best-effort.
+//
+// Parameters:
+//   - ctx: Context for cancellation.
+//   - trashPath: Unused on Windows.
+//   - originalPath: Destination path expected after restoration.
+//
+// Returns:
+//   - An error if the file is not already present at originalPath.
 func (t *windowsTrasher) RestoreFromTrash(
 	ctx context.Context,
 	trashPath, originalPath string,
@@ -141,18 +164,26 @@ func (t *windowsTrasher) RestoreFromTrash(
 		"Please restore the file from Recycle Bin to: " + originalPath)
 }
 
-// IsInTrash checks if a file exists in the Windows Recycle Bin.
-// Note: Reliable detection is not feasible via the current API. Windows does not
-// provide a direct API to check if a specific file is in the Recycle Bin without
-// using COM interfaces (IShellFolder). This function returns false as a
-// deterministic result, since non-existence of a file does not mean it's "in the
-// recycle bin" - the file could have never existed or been permanently deleted.
+// IsInTrash reports whether a file exists in the Windows Recycle Bin.
+//
+// Reliable detection is not available without COM, so this always returns false.
+//
+// Parameters:
+//   - trashPath: Path to check.
+//
+// Returns:
+//   - Always false.
 func (t *windowsTrasher) IsInTrash(trashPath string) bool {
 	return false
 }
 
-// ListTrash returns entries from Windows Recycle Bin.
-// Note: Windows does not expose a direct API to list Recycle Bin contents.
+// ListTrash returns entries from the Windows Recycle Bin.
+//
+// Windows does not expose a direct listing API, so this returns an empty slice.
+//
+// Returns:
+//   - Empty trash entry list.
+//   - Always nil error.
 func (t *windowsTrasher) ListTrash() ([]TrashEntry, error) {
 	// Windows does not provide a straightforward API to list Recycle Bin contents
 	// without using COM interfaces. For this implementation, we return an empty list.
@@ -168,7 +199,15 @@ func (t *windowsTrasher) ListTrash() ([]TrashEntry, error) {
 }
 
 // DeletePermanently removes a file permanently from Windows.
-// Uses SHFileOperation without FOF_ALLOWUNDO flag.
+//
+// It uses SHFileOperation without FOF_ALLOWUNDO.
+//
+// Parameters:
+//   - ctx: Context for cancellation.
+//   - trashPath: Path of the file to delete.
+//
+// Returns:
+//   - An error if deletion fails.
 func (t *windowsTrasher) DeletePermanently(ctx context.Context, trashPath string) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -191,7 +230,7 @@ func (t *windowsTrasher) DeletePermanently(ctx context.Context, trashPath string
 	}
 
 	// Convert to UTF-16 with double null terminator
-	utf16Path, err := syscall.UTF16FromString(absPath)
+	utf16Path, err := windows.UTF16FromString(absPath)
 	if err != nil {
 		return fmt.Errorf("converting path to UTF-16: %w", err)
 	}
@@ -215,24 +254,12 @@ func (t *windowsTrasher) DeletePermanently(ctx context.Context, trashPath string
 	return nil
 }
 
-// GetTrashPath returns an empty string on Windows since trash is managed by the system.
+// GetTrashPath returns an empty string on Windows because trash is system-managed.
+//
+// Returns:
+//   - Empty string.
 func (t *windowsTrasher) GetTrashPath() string {
 	// Windows Recycle Bin location is system-managed
 	// Typically at %USERPROFILE%\$Recycle.Bin
 	return ""
-}
-
-// getRecycleBinPath returns the path to the current user's Recycle Bin.
-func getRecycleBinPath() string {
-	userProfile := os.Getenv("USERPROFILE")
-	if userProfile == "" {
-		return ""
-	}
-
-	return filepath.Join(userProfile, "$Recycle.Bin")
-}
-
-// Helper function to format time for trash entries.
-func formatDeletionTime(t time.Time) string {
-	return t.Format(time.RFC3339)
 }

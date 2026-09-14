@@ -351,45 +351,29 @@ func TestZerologLogger_ConcurrentAccess(t *testing.T) {
 	zl := zerolog.New(output).With().Timestamp().Logger().Level(zerolog.DebugLevel)
 	logger := &ZerologLogger{logger: zl, output: output}
 
-	// Run concurrent logging operations.
-	done := make(chan bool, 4)
+	var wg sync.WaitGroup
 
-	go func() {
+	wg.Go(func() {
 		for range 100 {
 			logger.Debug().Msg("debug message")
 		}
-
-		done <- true
-	}()
-
-	go func() {
+	})
+	wg.Go(func() {
 		for range 100 {
 			logger.Info().Msg("info message")
 		}
-
-		done <- true
-	}()
-
-	go func() {
+	})
+	wg.Go(func() {
 		for range 100 {
 			logger.Warn().Msg("warn message")
 		}
-
-		done <- true
-	}()
-
-	go func() {
+	})
+	wg.Go(func() {
 		for range 100 {
 			logger.Error().Msg("error message")
 		}
-
-		done <- true
-	}()
-
-	// Wait for all goroutines to complete.
-	for range 4 {
-		<-done
-	}
+	})
+	wg.Wait()
 
 	// Verify output contains messages from all levels.
 	outputStr := buf.String()

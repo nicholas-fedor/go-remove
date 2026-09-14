@@ -7,7 +7,6 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 package logger
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,9 +17,6 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// ErrLoggerNil indicates that the logger instance is nil when an operation is attempted.
-var ErrLoggerNil = errors.New("logger is nil")
-
 // LogCaptureFunc is a callback function that receives captured log messages.
 // The level parameter contains the log level string (e.g., "DBG", "INF", "WRN", "ERR").
 // The msg parameter contains the formatted log message.
@@ -29,19 +25,47 @@ type LogCaptureFunc func(level, msg string)
 // Logger defines the logging operations required by the application.
 type Logger interface {
 	// Debug returns a debug-level event for logging.
+	//
+	// Returns:
+	//   - Zerolog event for a debug message.
 	Debug() *zerolog.Event
+
 	// Info returns an info-level event for logging.
+	//
+	// Returns:
+	//   - Zerolog event for an info message.
 	Info() *zerolog.Event
+
 	// Warn returns a warn-level event for logging.
+	//
+	// Returns:
+	//   - Zerolog event for a warning message.
 	Warn() *zerolog.Event
+
 	// Error returns an error-level event for logging.
+	//
+	// Returns:
+	//   - Zerolog event for an error message.
 	Error() *zerolog.Event
-	// Sync flushes any buffered log entries (no-op for zerolog, kept for compatibility).
+
+	// Sync flushes any buffered log entries.
+	//
+	// This is a no-op for zerolog and exists for interface compatibility.
+	//
+	// Returns:
+	//   - Always nil.
 	Sync() error
+
 	// Level sets the minimum log level dynamically.
+	//
+	// Parameters:
+	//   - level: Minimum zerolog level to emit.
 	Level(level zerolog.Level)
-	// SetCaptureFunc sets a callback function to capture log messages for TUI display.
-	// When set, log messages are sent to this callback in addition to normal output.
+
+	// SetCaptureFunc sets a callback that receives log messages for TUI display.
+	//
+	// Parameters:
+	//   - captureFunc: Callback invoked with level and message, or nil to disable capture.
 	SetCaptureFunc(captureFunc LogCaptureFunc)
 }
 
@@ -50,9 +74,10 @@ type ZerologLogger struct {
 	logger        zerolog.Logger
 	mu            sync.RWMutex
 	output        io.Writer
-	captureFunc   LogCaptureFunc
 	captureWriter *captureWriter
 }
+
+var _ Logger = (*ZerologLogger)(nil)
 
 // captureWriter wraps an io.Writer and captures written data for TUI display.
 type captureWriter struct {
@@ -62,8 +87,16 @@ type captureWriter struct {
 	captureEnabled bool
 }
 
-// Write implements io.Writer, writing to the underlying output and capturing the data.
-// When capture is enabled, output is discarded to prevent duplicate logs in TUI mode.
+// Write implements io.Writer, writing to the underlying output or capturing the data.
+//
+// When capture is enabled, output is discarded so the TUI does not show duplicate logs.
+//
+// Parameters:
+//   - data: Log bytes produced by zerolog.
+//
+// Returns:
+//   - Number of bytes accepted.
+//   - An error if the underlying writer fails.
 func (w *captureWriter) Write(data []byte) (int, error) {
 	w.mu.RLock()
 	output := w.output
@@ -74,10 +107,6 @@ func (w *captureWriter) Write(data []byte) (int, error) {
 	// The log message will only be sent through the capture mechanism to the TUI log panel.
 	if enabled {
 		w.captureLogMessage(string(data))
-
-		// Write to io.Discard to satisfy the writer interface without producing output.
-		// io.Discard.Write always returns (len(p), nil), so we can safely ignore the error.
-		_, _ = io.Discard.Write(data)
 
 		return len(data), nil
 	}
@@ -91,14 +120,12 @@ func (w *captureWriter) Write(data []byte) (int, error) {
 	return bytesWritten, nil
 }
 
-// captureLogMessage parses and captures the log message from zerolog ConsoleWriter output.
+// captureLogMessage parses a ConsoleWriter line and sends it to the capture callback.
 //
-// Expected format from ConsoleWriter: "<timestamp> <LEVEL> <message>"
-// where LEVEL is one of: DBG, INF, WRN, ERR, FTL (zerolog's default level abbreviations).
+// Expected format is "<timestamp> <LEVEL> <message>", where LEVEL is DBG, INF, WRN, ERR, or FTL.
 //
-// This function scans fields to find a known level token rather than assuming a fixed
-// position, making it tolerant to format changes (e.g., additional prefix fields).
-// If no known level token is found, it defaults to level "LOG" with the full message.
+// Parameters:
+//   - logLine: Console-formatted log line.
 func (w *captureWriter) captureLogMessage(logLine string) {
 	w.mu.RLock()
 	capture := w.captureFunc
@@ -108,59 +135,44 @@ func (w *captureWriter) captureLogMessage(logLine string) {
 		return
 	}
 
-	// Known zerolog level abbreviations used by ConsoleWriter.
-	// These are the default short level names output by zerolog.
-	knownLevels := map[string]bool{
-		"DBG": true,
-		"INF": true,
-		"WRN": true,
-		"ERR": true,
-		"FTL": true,
-	}
-
-	// Parse the log line to extract level and message.
-	// Expected format: "2006-01-02T15:04:05Z07:00 DBG message here"
 	parts := strings.Fields(logLine)
 
-	const minLogParts = 3 // timestamp, level, message
+	const minLogParts = 3
 	if len(parts) < minLogParts {
-		// Not enough parts, use the whole line as a generic log entry.
 		capture("LOG", strings.TrimSpace(logLine))
 
 		return
 	}
 
-	// Scan for a known level token instead of assuming fixed position.
-	// This makes parsing more robust against format changes.
-	level := "LOG" // default level if no known token found
+	level := "LOG"
 	levelIndex := -1
 
 	for i, part := range parts {
-		if knownLevels[part] {
+		switch part {
+		case "DBG", "INF", "WRN", "ERR", "FTL":
 			level = part
 			levelIndex = i
+		}
 
+		if levelIndex >= 0 {
 			break
 		}
 	}
 
-	var msg string
-
+	msg := strings.TrimSpace(logLine)
 	if levelIndex >= 0 {
-		// Level found: message is everything after the level field.
-		// Build message from the parsed parts slice to avoid matching earlier tokens.
 		msg = strings.TrimSpace(strings.Join(parts[levelIndex+1:], " "))
-	} else {
-		// No known level found: use the whole line as the message.
-		msg = strings.TrimSpace(logLine)
 	}
 
 	capture(level, msg)
 }
 
-// SetCaptureFunc sets the capture function for the underlying capture writer.
-// When a non-nil captureFunc is provided, capture is enabled and log messages
-// will be sent to the callback instead of the normal output.
+// SetCaptureFunc sets the capture callback for this writer.
+//
+// A non-nil callback enables capture and discards normal output.
+//
+// Parameters:
+//   - captureFunc: Callback invoked with level and message, or nil to disable capture.
 func (w *captureWriter) SetCaptureFunc(captureFunc LogCaptureFunc) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -169,22 +181,13 @@ func (w *captureWriter) SetCaptureFunc(captureFunc LogCaptureFunc) {
 	w.captureEnabled = captureFunc != nil
 }
 
-// SetupCaptureBridge configures the capture writer with a bridge function that
-// calls the provided callback. This is used internally to connect the capture
-// writer to the logger's capture function.
-func (w *captureWriter) SetupCaptureBridge(bridge func(level, msg string)) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	w.captureFunc = bridge
-}
-
-// NewLogger creates a new zerolog-based logger with console output.
+// NewLogger creates a zerolog-based logger with console output to stderr.
 //
-// The logger is configured with:
-//   - ConsoleWriter output to os.Stderr
-//   - RFC3339 timestamp format
-//   - Info level as default
+// The logger uses RFC3339 timestamps and defaults to info level.
+//
+// Returns:
+//   - Configured logger.
+//   - Always nil error.
 func NewLogger() (Logger, error) {
 	output := zerolog.ConsoleWriter{
 		Out:        os.Stderr,
@@ -205,11 +208,14 @@ func NewLogger() (Logger, error) {
 	}, nil
 }
 
-// NewLoggerWithCapture creates a new zerolog-based logger that supports log capture.
+// NewLoggerWithCapture creates a logger that can send messages to the TUI.
 //
-// The returned logger uses a captureWriter that can send log messages to a callback
-// for display in the TUI. This is useful for verbose mode where debug logs should
-// appear within the TUI interface rather than being written directly to stderr.
+// The returned writer can be used to inspect capture state in tests.
+//
+// Returns:
+//   - Logger that supports SetCaptureFunc.
+//   - Underlying capture writer.
+//   - Always nil error.
 func NewLoggerWithCapture() (Logger, *captureWriter, error) {
 	// Create a captureWriter that wraps stderr.
 	// captureFunc and captureEnabled are left as zero values (nil and false).
@@ -221,7 +227,7 @@ func NewLoggerWithCapture() (Logger, *captureWriter, error) {
 	consoleWriter := zerolog.ConsoleWriter{
 		Out:        captureWriter,
 		TimeFormat: time.RFC3339,
-		NoColor:    false,
+		NoColor:    true,
 	}
 
 	// Create the base logger with info level.
@@ -234,7 +240,6 @@ func NewLoggerWithCapture() (Logger, *captureWriter, error) {
 	logger := &ZerologLogger{
 		logger:        zerologLogger,
 		output:        consoleWriter,
-		captureFunc:   nil,
 		captureWriter: captureWriter,
 	}
 
@@ -242,6 +247,9 @@ func NewLoggerWithCapture() (Logger, *captureWriter, error) {
 }
 
 // Debug returns a debug-level event for logging.
+//
+// Returns:
+//   - Zerolog event for a debug message.
 func (z *ZerologLogger) Debug() *zerolog.Event {
 	z.mu.RLock()
 	defer z.mu.RUnlock()
@@ -251,6 +259,9 @@ func (z *ZerologLogger) Debug() *zerolog.Event {
 }
 
 // Info returns an info-level event for logging.
+//
+// Returns:
+//   - Zerolog event for an info message.
 func (z *ZerologLogger) Info() *zerolog.Event {
 	z.mu.RLock()
 	defer z.mu.RUnlock()
@@ -260,6 +271,9 @@ func (z *ZerologLogger) Info() *zerolog.Event {
 }
 
 // Warn returns a warn-level event for logging.
+//
+// Returns:
+//   - Zerolog event for a warning message.
 func (z *ZerologLogger) Warn() *zerolog.Event {
 	z.mu.RLock()
 	defer z.mu.RUnlock()
@@ -269,6 +283,9 @@ func (z *ZerologLogger) Warn() *zerolog.Event {
 }
 
 // Error returns an error-level event for logging.
+//
+// Returns:
+//   - Zerolog event for an error message.
 func (z *ZerologLogger) Error() *zerolog.Event {
 	z.mu.RLock()
 	defer z.mu.RUnlock()
@@ -277,8 +294,12 @@ func (z *ZerologLogger) Error() *zerolog.Event {
 	return z.logger.Error()
 }
 
-// Sync is a no-op for zerolog, kept for interface compatibility.
-// zerolog writes directly to the output without buffering.
+// Sync flushes any buffered log entries.
+//
+// This is a no-op for zerolog and exists for interface compatibility.
+//
+// Returns:
+//   - Always nil.
 func (z *ZerologLogger) Sync() error {
 	z.mu.RLock()
 	defer z.mu.RUnlock()
@@ -287,6 +308,9 @@ func (z *ZerologLogger) Sync() error {
 }
 
 // Level sets the minimum log level dynamically.
+//
+// Parameters:
+//   - level: Minimum zerolog level to emit.
 func (z *ZerologLogger) Level(level zerolog.Level) {
 	z.mu.Lock()
 	defer z.mu.Unlock()
@@ -295,41 +319,25 @@ func (z *ZerologLogger) Level(level zerolog.Level) {
 	z.logger = z.logger.Level(level)
 }
 
-// SetCaptureFunc sets a callback function to capture log messages for TUI display.
-// When set, log messages are parsed and sent to this callback.
+// SetCaptureFunc sets a callback that receives log messages for TUI display.
+//
+// Parameters:
+//   - captureFunc: Callback invoked with level and message, or nil to disable capture.
 func (z *ZerologLogger) SetCaptureFunc(captureFunc LogCaptureFunc) {
-	z.mu.Lock()
-	z.captureFunc = captureFunc
-	z.mu.Unlock()
-
-	// Update the capture writer's state atomically when it exists.
-	// SetCaptureFunc is called FIRST to update the writer's capture handler and
-	// enable flag. Then SetupCaptureBridge installs a bridge that delegates to
-	// the writer's capture handler. This ordering prevents a race condition where
-	// logs could be dropped between setting up the bridge and updating the handler.
 	if z.captureWriter != nil {
 		z.captureWriter.SetCaptureFunc(captureFunc)
-		z.captureWriter.SetupCaptureBridge(func(level, msg string) {
-			z.mu.RLock()
-			capture := z.captureFunc
-			z.mu.RUnlock()
-
-			if capture != nil {
-				capture(level, msg)
-			}
-		})
 	}
 }
 
 // ParseLevel parses a string log level into a zerolog.Level.
 //
-// Supported levels (case-insensitive):
-//   - "debug" -> DebugLevel
-//   - "info" -> InfoLevel
-//   - "warn" -> WarnLevel
-//   - "error" -> ErrorLevel
+// Supported levels are debug, info, warn, and error. Unrecognized values default to info.
 //
-// Defaults to InfoLevel if the level is unrecognized.
+// Parameters:
+//   - level: Case-insensitive level name.
+//
+// Returns:
+//   - Matching zerolog level, or InfoLevel when unrecognized.
 func ParseLevel(level string) zerolog.Level {
 	switch strings.ToLower(level) {
 	case "debug":

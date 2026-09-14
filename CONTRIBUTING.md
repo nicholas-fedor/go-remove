@@ -217,12 +217,11 @@ Comprehensive testing is **MANDATORY**. All tests must pass before submission.
 
 #### Integration Tests (Black-Box)
 
-- **Location**: `/testing/integration/<package>/`
+- **Location**: Same directory as the package, in `*_integration_test.go` files
 - **Requirements**:
-  - Test from outside the package
+  - Test from outside the package (`package <name>_test`)
   - Use Mockery-generated mocks
   - No external calls allowed
-  - Package name: <package>_test
 - **Purpose**: Verify component interactions
 
 #### E2E Tests
@@ -249,15 +248,6 @@ Comprehensive testing is **MANDATORY**. All tests must pass before submission.
 ```bash
 # Run all tests with race detection
 make test
-
-# Run unit tests only
-make test-unit
-
-# Run integration tests
-make test-integration
-
-# Run E2E tests
-make test-e2e
 
 # Generate coverage report
 make coverage

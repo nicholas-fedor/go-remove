@@ -10,7 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -77,6 +77,15 @@ type HistoryMsg struct {
 
 // ProgramRunner defines an interface for running Bubbletea programs.
 type ProgramRunner interface {
+	// RunProgram launches a Bubble Tea program.
+	//
+	// Parameters:
+	//   - m: Initial TUI model.
+	//   - opts: Optional Bubble Tea program options.
+	//
+	// Returns:
+	//   - Started program.
+	//   - An error if the program cannot be created.
 	RunProgram(m tea.Model, opts ...tea.ProgramOption) (*tea.Program, error)
 }
 
@@ -130,12 +139,20 @@ type model struct {
 // DefaultRunner provides the default Bubbletea program runner.
 type DefaultRunner struct{}
 
-// NewLogMsg creates a new LogMsg for sending log entries to the TUI.
-func NewLogMsg(level, message string) LogMsg {
-	return LogMsg{Level: level, Message: message}
-}
+var _ ProgramRunner = DefaultRunner{}
 
-// RunTUI launches the interactive TUI mode for binary selection and removal.
+// RunTUI launches the interactive TUI for binary selection, removal, and restore.
+//
+// Parameters:
+//   - dir: Directory containing Go binaries.
+//   - config: CLI configuration.
+//   - log: Logger used by the TUI.
+//   - filesystem: Filesystem implementation.
+//   - runner: Bubble Tea program runner.
+//   - historyMgr: History manager for undo and restore.
+//
+// Returns:
+//   - An error if no binaries are found or the program fails to run.
 func RunTUI(
 	dir string,
 	config Config,
@@ -202,22 +219,29 @@ func RunTUI(
 }
 
 // setupLogCapture configures the logger's capture callback to send messages to the TUI.
+//
 // This method is idempotent and can be called multiple times safely.
+//
+// Parameters:
+//   - log: Logger that will receive the capture callback.
 func (m *model) setupLogCapture(log logger.Logger) {
 	log.SetCaptureFunc(func(level, msg string) {
 		// Send to channel without blocking.
 		// If channel is full, the message is dropped to prevent blocking.
 		select {
-		case m.logChan <- NewLogMsg(level, msg):
+		case m.logChan <- LogMsg{Level: level, Message: msg}:
 		default:
 			// Channel is full, message is dropped to prevent blocking.
 		}
 	})
 }
 
-// toggleVerboseLogging toggles verbose logging mode and log panel visibility.
-// It updates both the logger level (Info <-> Debug) and the showLogs state.
-// Returns a command to start polling for logs if verbose mode is being enabled.
+// toggleVerboseLogging toggles verbose logging and log panel visibility.
+//
+// It switches the logger between Info and Debug and starts log polling when enabled.
+//
+// Returns:
+//   - Command to poll the log channel, or a no-op command when logs are hidden.
 func (m *model) toggleVerboseLogging() tea.Cmd {
 	m.showLogs = !m.showLogs
 
@@ -245,6 +269,9 @@ func (m *model) toggleVerboseLogging() tea.Cmd {
 }
 
 // defaultStyleConfig provides default TUI style settings.
+//
+// Returns:
+//   - Default color and cursor configuration.
 func defaultStyleConfig() styleConfig {
 	return styleConfig{
 		TitleColor:    "39",  // Bright blue
@@ -259,7 +286,15 @@ func defaultStyleConfig() styleConfig {
 	}
 }
 
-// RunProgram launches a Bubbletea program with the given model and options.
+// RunProgram launches a Bubble Tea program with the given model and options.
+//
+// Parameters:
+//   - m: Initial TUI model.
+//   - opts: Optional Bubble Tea program options.
+//
+// Returns:
+//   - Started program.
+//   - Always nil error.
 func (r DefaultRunner) RunProgram(m tea.Model, opts ...tea.ProgramOption) (*tea.Program, error) {
 	program := tea.NewProgram(m, opts...)
 
@@ -267,6 +302,9 @@ func (r DefaultRunner) RunProgram(m tea.Model, opts ...tea.ProgramOption) (*tea.
 }
 
 // Init prepares the TUI model for rendering.
+//
+// Returns:
+//   - Initial command batch for history loading and log polling.
 func (m *model) Init() tea.Cmd {
 	m.sortChoices()
 
@@ -294,6 +332,9 @@ func (m *model) Init() tea.Cmd {
 }
 
 // loadHistory returns a command that loads deletion history.
+//
+// Returns:
+//   - Command that produces a HistoryMsg.
 func (m *model) loadHistory() tea.Cmd {
 	return func() tea.Msg {
 		// Check if history manager is available
@@ -309,8 +350,11 @@ func (m *model) loadHistory() tea.Cmd {
 }
 
 // pollLogChannel returns a command that polls for log messages.
-// This approach avoids deadlocks by having the TUI poll the channel
-// rather than trying to Send() from within the capture callback.
+//
+// The TUI polls the channel instead of sending from the capture callback, which avoids deadlocks.
+//
+// Returns:
+//   - Command that produces a LogMsg or poll tick.
 func (m *model) pollLogChannel() tea.Cmd {
 	return func() tea.Msg {
 		// Wait for either a log message or a timeout.
@@ -333,15 +377,22 @@ const pollInterval = 50 * time.Millisecond
 type pollLogTickMsg struct{}
 
 // Update processes TUI events and updates the model state.
+//
+// Parameters:
+//   - msg: Incoming Bubble Tea message.
+//
+// Returns:
+//   - Updated model.
+//   - Follow-up command, if any.
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		// Handle confirmation dialog first if active
+	case tea.KeyPressMsg:
+		// Ignore KeyReleaseMsg. KeyMsg matches both, so a single physical
+		// keystroke would otherwise undo or restore twice.
 		if m.confirmation != confirmNone {
 			return m.handleConfirmation(msg)
 		}
 
-		// Handle mode-specific key bindings
 		if m.mode == modeHistory {
 			return m.updateHistoryMode(msg)
 		}
@@ -394,7 +445,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // handleConfirmation processes key presses during confirmation dialogs.
-func (m *model) handleConfirmation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+//
+// Parameters:
+//   - msg: Key press from the user.
+//
+// Returns:
+//   - Updated model.
+//   - Follow-up command, if any.
+func (m *model) handleConfirmation(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
 		// Confirmed - execute the operation
@@ -409,6 +467,10 @@ func (m *model) handleConfirmation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // executeConfirmation executes the pending confirmation operation.
+//
+// Returns:
+//   - Updated model.
+//   - Follow-up command, if any.
 func (m *model) executeConfirmation() (tea.Model, tea.Cmd) {
 	ctx := context.Background()
 
@@ -447,7 +509,14 @@ func (m *model) executeConfirmation() (tea.Model, tea.Cmd) {
 }
 
 // updateHistoryMode processes key events in history mode.
-func (m *model) updateHistoryMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+//
+// Parameters:
+//   - msg: Key press from the user.
+//
+// Returns:
+//   - Updated model.
+//   - Follow-up command, if any.
+func (m *model) updateHistoryMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "q":
 		return m, tea.Quit // Exit the TUI
@@ -507,7 +576,14 @@ func (m *model) updateHistoryMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // updateBinaryMode processes key events in binary selection mode.
-func (m *model) updateBinaryMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+//
+// Parameters:
+//   - msg: Key press from the user.
+//
+// Returns:
+//   - Updated model.
+//   - Follow-up command, if any.
+func (m *model) updateBinaryMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "q":
 		return m, tea.Quit // Exit the TUI
@@ -623,7 +699,11 @@ func (m *model) updateBinaryMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleRestore handles restoring the selected history entry.
+// handleRestore restores the selected history entry.
+//
+// Returns:
+//   - Updated model.
+//   - Command to refresh history after a successful restore.
 func (m *model) handleRestore() (tea.Model, tea.Cmd) {
 	if m.historyManager == nil || m.historyCursor >= len(m.historyEntries) {
 		m.status = "No history entry selected"
@@ -634,7 +714,7 @@ func (m *model) handleRestore() (tea.Model, tea.Cmd) {
 	entry := m.historyEntries[m.historyCursor]
 
 	// Check if entry can be restored
-	if !entry.CanRestore {
+	if !entry.InTrash {
 		m.status = fmt.Sprintf("Cannot restore %s: not available in trash", entry.BinaryName)
 
 		return m, nil
@@ -669,7 +749,11 @@ func (m *model) handleRestore() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleUndo handles undoing the most recent deletion.
+// handleUndo restores the most recently deleted binary.
+//
+// Returns:
+//   - Updated model.
+//   - Command to refresh history when viewing history mode.
 func (m *model) handleUndo() (tea.Model, tea.Cmd) {
 	if m.historyManager == nil {
 		m.status = "History manager not available"
@@ -712,7 +796,14 @@ func (m *model) handleUndo() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleClearEntry handles clearing a history entry.
+// handleClearEntry removes a history entry and optionally deletes it from trash.
+//
+// Parameters:
+//   - deleteFromTrash: When true, also permanently delete the trashed binary.
+//
+// Returns:
+//   - Updated model.
+//   - Command to refresh history after a successful clear.
 func (m *model) handleClearEntry(deleteFromTrash bool) (tea.Model, tea.Cmd) {
 	if m.historyManager == nil || m.historyCursor >= len(m.historyEntries) {
 		m.status = "No history entry selected"
@@ -740,7 +831,10 @@ func (m *model) handleClearEntry(deleteFromTrash bool) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// addLogEntry adds a log message to the circular buffer, maintaining maxLogLines limit.
+// addLogEntry adds a log message to the circular buffer.
+//
+// Parameters:
+//   - msg: Log message to display.
 func (m *model) addLogEntry(msg LogMsg) {
 	// Format the log entry: "[LEVEL] message"
 	entry := fmt.Sprintf("[%s] %s", msg.Level, msg.Message)
@@ -754,7 +848,10 @@ func (m *model) addLogEntry(msg LogMsg) {
 	}
 }
 
-// getVisibleLogs returns the last N log lines that fit within the available height.
+// getVisibleLogs returns the last log lines that fit in the panel.
+//
+// Returns:
+//   - Visible log lines, or nil when the log panel is hidden.
 func (m *model) getVisibleLogs() []string {
 	if !m.showLogs {
 		return nil
@@ -766,20 +863,20 @@ func (m *model) getVisibleLogs() []string {
 	return m.logs[start:]
 }
 
-// sortChoices sorts the choices based on the current sort order.
+// sortChoices sorts the binary list according to the current sort order.
 func (m *model) sortChoices() {
 	if len(m.choices) == 0 {
 		return
 	}
 
-	if m.sortAscending {
-		sort.Strings(m.choices)
-	} else {
-		sort.Sort(sort.Reverse(sort.StringSlice(m.choices)))
+	slices.Sort(m.choices)
+
+	if !m.sortAscending {
+		slices.Reverse(m.choices)
 	}
 }
 
-// updateGrid recalculates the grid layout based on current state and terminal size.
+// updateGrid recalculates the grid layout from the current state and terminal size.
 func (m *model) updateGrid() {
 	// Determine the maximum length of binary names for column sizing.
 	maxNameLen := 0
@@ -801,19 +898,19 @@ func (m *model) updateGrid() {
 		statusAdjustment = 1
 	}
 
-	availHeight := maximum(m.height-minAvailHeightAdjustment-statusAdjustment, 1)
+	availHeight := max(m.height-minAvailHeightAdjustment-statusAdjustment, 1)
 
 	// Adjust available height for log panel if visible
 	if m.showLogs {
 		// Reserve up to maxVisibleLogLines lines for log panel (plus separator lines)
-		visibleLogCount := minimum(len(m.logs), maxVisibleLogLines)
+		visibleLogCount := min(len(m.logs), maxVisibleLogLines)
 		if visibleLogCount == 0 {
 			// Empty log panel: header + placeholder
 			visibleLogCount = 1
 		}
 
 		logPanelHeight := visibleLogCount + logPanelSeparatorLines
-		availHeight = maximum(availHeight-logPanelHeight, 1)
+		availHeight = max(availHeight-logPanelHeight, 1)
 	}
 
 	// Clear grid if no choices remain.
@@ -827,14 +924,14 @@ func (m *model) updateGrid() {
 	}
 
 	// Compute grid dimensions: maximize rows, limit columns by width.
-	maxCols := maximum(availWidth/colWidth, 1)
+	maxCols := max(availWidth/colWidth, 1)
 
-	m.rows = minimum(availHeight, len(m.choices))
+	m.rows = min(availHeight, len(m.choices))
 	if m.rows == 0 {
 		m.rows = 1 // Ensure at least one row
 	}
 
-	m.cols = minimum(maxCols, (len(m.choices)+m.rows-1)/m.rows)
+	m.cols = min(maxCols, (len(m.choices)+m.rows-1)/m.rows)
 
 	// Clamp cursor position to valid bounds after resizing.
 	if m.cursorX >= m.cols {
@@ -853,7 +950,10 @@ func (m *model) updateGrid() {
 	}
 }
 
-// View renders the TUI interface as a tea.View.
+// View renders the TUI interface.
+//
+// Returns:
+//   - Bubble Tea view for the current mode.
 func (m *model) View() tea.View {
 	if m.mode == modeHistory {
 		return m.viewHistory()
@@ -863,6 +963,9 @@ func (m *model) View() tea.View {
 }
 
 // viewBinaries renders the binary selection view.
+//
+// Returns:
+//   - Bubble Tea view listing binaries in a grid.
 func (m *model) viewBinaries() tea.View {
 	if len(m.choices) == 0 {
 		view := tea.NewView("No binaries found.\n")
@@ -905,7 +1008,7 @@ func (m *model) viewBinaries() tea.View {
 
 			item := m.choices[idx]
 			visibleLen := visibleLenPrefix + len([]rune(item))
-			padding := maximum(colWidth-visibleLen, 0)
+			padding := max(colWidth-visibleLen, 0)
 			cell := prefix + item + strings.Repeat(" ", padding)
 			grid.WriteString(cell)
 		}
@@ -990,6 +1093,9 @@ func (m *model) viewBinaries() tea.View {
 }
 
 // viewHistory renders the history view.
+//
+// Returns:
+//   - Bubble Tea view listing deletion history.
 func (m *model) viewHistory() tea.View {
 	// Apply configured styles for UI elements.
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(m.styles.TitleColor))
@@ -1042,7 +1148,7 @@ func (m *model) viewHistory() tea.View {
 
 		if m.showLogs {
 			// Reserve additional space for log panel (header + separator + lines)
-			visibleLogCount := minimum(len(m.logs), maxVisibleLogLines)
+			visibleLogCount := min(len(m.logs), maxVisibleLogLines)
 			if visibleLogCount == 0 {
 				visibleLogCount = 1 // Placeholder line
 			}
@@ -1050,9 +1156,9 @@ func (m *model) viewHistory() tea.View {
 			reservedHeight += visibleLogCount + logPanelSeparatorLines
 		}
 
-		maxVisibleEntries = maximum(m.height-reservedHeight, 1)
+		maxVisibleEntries = max(m.height-reservedHeight, 1)
 		entryCount = len(m.historyEntries)
-		visibleCount = minimum(entryCount, maxVisibleEntries)
+		visibleCount = min(entryCount, maxVisibleEntries)
 
 		// Adjust if we need to show "...and X more" message
 		showMoreIndicator := entryCount > maxVisibleEntries
@@ -1067,7 +1173,7 @@ func (m *model) viewHistory() tea.View {
 			// If cursor is below visible range, adjust start index
 			startIdx = m.historyCursor - visibleCount + 1
 			// Recalculate visible count based on new start
-			visibleCount = minimum(entryCount-startIdx, maxVisibleEntries)
+			visibleCount = min(entryCount-startIdx, maxVisibleEntries)
 			if showMoreIndicator && visibleCount > 0 {
 				visibleCount--
 			}
@@ -1179,7 +1285,7 @@ func (m *model) viewHistory() tea.View {
 
 	if !m.historyLoading && len(m.historyEntries) > 0 {
 		// Calculate actual displayed rows (before visibleCount was potentially decremented)
-		actualVisibleCount := minimum(entryCount, maxVisibleEntries)
+		actualVisibleCount := min(entryCount, maxVisibleEntries)
 		contentHeight += actualVisibleCount + historyTableHeaderLines
 		// Account for the "...and X more" indicator line if it will be displayed
 		if entryCount > maxVisibleEntries {
@@ -1223,22 +1329,4 @@ func (m *model) viewHistory() tea.View {
 	view.AltScreen = true
 
 	return view
-}
-
-// maximum returns the larger of two integers.
-func maximum(a, b int) int {
-	if a > b {
-		return a
-	}
-
-	return b
-}
-
-// minimum returns the smaller of two integers.
-func minimum(a, b int) int {
-	if a < b {
-		return a
-	}
-
-	return b
 }

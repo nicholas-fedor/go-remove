@@ -105,7 +105,7 @@ func TestMoveToTrash(t *testing.T) {
 			require.NoError(t, err)
 
 			filePath := tt.setup(t)
-			ctx := context.Background()
+			ctx := t.Context()
 
 			trashPath, err := trasher.MoveToTrash(ctx, filePath)
 
@@ -149,7 +149,7 @@ func TestMoveToTrash_ContextCancellation(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create cancelled context
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	_, err = trasher.MoveToTrash(ctx, testFile)
@@ -184,7 +184,7 @@ func TestRestoreFromTrash(t *testing.T) {
 				err = os.WriteFile(originalPath, []byte("test content"), 0o644)
 				require.NoError(t, err)
 
-				ctx := context.Background()
+				ctx := t.Context()
 				trashPath, err := trasher.MoveToTrash(ctx, originalPath)
 				require.NoError(t, err)
 
@@ -206,7 +206,7 @@ func TestRestoreFromTrash(t *testing.T) {
 				err = os.WriteFile(originalPath, []byte("test content"), 0o644)
 				require.NoError(t, err)
 
-				ctx := context.Background()
+				ctx := t.Context()
 				trashPath, err := trasher.MoveToTrash(ctx, originalPath)
 				require.NoError(t, err)
 
@@ -246,7 +246,7 @@ func TestRestoreFromTrash(t *testing.T) {
 			trashPath, originalPath, cleanup := tt.setup(t, trasher)
 			defer cleanup()
 
-			ctx := context.Background()
+			ctx := t.Context()
 			err = trasher.RestoreFromTrash(ctx, trashPath, originalPath)
 
 			if tt.wantErr {
@@ -286,7 +286,7 @@ func TestIsInTrash(t *testing.T) {
 	assert.False(t, trasher.IsInTrash(testFile))
 
 	// Move to trash
-	ctx := context.Background()
+	ctx := t.Context()
 	trashPath, err := trasher.MoveToTrash(ctx, testFile)
 	require.NoError(t, err)
 
@@ -315,7 +315,7 @@ func TestDeletePermanently(t *testing.T) {
 	require.NoError(t, err)
 
 	// Move to trash
-	ctx := context.Background()
+	ctx := t.Context()
 	trashPath, err := trasher.MoveToTrash(ctx, testFile)
 	require.NoError(t, err)
 
@@ -349,7 +349,7 @@ func TestDeletePermanently_NotInTrash(t *testing.T) {
 	err = os.WriteFile(testFile, []byte("test content"), 0o644)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	err = trasher.DeletePermanently(ctx, testFile)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrFileNotInTrash)
@@ -371,7 +371,7 @@ func TestListTrash(t *testing.T) {
 	fileNames := []string{"file1.txt", "file2.txt", "file3.txt"}
 	originalPaths := make(map[string]string)
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for _, name := range fileNames {
 		filePath := filepath.Join(tempDir, name)
@@ -444,7 +444,12 @@ func TestEncodeDecodeTrashPath(t *testing.T) {
 		{
 			name:     "path with spaces",
 			path:     "/home/user/my file.txt",
-			expected: "/home/user/my file.txt",
+			expected: "/home/user/my%20file.txt",
+		},
+		{
+			name:     "path with non-ascii bytes",
+			path:     "/tmp/\xe9",
+			expected: "/tmp/%E9",
 		},
 		{
 			name:     "path with percent sign",
@@ -591,52 +596,6 @@ func TestParseTrashInfo(t *testing.T) {
 	}
 }
 
-// TestSplitLines tests the splitLines helper.
-func TestSplitLines(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		input    string
-		expected []string
-	}{
-		{
-			name:     "Unix line endings",
-			input:    "line1\nline2\nline3",
-			expected: []string{"line1", "line2", "line3"},
-		},
-		{
-			name:     "Windows line endings",
-			input:    "line1\r\nline2\r\nline3",
-			expected: []string{"line1", "line2", "line3"},
-		},
-		{
-			name:     "mixed line endings",
-			input:    "line1\nline2\r\nline3",
-			expected: []string{"line1", "line2", "line3"},
-		},
-		{
-			name:     "trailing newline",
-			input:    "line1\nline2\n",
-			expected: []string{"line1", "line2"},
-		},
-		{
-			name:     "single line",
-			input:    "line1",
-			expected: []string{"line1"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			result := splitLines(tt.input)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 // TestErrors tests the exported error variables.
 func TestErrors(t *testing.T) {
 	t.Parallel()
@@ -725,22 +684,21 @@ func BenchmarkMoveToTrash(b *testing.B) {
 	require.NoError(b, err)
 
 	tempDir := b.TempDir()
-	ctx := context.Background()
+	ctx := b.Context()
+	i := 0
 
-	b.ResetTimer()
-
-	for i := range b.N {
+	for b.Loop() {
 		b.StopTimer()
 
 		filePath := filepath.Join(tempDir, fmt.Sprintf("benchfile_%d.txt", i))
+		i++
 
 		err := os.WriteFile(filePath, []byte("benchmark content"), 0o644)
 		require.NoError(b, err)
 
 		b.StartTimer()
 
-		_, err = trasher.MoveToTrash(ctx, filePath)
-		if err != nil {
+		if _, err := trasher.MoveToTrash(ctx, filePath); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -750,9 +708,7 @@ func BenchmarkMoveToTrash(b *testing.B) {
 func BenchmarkEncodeTrashPath(b *testing.B) {
 	path := "/home/user/my file with spaces and % signs.txt"
 
-	b.ResetTimer()
-
-	for range b.N {
+	for b.Loop() {
 		_ = encodeTrashPath(path)
 	}
 }
@@ -761,9 +717,7 @@ func BenchmarkEncodeTrashPath(b *testing.B) {
 func BenchmarkParseTrashInfo(b *testing.B) {
 	content := "[Trash Info]\nPath=/home/user/test.txt\nDeletionDate=2026-03-02T12:00:00Z\n"
 
-	b.ResetTimer()
-
-	for range b.N {
+	for b.Loop() {
 		_, _, _ = parseTrashInfo(content)
 	}
 }

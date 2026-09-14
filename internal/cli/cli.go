@@ -18,79 +18,69 @@ import (
 
 // Config holds command-line configuration options.
 type Config struct {
-	Binary      string // Binary name to remove; empty for TUI mode
-	Verbose     bool   // Enable verbose logging
-	Goroot      bool   // Use GOROOT/bin instead of GOBIN or GOPATH/bin
-	Help        bool   // Show help; managed by Cobra
-	LogLevel    string // Log level (debug, info, warn, error)
-	RestoreMode bool   // Start TUI in history mode
+	Binary      string
+	Verbose     bool
+	Goroot      bool
+	Help        bool
+	LogLevel    string
+	RestoreMode bool
 }
 
 // Dependencies holds runtime dependencies for CLI execution.
 type Dependencies struct {
-	FS             fs.FS           // Filesystem operations
-	Logger         logger.Logger   // Logging interface
-	HistoryManager history.Manager // History manager for undo/restore operations (optional)
+	FS             fs.FS
+	Logger         logger.Logger
+	HistoryManager history.Manager
 }
 
 // Run executes the CLI logic with the provided dependencies and configuration.
+//
+// Parameters:
+//   - deps: Filesystem, logger, and optional history manager.
+//   - config: CLI configuration for the requested operation.
+//
+// Returns:
+//   - An error if directory resolution, deletion, or TUI execution fails.
 func Run(deps Dependencies, config Config) error {
 	log := deps.Logger
+	defer func() { _ = log.Sync() }()
 
-	// Determine the binary directory based on GOROOT or GOPATH/GOBIN settings.
 	binDir, err := deps.FS.DetermineBinDir(config.Goroot)
 	if err != nil {
-		_ = log.Sync() // Flush logs; errors are ignored
-
-		return fmt.Errorf("failed to determine binary directory: %w", err)
+		return fmt.Errorf("determining binary directory: %w", err)
 	}
 
-	// Execute either TUI mode or direct binary removal based on config.Binary.
 	if config.Binary == "" {
-		err = RunTUI(binDir, config, log, deps.FS, DefaultRunner{}, deps.HistoryManager)
-	} else {
-		binaryPath := deps.FS.AdjustBinaryPath(binDir, config.Binary)
-
-		// Record deletion to history if manager is available.
-		// RecordDeletion moves the binary to trash internally.
-		if deps.HistoryManager != nil {
-			ctx := context.Background()
-			if _, recordErr := deps.HistoryManager.RecordDeletion(
-				ctx,
-				binaryPath,
-			); recordErr != nil {
-				_ = log.Sync()
-
-				return fmt.Errorf("failed to record deletion: %w", recordErr)
-			}
-
-			// Binary was successfully moved to trash by RecordDeletion.
-			if !config.Verbose {
-				fmt.Fprintf(os.Stdout, "Successfully removed %s\n", config.Binary)
-			}
-		} else {
-			// No history manager available; use direct removal as fallback.
-			err = deps.FS.RemoveBinary(binaryPath, config.Binary, config.Verbose, log)
-			if err != nil {
-				_ = log.Sync()
-
-				return fmt.Errorf("failed to remove binary %s: %w", config.Binary, err)
-			}
-
-			if !config.Verbose {
-				fmt.Fprintf(os.Stdout, "Successfully removed %s\n", config.Binary)
-			}
+		if err := RunTUI(
+			binDir,
+			config,
+			log,
+			deps.FS,
+			DefaultRunner{},
+			deps.HistoryManager,
+		); err != nil {
+			return fmt.Errorf("running TUI: %w", err)
 		}
+
+		return nil
 	}
 
-	if err != nil {
-		_ = log.Sync() // Flush logs; errors are ignored
+	binaryPath := deps.FS.AdjustBinaryPath(binDir, config.Binary)
 
-		return fmt.Errorf("failed to run TUI: %w", err)
+	if deps.HistoryManager != nil {
+		if _, err := deps.HistoryManager.RecordDeletion(
+			context.Background(),
+			binaryPath,
+		); err != nil {
+			return fmt.Errorf("recording deletion: %w", err)
+		}
+	} else if err := deps.FS.RemoveBinary(binaryPath, config.Binary, config.Verbose, log); err != nil {
+		return fmt.Errorf("removing binary %s: %w", config.Binary, err)
 	}
 
-	// Sync the logger to ensure all logs are written before exit.
-	_ = log.Sync() // Errors are ignored
+	if !config.Verbose {
+		fmt.Fprintf(os.Stdout, "Successfully removed %s\n", config.Binary)
+	}
 
 	return nil
 }

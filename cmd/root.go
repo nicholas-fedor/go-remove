@@ -28,9 +28,6 @@ import (
 
 // Common errors for CLI operations.
 var (
-	// ErrInvalidLoggerType indicates that the logger is not of the expected *ZerologLogger type.
-	ErrInvalidLoggerType = errors.New("logger is not a *ZerologLogger")
-
 	// ErrUndoWithBinary indicates the user specified both --undo flag and a binary name.
 	ErrUndoWithBinary = errors.New("cannot specify binary name with --undo flag")
 
@@ -60,14 +57,15 @@ var (
 const dirPermissions = 0o750
 
 // getStoragePath returns the path for the history storage database.
-// It uses platform-specific paths:
-//   - Linux: $XDG_DATA_HOME/go-remove/history.badger or ~/.local/share/go-remove/history.badger
-//   - macOS: ~/Library/Application Support/go-remove/history.badger
-//   - Windows: %LOCALAPPDATA%/go-remove/history.badger
 //
-// The function attempts os.UserHomeDir() first, then falls back to os.Executable().
-// It verifies that the chosen directory is writable before returning.
-// Returns an error if no writable directory can be found.
+// It uses platform-specific data directories:
+//   - Linux: $XDG_DATA_HOME/go-remove/history.badger or ~/.local/share/go-remove/history.badger.
+//   - macOS: ~/Library/Application Support/go-remove/history.badger.
+//   - Windows: %LOCALAPPDATA%/go-remove/history.badger.
+//
+// Returns:
+//   - Absolute path to the Badger database directory.
+//   - An error if no writable storage directory can be found.
 func getStoragePath() (string, error) {
 	// Try to get a writable data home directory
 	dataHome, err := getWritableDataHome()
@@ -78,10 +76,14 @@ func getStoragePath() (string, error) {
 	return filepath.Join(dataHome, "go-remove", "history.badger"), nil
 }
 
-// getWritableDataHome attempts to find a writable directory for storing data.
-// It tries platform-specific paths first, then falls back to user home directory
-// and executable directory.
-// Returns an error if no writable directory can be found.
+// getWritableDataHome finds a writable directory for application data.
+//
+// It tries platform-specific paths first, then the user home directory,
+// then the executable directory.
+//
+// Returns:
+//   - Writable data directory path.
+//   - An error if no writable directory can be found.
 func getWritableDataHome() (string, error) {
 	// Try platform-specific paths first
 	candidates := getPlatformDataHomeCandidates()
@@ -115,8 +117,10 @@ func getWritableDataHome() (string, error) {
 	return "", ErrNoWritableStorage
 }
 
-// getPlatformDataHomeCandidates returns a list of potential data home directories
-// based on the current operating system.
+// getPlatformDataHomeCandidates returns candidate data directories for the current OS.
+//
+// Returns:
+//   - Ordered list of potential data home directories.
 func getPlatformDataHomeCandidates() []string {
 	var candidates []string
 
@@ -154,8 +158,13 @@ func getPlatformDataHomeCandidates() []string {
 	return candidates
 }
 
-// isDirWritable checks if a directory is writable by attempting to create
-// a temporary file in it.
+// isDirWritable reports whether a directory can be written to.
+//
+// Parameters:
+//   - dir: Directory path to test.
+//
+// Returns:
+//   - True if a temporary file can be created in the directory.
 func isDirWritable(dir string) bool {
 	// Create the directory if it doesn't exist
 	if err := os.MkdirAll(dir, dirPermissions); err != nil {
@@ -179,11 +188,11 @@ func isDirWritable(dir string) bool {
 // initHistoryManager creates and initializes a history manager with all dependencies.
 //
 // Parameters:
-//   - log: Logger instance for recording operations
+//   - log: Logger instance for recording operations.
 //
 // Returns:
-//   - A history.Manager instance
-//   - An error if initialization fails
+//   - A history.Manager instance.
+//   - An error if initialization fails.
 func initHistoryManager(log logger.Logger) (history.Manager, error) {
 	// Create trash manager
 	trasher, err := trash.NewTrasher()
@@ -231,10 +240,10 @@ func initHistoryManager(log logger.Logger) (history.Manager, error) {
 // runUndo executes the undo operation to restore the most recently deleted binary.
 //
 // Parameters:
-//   - verbose: Whether to enable verbose output
+//   - verbose: Whether to enable verbose output.
 //
 // Returns:
-//   - An error if the undo operation fails
+//   - An error if the undo operation fails.
 func runUndo(verbose bool) error {
 	// Initialize logger
 	log, err := logger.NewLogger()
@@ -296,162 +305,115 @@ func runUndo(verbose bool) error {
 	return nil
 }
 
+// runRemove initializes dependencies and either removes a binary or starts the TUI.
+//
+// Parameters:
+//   - config: CLI configuration for the requested operation.
+//
+// Returns:
+//   - An error if initialization or execution fails.
+func runRemove(config cli.Config) error {
+	var (
+		log logger.Logger
+		err error
+	)
+
+	if config.Binary == "" {
+		log, _, err = logger.NewLoggerWithCapture()
+	} else {
+		log, err = logger.NewLogger()
+	}
+
+	if err != nil {
+		return fmt.Errorf("initializing logger: %w", err)
+	}
+
+	if config.Verbose {
+		log.Level(logger.ParseLevel(config.LogLevel))
+	}
+
+	manager, err := initHistoryManager(log)
+	if err != nil {
+		return fmt.Errorf("initializing history manager: %w", err)
+	}
+
+	defer func() {
+		if closeErr := manager.Close(); closeErr != nil {
+			log.Warn().Err(closeErr).Msg("failed to close history manager")
+		}
+	}()
+
+	filesystem := fs.NewRealFS()
+	if config.Binary != "" {
+		if err := cli.Run(cli.Dependencies{
+			FS:             filesystem,
+			Logger:         log,
+			HistoryManager: manager,
+		}, config); err != nil {
+			return fmt.Errorf("running CLI: %w", err)
+		}
+
+		return nil
+	}
+
+	binDir, err := filesystem.DetermineBinDir(config.Goroot)
+	if err != nil {
+		return fmt.Errorf("determining binary directory: %w", err)
+	}
+
+	if err := cli.RunTUI(
+		binDir,
+		config,
+		log,
+		filesystem,
+		cli.DefaultRunner{},
+		manager,
+	); err != nil {
+		return fmt.Errorf("running TUI: %w", err)
+	}
+
+	return nil
+}
+
 // rootCmd defines the root command for go-remove.
 var rootCmd = &cobra.Command{
 	Use:   "go-remove [binary]",
 	Short: "A tool to remove Go binaries",
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Extract flag values to configure CLI behavior; defaults to TUI mode if no binary is given.
 		verbose, _ := cmd.Flags().GetBool("verbose")
 		goroot, _ := cmd.Flags().GetBool("goroot")
 		logLevel, _ := cmd.Flags().GetString("log-level")
 		undo, _ := cmd.Flags().GetBool("undo")
 		restore, _ := cmd.Flags().GetBool("restore")
 
-		// Handle undo flag - mutually exclusive with binary argument
+		if undo && restore {
+			return ErrUndoWithRestore
+		}
+
+		if undo && len(args) > 0 {
+			return ErrUndoWithBinary
+		}
+
+		if restore && len(args) > 0 {
+			return ErrRestoreWithBinary
+		}
+
 		if undo {
-			if len(args) > 0 {
-				return ErrUndoWithBinary
-			}
-
-			if restore {
-				return ErrUndoWithRestore
-			}
-
 			return runUndo(verbose)
 		}
 
-		// Handle restore flag - opens TUI in history mode
-		if restore {
-			if len(args) > 0 {
-				return ErrRestoreWithBinary
-			}
-
-			// Initialize filesystem
-			filesystem := fs.NewRealFS()
-
-			// Determine the binary directory
-			binDir, err := filesystem.DetermineBinDir(goroot)
-			if err != nil {
-				return fmt.Errorf("failed to determine binary directory: %w", err)
-			}
-
-			// Initialize the logger with capture support for TUI mode
-			log, _, err := logger.NewLoggerWithCapture()
-			if err != nil {
-				return fmt.Errorf("failed to initialize logger: %w", err)
-			}
-
-			if verbose {
-				level := logger.ParseLevel(logLevel)
-				log.Level(level)
-			}
-
-			// Initialize history manager for restore mode
-			manager, err := initHistoryManager(log)
-			if err != nil {
-				return fmt.Errorf("failed to initialize history manager: %w", err)
-			}
-
-			defer func() {
-				if closeErr := manager.Close(); closeErr != nil {
-					log.Warn().Err(closeErr).Msg("Failed to close history manager")
-				}
-			}()
-
-			// Configure for restore mode (TUI will handle history view)
-			config := cli.Config{
-				Binary:      "",
-				Verbose:     verbose,
-				Goroot:      goroot,
-				Help:        false,
-				LogLevel:    logLevel,
-				RestoreMode: true,
-			}
-
-			return cli.RunTUI(binDir, config, log, filesystem, cli.DefaultRunner{}, manager)
-		}
-
 		config := cli.Config{
-			Binary:   "",
-			Verbose:  verbose,
-			Goroot:   goroot,
-			Help:     false, // Cobra manages help output automatically
-			LogLevel: logLevel,
+			Verbose:     verbose,
+			Goroot:      goroot,
+			LogLevel:    logLevel,
+			RestoreMode: restore,
 		}
-
-		// If a binary name is provided as an argument, run in direct removal mode.
 		if len(args) > 0 {
 			config.Binary = args[0]
-
-			// Initialize the standard logger for direct removal mode.
-			log, err := logger.NewLogger()
-			if err != nil {
-				return fmt.Errorf("failed to initialize logger: %w", err)
-			}
-
-			// Set log level based on config if verbose mode is enabled.
-			if verbose {
-				level := logger.ParseLevel(logLevel)
-				log.Level(level)
-			}
-
-			// Initialize history manager for recording deletions
-			manager, err := initHistoryManager(log)
-			if err != nil {
-				return fmt.Errorf("failed to initialize history manager: %w", err)
-			}
-
-			defer func() {
-				if closeErr := manager.Close(); closeErr != nil {
-					log.Warn().Err(closeErr).Msg("Failed to close history manager")
-				}
-			}()
-
-			// Assemble dependencies with a real filesystem, logger, and history manager.
-			deps := cli.Dependencies{
-				FS:             fs.NewRealFS(),
-				Logger:         log,
-				HistoryManager: manager,
-			}
-
-			return cli.Run(deps, config)
 		}
 
-		// Otherwise, determine the binary directory and launch the TUI for interactive selection.
-		// For TUI mode, we use a logger with capture support to display logs within the interface.
-		filesystem := fs.NewRealFS()
-
-		binDir, err := filesystem.DetermineBinDir(config.Goroot)
-		if err != nil {
-			return fmt.Errorf("failed to determine binary directory: %w", err)
-		}
-
-		// Initialize the logger with capture support for TUI mode.
-		log, _, err := logger.NewLoggerWithCapture()
-		if err != nil {
-			return fmt.Errorf("failed to initialize logger: %w", err)
-		}
-
-		// Set log level based on config if verbose mode is enabled.
-		if verbose {
-			level := logger.ParseLevel(logLevel)
-			log.Level(level)
-		}
-
-		// Initialize history manager for TUI mode
-		manager, err := initHistoryManager(log)
-		if err != nil {
-			return fmt.Errorf("failed to initialize history manager: %w", err)
-		}
-
-		defer func() {
-			if closeErr := manager.Close(); closeErr != nil {
-				log.Warn().Err(closeErr).Msg("Failed to close history manager")
-			}
-		}()
-
-		return cli.RunTUI(binDir, config, log, filesystem, cli.DefaultRunner{}, manager)
+		return runRemove(config)
 	},
 }
 
@@ -464,7 +426,9 @@ func init() {
 	rootCmd.Flags().BoolP("restore", "r", false, "Open history view for restoration")
 }
 
-// Execute runs the root command and handles any execution errors.
+// Execute runs the root command.
+//
+// Errors are written to stderr and the process exits with status 1.
 func Execute() {
 	// Execute the command, capturing any errors for reporting and exit handling.
 	if err := rootCmd.Execute(); err != nil {

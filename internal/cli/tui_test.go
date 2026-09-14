@@ -661,50 +661,6 @@ func Test_model_View(t *testing.T) {
 	}
 }
 
-// Test_max verifies the max function's comparison logic.
-func Test_max(t *testing.T) {
-	tests := []struct {
-		name string
-		a    int
-		b    int
-		want int
-	}{
-		{name: "a greater", a: 5, b: 3, want: 5},
-		{name: "b greater", a: 2, b: 7, want: 7},
-		{name: "equal", a: 4, b: 4, want: 4},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := maximum(tt.a, tt.b); got != tt.want {
-				t.Errorf("maximum() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-// Test_min verifies the min function's comparison logic.
-func Test_min(t *testing.T) {
-	tests := []struct {
-		name string
-		a    int
-		b    int
-		want int
-	}{
-		{name: "a lesser", a: 3, b: 5, want: 3},
-		{name: "b lesser", a: 7, b: 2, want: 2},
-		{name: "equal", a: 4, b: 4, want: 4},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := minimum(tt.a, tt.b); got != tt.want {
-				t.Errorf("minimum() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 // Priority 1: Core History Integration Tests
 
 // Test_model_Update_EnterWithHistoryManager verifies that RecordDeletion is called
@@ -818,7 +774,7 @@ func Test_handleRestore_RefreshesBinaryList(t *testing.T) {
 	entry := &history.HistoryEntry{
 		ID:         "entry1",
 		BinaryName: "restored_binary",
-		CanRestore: true,
+		InTrash:    true,
 	}
 
 	historyMock.On("Restore", mock.Anything, "entry1").
@@ -856,7 +812,7 @@ func Test_handleRestore_BinaryAppearsInChoices(t *testing.T) {
 	entry := &history.HistoryEntry{
 		ID:         "entry1",
 		BinaryName: "newbinary",
-		CanRestore: true,
+		InTrash:    true,
 	}
 
 	historyMock.On("Restore", mock.Anything, "entry1").
@@ -892,7 +848,7 @@ func Test_handleRestore_HistoryRefreshed(t *testing.T) {
 	entry := &history.HistoryEntry{
 		ID:         "entry1",
 		BinaryName: "testbin",
-		CanRestore: true,
+		InTrash:    true,
 	}
 
 	historyMock.On("Restore", mock.Anything, "entry1").
@@ -940,7 +896,7 @@ func Test_handleRestore_ErrorHandling(t *testing.T) {
 			entry: &history.HistoryEntry{
 				ID:         "entry1",
 				BinaryName: "test",
-				CanRestore: true,
+				InTrash:    true,
 			},
 			wantStatus:   "test has already been restored",
 			wantCmdIsNil: true,
@@ -954,7 +910,7 @@ func Test_handleRestore_ErrorHandling(t *testing.T) {
 			entry: &history.HistoryEntry{
 				ID:         "entry2",
 				BinaryName: "test2",
-				CanRestore: true,
+				InTrash:    true,
 			},
 			wantStatus:   "test2 is no longer in trash",
 			wantCmdIsNil: true,
@@ -968,7 +924,7 @@ func Test_handleRestore_ErrorHandling(t *testing.T) {
 			entry: &history.HistoryEntry{
 				ID:         "entry3",
 				BinaryName: "test3",
-				CanRestore: true,
+				InTrash:    true,
 			},
 			wantStatus:   "Cannot restore test3: file already exists",
 			wantCmdIsNil: true,
@@ -982,7 +938,7 @@ func Test_handleRestore_ErrorHandling(t *testing.T) {
 			entry: &history.HistoryEntry{
 				ID:         "entry4",
 				BinaryName: "test4",
-				CanRestore: true,
+				InTrash:    true,
 			},
 			wantStatus:   "Error restoring test4: disk error",
 			wantCmdIsNil: true,
@@ -1202,6 +1158,50 @@ func Test_model_Update_ModeSwitchToBinaries(t *testing.T) {
 	fsMock.AssertExpectations(t)
 }
 
+// Test_model_Update_IgnoresKeyRelease verifies key-release events do not
+// repeat navigation, restore, or undo actions.
+func Test_model_Update_IgnoresKeyRelease(t *testing.T) {
+	historyMock := mockHistory.NewMockManager(t)
+	entries := []*history.HistoryEntry{
+		{ID: "1", BinaryName: "bin1", InTrash: true},
+		{ID: "2", BinaryName: "bin2", InTrash: true},
+	}
+	m := &model{
+		choices:        []string{},
+		dir:            "/bin",
+		fs:             mockFS.NewMockFS(t),
+		historyManager: historyMock,
+		logger:         &tuiMockLogger{},
+		mode:           modeHistory,
+		historyEntries: entries,
+		historyCursor:  0,
+		cols:           1,
+		rows:           1,
+		width:          80,
+		height:         24,
+		sortAscending:  true,
+	}
+
+	got, cmd := m.Update(tea.KeyReleaseMsg{Text: "j", Code: 'j', ShiftedCode: 'j'})
+	gotModel := got.(*model)
+
+	assert.Equal(t, 0, gotModel.historyCursor)
+	assert.Nil(t, cmd)
+
+	got, cmd = m.Update(tea.KeyReleaseMsg{Text: "u", Code: 'u', ShiftedCode: 'u'})
+	gotModel = got.(*model)
+
+	assert.Empty(t, gotModel.status)
+	assert.Nil(t, cmd)
+
+	got, cmd = m.Update(tea.KeyReleaseMsg{Code: tea.KeyEnter})
+	gotModel = got.(*model)
+
+	assert.Empty(t, gotModel.status)
+	assert.Nil(t, cmd)
+	historyMock.AssertExpectations(t)
+}
+
 // Test_model_Update_HistoryNavigation verifies up/down in history list.
 func Test_model_Update_HistoryNavigation(t *testing.T) {
 	entries := []*history.HistoryEntry{
@@ -1271,7 +1271,7 @@ func Test_updateHistoryMode_EnterRestore(t *testing.T) {
 	entry := &history.HistoryEntry{
 		ID:         "entry1",
 		BinaryName: "restoreme",
-		CanRestore: true,
+		InTrash:    true,
 	}
 
 	historyMock.On("Restore", mock.Anything, "entry1").
@@ -1981,7 +1981,7 @@ func Test_handleRestore_CannotRestore(t *testing.T) {
 		historyManager: mockHistory.NewMockManager(t),
 		logger:         &tuiMockLogger{},
 		mode:           modeHistory,
-		historyEntries: []*history.HistoryEntry{{ID: "1", BinaryName: "bin1", CanRestore: false}},
+		historyEntries: []*history.HistoryEntry{{ID: "1", BinaryName: "bin1"}},
 		historyCursor:  0,
 	}
 
@@ -2002,7 +2002,7 @@ func Test_model_Update_CannotRestore(t *testing.T) {
 		historyManager: mockHistory.NewMockManager(t),
 		logger:         &tuiMockLogger{},
 		mode:           modeHistory,
-		historyEntries: []*history.HistoryEntry{{ID: "1", BinaryName: "bin1", CanRestore: false}},
+		historyEntries: []*history.HistoryEntry{{ID: "1", BinaryName: "bin1"}},
 		historyCursor:  0,
 		cols:           1,
 		rows:           1,
@@ -2295,7 +2295,7 @@ func Test_handleRestore_HistoryModeRefresh(t *testing.T) {
 	entry := &history.HistoryEntry{
 		ID:         "entry1",
 		BinaryName: "restoreme",
-		CanRestore: true,
+		InTrash:    true,
 	}
 
 	historyMock.On("Restore", mock.Anything, "entry1").

@@ -9,7 +9,18 @@ import (
 	"testing"
 
 	"github.com/nicholas-fedor/go-remove/internal/history"
+	"github.com/nicholas-fedor/go-remove/internal/logger"
 )
+
+type fuzzFS struct{}
+
+func (fuzzFS) DetermineBinDir(bool) (string, error) { return "/bin", nil }
+
+func (fuzzFS) AdjustBinaryPath(dir, binary string) string { return dir + "/" + binary }
+
+func (fuzzFS) RemoveBinary(string, string, bool, logger.Logger) error { return nil }
+
+func (fuzzFS) ListBinaries(string) []string { return []string{"test1", "test2", "test3"} }
 
 // Fuzz_model_Update fuzz tests the Update() method with random key sequences.
 // It verifies that Update() doesn't panic with any input and maintains state consistency.
@@ -51,28 +62,15 @@ func Fuzz_model_Update(f *testing.F) {
 			showLogs:      false,
 			width:         80,
 			height:        24,
+			dir:           "/bin",
+			fs:            fuzzFS{},
+			logger:        &tuiMockLogger{},
+			styles:        defaultStyleConfig(),
 		}
 
-		// Create a key message from the fuzz input using keyPressString helper
 		msg := keyPressString(key)
-
-		// Use recover to handle potential panics from nil fields
-		// This allows testing that Update handles edge cases gracefully
-		var resultModel *model
-
-		func() {
-			defer func() {
-				recover() // Recover from any panic during Update
-			}()
-
-			result, _ := m.Update(msg)
-			resultModel = result.(*model)
-		}()
-
-		// If Update panicked, use original model for consistency checks
-		if resultModel == nil {
-			resultModel = m
-		}
+		result, _ := m.Update(msg)
+		resultModel := result.(*model)
 
 		// Verify state consistency after Update()
 		// Cursor should never be negative
@@ -247,20 +245,10 @@ func Fuzz_pollLogChannel(f *testing.F) {
 			close(logChan)
 		}
 
-		// Test pollLogChannel - if channel is closed, it may panic
-		// which is acceptable behavior. We use recover to handle this gracefully.
-		func() {
-			defer func() {
-				recover() // Recover from potential panic on closed channel
-			}()
-
-			cmd := m.pollLogChannel()
-
-			// If we have a command, execute it to test the full flow
-			if cmd != nil {
-				_ = cmd()
-			}
-		}()
+		cmd := m.pollLogChannel()
+		if cmd != nil {
+			_ = cmd()
+		}
 
 		// Clean up if not already closed
 		if !closeChannel {
@@ -291,26 +279,20 @@ func Fuzz_model_stateConsistency(f *testing.F) {
 			showLogs:       false,
 			width:          80,
 			height:         24,
+			dir:            "/bin",
+			fs:             fuzzFS{},
+			logger:         &tuiMockLogger{},
+			styles:         defaultStyleConfig(),
 			historyEntries: make([]*history.HistoryEntry, 0),
 			historyCursor:  0,
 			confirmation:   confirmNone,
 		}
 
-		// Process each key in the sequence
 		keys := splitKeys(keySequence)
 		for _, key := range keys {
 			msg := keyPressString(key)
-
-			// Use recover to handle potential panics from nil fields
-			// This allows the fuzz test to continue and test other paths
-			func() {
-				defer func() {
-					recover() // Recover from any panic during Update
-				}()
-
-				result, _ := m.Update(msg)
-				m = result.(*model)
-			}()
+			result, _ := m.Update(msg)
+			m = result.(*model)
 
 			// State consistency checks
 			if m.cursorX < 0 {

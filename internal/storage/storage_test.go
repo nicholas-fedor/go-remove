@@ -79,7 +79,7 @@ func TestBadgerStore_SaveRecord(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		record := createTestRecord(time.Now().Unix(), testBinaryName)
 		err := store.SaveRecord(ctx, &record)
 		require.NoError(t, err)
@@ -89,7 +89,7 @@ func TestBadgerStore_SaveRecord(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		record := createTestRecord(0, testBinaryName)
 		err := store.SaveRecord(ctx, &record)
 		require.ErrorIs(t, err, ErrInvalidRecord)
@@ -100,7 +100,7 @@ func TestBadgerStore_SaveRecord(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		record := createTestRecord(time.Now().Unix(), "")
 		err := store.SaveRecord(ctx, &record)
 		require.ErrorIs(t, err, ErrInvalidRecord)
@@ -111,7 +111,7 @@ func TestBadgerStore_SaveRecord(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		cleanup() // Close immediately
 
-		ctx := context.Background()
+		ctx := t.Context()
 		record := createTestRecord(time.Now().Unix(), testBinaryName)
 		err := store.SaveRecord(ctx, &record)
 		assert.ErrorIs(t, err, ErrDatabaseClosed)
@@ -121,7 +121,7 @@ func TestBadgerStore_SaveRecord(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		cancel() // Cancel immediately
 
 		record := createTestRecord(time.Now().Unix(), testBinaryName)
@@ -135,7 +135,7 @@ func TestBadgerStore_GetRecord(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		timestamp := time.Now().Unix()
 		binaryName := testBinaryName
 		record := createTestRecord(timestamp, binaryName)
@@ -155,7 +155,7 @@ func TestBadgerStore_GetRecord(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		key := GenerateKey(time.Now().Unix(), "non-existent")
 		_, err := store.GetRecord(ctx, key)
 		assert.ErrorIs(t, err, ErrRecordNotFound)
@@ -165,7 +165,7 @@ func TestBadgerStore_GetRecord(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		_, err := store.GetRecord(ctx, "invalid-key")
 		assert.ErrorIs(t, err, ErrInvalidKey)
 	})
@@ -174,7 +174,7 @@ func TestBadgerStore_GetRecord(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		key := GenerateKey(time.Now().Unix(), "test")
 		_, err := store.GetRecord(ctx, key)
 		assert.ErrorIs(t, err, ErrDatabaseClosed)
@@ -184,7 +184,7 @@ func TestBadgerStore_GetRecord(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
 		key := GenerateKey(time.Now().Unix(), "test")
@@ -198,7 +198,7 @@ func TestBadgerStore_GetMostRecent(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		_, err := store.GetMostRecent(ctx)
 		assert.ErrorIs(t, err, ErrNoHistory)
 	})
@@ -207,7 +207,7 @@ func TestBadgerStore_GetMostRecent(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		now := time.Now().Unix()
 
 		record1 := createTestRecord(now-100, "old-binary")
@@ -228,7 +228,7 @@ func TestBadgerStore_GetMostRecent(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		_, err := store.GetMostRecent(ctx)
 		assert.ErrorIs(t, err, ErrDatabaseClosed)
 	})
@@ -237,11 +237,11 @@ func TestBadgerStore_GetMostRecent(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		record := createTestRecord(time.Now().Unix(), "test")
 		require.NoError(t, store.SaveRecord(ctx, &record))
 
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
 		_, err := store.GetMostRecent(ctx)
@@ -254,7 +254,7 @@ func TestBadgerStore_ListRecords(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		records, err := store.ListRecords(ctx, ListOptions{})
 		require.NoError(t, err)
 		assert.Empty(t, records)
@@ -264,7 +264,7 @@ func TestBadgerStore_ListRecords(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		now := time.Now().Unix()
 
 		record1 := createTestRecord(now-200, "oldest")
@@ -287,7 +287,7 @@ func TestBadgerStore_ListRecords(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		now := time.Now().Unix()
 
 		for i := range 5 {
@@ -306,7 +306,7 @@ func TestBadgerStore_ListRecords(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		now := time.Now().Unix()
 
 		for i := range 5 {
@@ -324,7 +324,7 @@ func TestBadgerStore_ListRecords(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		now := time.Now().Unix()
 
 		available := createTestRecord(now-100, "available")
@@ -346,7 +346,7 @@ func TestBadgerStore_ListRecords(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		now := time.Now().Unix()
 
 		for i := range 10 {
@@ -366,7 +366,7 @@ func TestBadgerStore_ListRecords(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		cleanup()
 
-		_, err := store.ListRecords(context.Background(), ListOptions{})
+		_, err := store.ListRecords(t.Context(), ListOptions{})
 		assert.ErrorIs(t, err, ErrDatabaseClosed)
 	})
 
@@ -377,10 +377,10 @@ func TestBadgerStore_ListRecords(t *testing.T) {
 		// Save records first
 		for i := range 5 {
 			record := createTestRecord(time.Now().Unix()+int64(i), fmt.Sprintf("binary-%d", i))
-			require.NoError(t, store.SaveRecord(context.Background(), &record))
+			require.NoError(t, store.SaveRecord(t.Context(), &record))
 		}
 
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
 		_, err := store.ListRecords(ctx, ListOptions{})
@@ -393,7 +393,7 @@ func TestBadgerStore_UpdateRecord(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		timestamp := time.Now().Unix()
 		binaryName := testBinaryName
 
@@ -419,7 +419,7 @@ func TestBadgerStore_UpdateRecord(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		record := createTestRecord(time.Now().Unix(), "non-existent")
 		err := store.UpdateRecord(ctx, &record)
 		assert.ErrorIs(t, err, ErrRecordNotFound)
@@ -429,7 +429,7 @@ func TestBadgerStore_UpdateRecord(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		record := createTestRecord(0, "test")
 		err := store.UpdateRecord(ctx, &record)
 		assert.ErrorIs(t, err, ErrInvalidRecord)
@@ -439,7 +439,7 @@ func TestBadgerStore_UpdateRecord(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		record := createTestRecord(time.Now().Unix(), "")
 		err := store.UpdateRecord(ctx, &record)
 		assert.ErrorIs(t, err, ErrInvalidRecord)
@@ -449,7 +449,7 @@ func TestBadgerStore_UpdateRecord(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		record := createTestRecord(time.Now().Unix(), "test")
 		err := store.UpdateRecord(ctx, &record)
 		assert.ErrorIs(t, err, ErrDatabaseClosed)
@@ -459,7 +459,7 @@ func TestBadgerStore_UpdateRecord(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
 		record := createTestRecord(time.Now().Unix(), "test")
@@ -473,7 +473,7 @@ func TestBadgerStore_DeleteRecord(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		timestamp := time.Now().Unix()
 		binaryName := testBinaryName
 
@@ -493,7 +493,7 @@ func TestBadgerStore_DeleteRecord(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		key := GenerateKey(time.Now().Unix(), "non-existent")
 		err := store.DeleteRecord(ctx, key)
 		assert.ErrorIs(t, err, ErrRecordNotFound)
@@ -503,7 +503,7 @@ func TestBadgerStore_DeleteRecord(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		err := store.DeleteRecord(ctx, "invalid-key")
 		assert.ErrorIs(t, err, ErrInvalidKey)
 	})
@@ -512,7 +512,7 @@ func TestBadgerStore_DeleteRecord(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		key := GenerateKey(time.Now().Unix(), "test")
 		err := store.DeleteRecord(ctx, key)
 		assert.ErrorIs(t, err, ErrDatabaseClosed)
@@ -522,7 +522,7 @@ func TestBadgerStore_DeleteRecord(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
 		key := GenerateKey(time.Now().Unix(), "test")
@@ -536,7 +536,7 @@ func TestBadgerStore_DeleteAllRecords(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 
 		// Create multiple records
 		for i := range 5 {
@@ -563,7 +563,7 @@ func TestBadgerStore_DeleteAllRecords(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		err := store.DeleteAllRecords(ctx)
 		require.NoError(t, err)
 	})
@@ -572,7 +572,7 @@ func TestBadgerStore_DeleteAllRecords(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		err := store.DeleteAllRecords(ctx)
 		assert.ErrorIs(t, err, ErrDatabaseClosed)
 	})
@@ -581,7 +581,7 @@ func TestBadgerStore_DeleteAllRecords(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 
 		// Create some records first
 		for i := range 3 {
@@ -589,7 +589,7 @@ func TestBadgerStore_DeleteAllRecords(t *testing.T) {
 			require.NoError(t, store.SaveRecord(ctx, &record))
 		}
 
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
 		err := store.DeleteAllRecords(ctx)
@@ -769,7 +769,7 @@ func TestIntegration_CRUDWorkflow(t *testing.T) {
 	store, cleanup := setupTestStore(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create
 	record1 := createTestRecord(time.Now().Unix(), "binary1")
@@ -817,7 +817,7 @@ func TestErrorWrapping(t *testing.T) {
 		cleanup() // Close immediately to cause errors
 
 		record := createTestRecord(time.Now().Unix(), "test")
-		err := store.SaveRecord(context.Background(), &record)
+		err := store.SaveRecord(t.Context(), &record)
 
 		// Should be ErrDatabaseClosed
 		assert.ErrorIs(t, err, ErrDatabaseClosed)
@@ -827,7 +827,7 @@ func TestErrorWrapping(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()
 
-		ctx := context.Background()
+		ctx := t.Context()
 
 		// Test ErrRecordNotFound wrapping
 		key := GenerateKey(time.Now().Unix(), "nonexistent")

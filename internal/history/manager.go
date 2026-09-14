@@ -24,9 +24,6 @@ var (
 	// ErrEntryNotFound indicates the requested history entry does not exist.
 	ErrEntryNotFound = errors.New("history entry not found")
 
-	// ErrCannotRestore indicates the binary cannot be restored.
-	ErrCannotRestore = errors.New("binary cannot be restored")
-
 	// ErrNotInTrash indicates the binary is no longer in trash.
 	ErrNotInTrash = errors.New("binary is no longer in trash")
 
@@ -148,16 +145,18 @@ type HistoryManager struct {
 	logger    logger.Logger
 }
 
+var _ Manager = (*HistoryManager)(nil)
+
 // NewManager creates a new history manager instance.
 //
 // Parameters:
-//   - trasher: The trash.Trasher implementation for file operations
-//   - storer: The storage.Storer implementation for persistence
-//   - extractor: The buildinfo.Extractor implementation for metadata
-//   - log: The logger.Logger for logging operations
+//   - trasher: The trash.Trasher implementation for file operations.
+//   - storer: The storage.Storer implementation for persistence.
+//   - extractor: The buildinfo.Extractor implementation for metadata.
+//   - log: The logger.Logger for logging operations.
 //
 // Returns:
-//   - A Manager instance
+//   - A Manager instance.
 //
 // Example:
 //
@@ -190,12 +189,12 @@ func NewManager(
 //  5. Save to storage
 //
 // Parameters:
-//   - ctx: Context for cancellation
-//   - binaryPath: Full path to the binary being deleted
+//   - ctx: Context for cancellation.
+//   - binaryPath: Full path to the binary being deleted.
 //
 // Returns:
-//   - The created history entry
-//   - An error if the operation fails
+//   - The created history entry.
+//   - An error if the operation fails.
 func (m *HistoryManager) RecordDeletion(
 	ctx context.Context,
 	binaryPath string,
@@ -290,11 +289,11 @@ func (m *HistoryManager) RecordDeletion(
 //  5. Update storage: TrashAvailable=false
 //
 // Parameters:
-//   - ctx: Context for cancellation
+//   - ctx: Context for cancellation.
 //
 // Returns:
-//   - The result of the restore operation
-//   - An error if the operation fails or no history exists
+//   - The result of the restore operation.
+//   - An error if the operation fails or no history exists.
 func (m *HistoryManager) UndoMostRecent(ctx context.Context) (*RestoreResult, error) {
 	m.logger.Debug().Msg("Undoing most recent deletion")
 
@@ -321,12 +320,12 @@ func (m *HistoryManager) UndoMostRecent(ctx context.Context) (*RestoreResult, er
 //  5. Update storage: TrashAvailable=false
 //
 // Parameters:
-//   - ctx: Context for cancellation
-//   - entryID: The history entry ID (format: "timestamp:binary_name")
+//   - ctx: Context for cancellation.
+//   - entryID: The history entry ID (format: "timestamp:binary_name").
 //
 // Returns:
-//   - The result of the restore operation
-//   - An error if the operation fails
+//   - The result of the restore operation.
+//   - An error if the operation fails.
 func (m *HistoryManager) Restore(ctx context.Context, entryID string) (*RestoreResult, error) {
 	m.logger.Debug().
 		Str(logFieldEntryID, entryID).
@@ -348,12 +347,12 @@ func (m *HistoryManager) Restore(ctx context.Context, entryID string) (*RestoreR
 // restoreRecord performs the actual restoration of a binary.
 //
 // Parameters:
-//   - ctx: Context for cancellation
-//   - record: The history record to restore (passed by pointer for efficiency)
+//   - ctx: Context for cancellation.
+//   - record: The history record to restore (passed by pointer for efficiency).
 //
 // Returns:
-//   - The result of the restore operation
-//   - An error if the operation fails
+//   - The result of the restore operation.
+//   - An error if the operation fails.
 func (m *HistoryManager) restoreRecord(
 	ctx context.Context,
 	record *storage.HistoryRecord,
@@ -434,7 +433,7 @@ func (m *HistoryManager) restoreRecord(
 		Msg("Binary restored from trash")
 
 	return &RestoreResult{
-		EntryID:    GenerateKey(record.Timestamp, record.BinaryName),
+		EntryID:    storage.GenerateKey(record.Timestamp, record.BinaryName),
 		BinaryName: record.BinaryName,
 		RestoredTo: record.OriginalPath,
 		FromTrash:  true,
@@ -446,12 +445,12 @@ func (m *HistoryManager) restoreRecord(
 // GetHistory retrieves the deletion history (newest first).
 //
 // Parameters:
-//   - ctx: Context for cancellation
-//   - limit: Maximum number of entries to return (0 = no limit)
+//   - ctx: Context for cancellation.
+//   - limit: Maximum number of entries to return (0 = no limit).
 //
 // Returns:
-//   - A slice of history entries
-//   - An error if the operation fails
+//   - A slice of history entries.
+//   - An error if the operation fails.
 func (m *HistoryManager) GetHistory(ctx context.Context, limit int) ([]*HistoryEntry, error) {
 	m.logger.Debug().
 		Int("limit", limit).
@@ -478,11 +477,11 @@ func (m *HistoryManager) GetHistory(ctx context.Context, limit int) ([]*HistoryE
 // DeletePermanently removes a binary from trash and deletes the history entry.
 //
 // Parameters:
-//   - ctx: Context for cancellation
-//   - entryID: The history entry ID
+//   - ctx: Context for cancellation.
+//   - entryID: The history entry ID.
 //
 // Returns:
-//   - An error if the operation fails
+//   - An error if the operation fails.
 func (m *HistoryManager) DeletePermanently(ctx context.Context, entryID string) error {
 	m.logger.Debug().
 		Str(logFieldEntryID, entryID).
@@ -523,11 +522,11 @@ func (m *HistoryManager) DeletePermanently(ctx context.Context, entryID string) 
 // ClearHistory removes all history entries.
 //
 // Parameters:
-//   - ctx: Context for cancellation
-//   - clearTrash: If true, also clears all binaries from trash
+//   - ctx: Context for cancellation.
+//   - clearTrash: If true, also clears all binaries from trash.
 //
 // Returns:
-//   - An error if the operation fails
+//   - An error if the operation fails.
 func (m *HistoryManager) ClearHistory(ctx context.Context, clearTrash bool) error {
 	m.logger.Debug().
 		Bool("clear_trash", clearTrash).
@@ -568,12 +567,12 @@ func (m *HistoryManager) ClearHistory(ctx context.Context, clearTrash bool) erro
 // ClearEntry removes a single history entry.
 //
 // Parameters:
-//   - ctx: Context for cancellation
-//   - entryID: The history entry ID
-//   - deleteFromTrash: If true, also deletes the binary from trash
+//   - ctx: Context for cancellation.
+//   - entryID: The history entry ID.
+//   - deleteFromTrash: If true, also deletes the binary from trash.
 //
 // Returns:
-//   - An error if the operation fails
+//   - An error if the operation fails.
 func (m *HistoryManager) ClearEntry(
 	ctx context.Context,
 	entryID string,
@@ -619,7 +618,7 @@ func (m *HistoryManager) ClearEntry(
 // Close closes all underlying resources.
 //
 // Returns:
-//   - An error if closing fails
+//   - An error if closing fails.
 func (m *HistoryManager) Close() error {
 	m.logger.Debug().Msg("Closing history manager")
 

@@ -10,13 +10,13 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 // sortable keys for efficient time-based queries.
 //
 // Key Format:
-//   - Keys use the format "<zero-padded-timestamp>:<binary_name>" (e.g., "00000001709321234:golangci-lint")
-//   - The timestamp is zero-padded to 20 digits to ensure lexicographic order equals chronological order
-//   - Unix timestamps ensure sortability and uniqueness
+//   - Keys use the format "<zero-padded-timestamp>:<binary_name>" (e.g., "00000001709321234:golangci-lint").
+//   - The timestamp is zero-padded to 20 digits to ensure lexicographic order equals chronological order.
+//   - Unix timestamps ensure sortability and uniqueness.
 //
 // Storage Location:
-//   - Linux: $XDG_DATA_HOME/go-remove/history.badger (fallback: ~/.local/share/go-remove/history.badger)
-//   - Windows: %LOCALAPPDATA%/go-remove/history.badger
+//   - Linux: $XDG_DATA_HOME/go-remove/history.badger (fallback: ~/.local/share/go-remove/history.badger).
+//   - Windows: %LOCALAPPDATA%/go-remove/history.badger.
 //
 // Usage:
 //
@@ -38,10 +38,9 @@ package storage
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"runtime"
 	"sync/atomic"
 	"time"
 
@@ -113,6 +112,9 @@ type HistoryRecord struct {
 }
 
 // DisplayTime returns a formatted time string for TUI display.
+//
+// Returns:
+//   - Timestamp formatted as "2006-01-02 15:04:05".
 func (r *HistoryRecord) DisplayTime() string {
 	return time.Unix(r.Timestamp, 0).Format("2006-01-02 15:04:05")
 }
@@ -132,31 +134,82 @@ type ListOptions struct {
 // Storer defines operations for history record persistence.
 type Storer interface {
 	// SaveRecord persists a history record to Badger.
-	// The record's Timestamp and BinaryName fields are used to generate the key.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation.
+	//   - record: History record to persist.
+	//
+	// Returns:
+	//   - An error if the record is invalid or the write fails.
 	SaveRecord(ctx context.Context, record *HistoryRecord) error
 
 	// GetRecord retrieves a history record by its composite key.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation.
+	//   - key: Composite record key.
+	//
+	// Returns:
+	//   - Matching history record.
+	//   - An error if the key is invalid or the record does not exist.
 	GetRecord(ctx context.Context, key string) (HistoryRecord, error)
 
 	// GetMostRecent returns the most recent history record.
-	// Returns ErrNoHistory if no records exist.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation.
+	//
+	// Returns:
+	//   - Newest history record.
+	//   - ErrNoHistory if no records exist.
 	GetMostRecent(ctx context.Context) (HistoryRecord, error)
 
-	// ListRecords returns all history records matching the provided options.
-	// Records are returned in reverse chronological order (newest first).
+	// ListRecords returns history records matching the provided options.
+	//
+	// Records are returned newest first.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation.
+	//   - opts: Filtering and pagination options.
+	//
+	// Returns:
+	//   - Matching history records.
+	//   - An error if the query fails.
 	ListRecords(ctx context.Context, opts ListOptions) ([]HistoryRecord, error)
 
 	// UpdateRecord updates an existing history record.
-	// The record must have a valid key derived from Timestamp and BinaryName.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation.
+	//   - record: History record to update.
+	//
+	// Returns:
+	//   - An error if the record does not exist or the write fails.
 	UpdateRecord(ctx context.Context, record *HistoryRecord) error
 
 	// DeleteRecord removes a history record from storage.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation.
+	//   - key: Composite record key.
+	//
+	// Returns:
+	//   - An error if the record does not exist or the delete fails.
 	DeleteRecord(ctx context.Context, key string) error
 
 	// DeleteAllRecords removes all history records.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation.
+	//
+	// Returns:
+	//   - An error if the delete fails.
 	DeleteAllRecords(ctx context.Context) error
 
 	// Close closes the Badger database.
+	//
+	// Returns:
+	//   - An error if the database is already closed or close fails.
 	Close() error
 }
 
@@ -167,6 +220,8 @@ type BadgerStore struct {
 	closed   atomic.Bool
 }
 
+var _ Storer = (*BadgerStore)(nil)
+
 // ValueLogSizeExponent defines the exponent for value log file size calculation (1 << 20 = 1MB).
 const ValueLogSizeExponent = 20
 
@@ -174,8 +229,15 @@ const ValueLogSizeExponent = 20
 const LevelZeroTablesStall = 2
 
 // NewBadgerStore creates a new Badger-based storage instance.
-// The path parameter specifies the directory where the database files will be stored.
-// The directory will be created if it does not exist.
+//
+// The directory is created if it does not exist.
+//
+// Parameters:
+//   - path: Directory where the database files will be stored.
+//
+// Returns:
+//   - Opened Badger store.
+//   - An error if the database cannot be opened.
 func NewBadgerStore(path string) (*BadgerStore, error) {
 	// Configure Badger with reasonable defaults for desktop application
 	opts := badger.DefaultOptions(path).
@@ -185,9 +247,6 @@ func NewBadgerStore(path string) (*BadgerStore, error) {
 		WithNumMemtables(1).                              // Minimal memory usage
 		WithNumLevelZeroTables(1).                        // Minimal memory usage
 		WithNumLevelZeroTablesStall(LevelZeroTablesStall) // Conservative stall threshold
-
-	// Silence the unused import warning for runtime - may be used in future platform-specific code
-	_ = runtime.GOOS
 
 	database, err := badger.Open(opts)
 	if err != nil {
@@ -200,22 +259,33 @@ func NewBadgerStore(path string) (*BadgerStore, error) {
 	}, nil
 }
 
-// SaveRecord persists a history record to Badger.
-// The record's Timestamp and BinaryName fields are used to generate the key.
-// Returns ErrInvalidRecord if the record is missing required fields.
-func (s *BadgerStore) SaveRecord(ctx context.Context, record *HistoryRecord) error {
+// checkReady returns an error if the store is closed or ctx is already done.
+//
+// Parameters:
+//   - ctx: Context for cancellation.
+//
+// Returns:
+//   - ErrDatabaseClosed or ErrContextCanceled when the store cannot be used.
+func (s *BadgerStore) checkReady(ctx context.Context) error {
 	if s.closed.Load() {
 		return ErrDatabaseClosed
 	}
 
-	// Check for context cancellation
-	select {
-	case <-ctx.Done():
-		return fmt.Errorf("%w: %w", ErrContextCanceled, ctx.Err())
-	default:
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%w: %w", ErrContextCanceled, err)
 	}
 
-	// Validate required fields
+	return nil
+}
+
+// validateRecord returns ErrInvalidRecord when required fields are missing.
+//
+// Parameters:
+//   - record: History record to validate.
+//
+// Returns:
+//   - An error if the record is nil or missing required fields.
+func validateRecord(record *HistoryRecord) error {
 	if record == nil {
 		return fmt.Errorf("%w: record is nil", ErrInvalidRecord)
 	}
@@ -228,23 +298,36 @@ func (s *BadgerStore) SaveRecord(ctx context.Context, record *HistoryRecord) err
 		return fmt.Errorf("%w: binary_name is required", ErrInvalidRecord)
 	}
 
-	key := GenerateKey(record.Timestamp, record.BinaryName)
+	return nil
+}
+
+// SaveRecord persists a history record to Badger.
+//
+// Parameters:
+//   - ctx: Context for cancellation.
+//   - record: History record to persist.
+//
+// Returns:
+//   - An error if the record is invalid or the write fails.
+func (s *BadgerStore) SaveRecord(ctx context.Context, record *HistoryRecord) error {
+	if err := s.checkReady(ctx); err != nil {
+		return err
+	}
+
+	if err := validateRecord(record); err != nil {
+		return err
+	}
 
 	value, err := json.Marshal(record)
 	if err != nil {
 		return fmt.Errorf("marshaling record: %w", err)
 	}
 
-	err = s.database.Update(func(txn *badger.Txn) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
+	key := GenerateKey(record.Timestamp, record.BinaryName)
 
+	if err := s.database.Update(func(txn *badger.Txn) error {
 		return txn.Set([]byte(key), value)
-	})
-	if err != nil {
+	}); err != nil {
 		return fmt.Errorf("saving record: %w", err)
 	}
 
@@ -252,34 +335,26 @@ func (s *BadgerStore) SaveRecord(ctx context.Context, record *HistoryRecord) err
 }
 
 // GetRecord retrieves a history record by its composite key.
-// Returns ErrRecordNotFound if the key does not exist.
-// Returns ErrInvalidKey if the key format is invalid.
+//
+// Parameters:
+//   - ctx: Context for cancellation.
+//   - key: Composite record key.
+//
+// Returns:
+//   - Matching history record.
+//   - An error if the key is invalid or the record does not exist.
 func (s *BadgerStore) GetRecord(ctx context.Context, key string) (HistoryRecord, error) {
 	var record HistoryRecord
 
-	if s.closed.Load() {
-		return record, ErrDatabaseClosed
+	if err := s.checkReady(ctx); err != nil {
+		return record, err
 	}
 
-	// Check for context cancellation
-	select {
-	case <-ctx.Done():
-		return record, fmt.Errorf("%w: %w", ErrContextCanceled, ctx.Err())
-	default:
-	}
-
-	// Validate key format
 	if _, _, err := ParseKey(key); err != nil {
 		return record, fmt.Errorf("%w: %w", ErrInvalidKey, err)
 	}
 
 	err := s.database.View(func(txn *badger.Txn) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
 		item, getErr := txn.Get([]byte(key))
 		if getErr != nil {
 			if errors.Is(getErr, badger.ErrKeyNotFound) {
@@ -305,30 +380,23 @@ func (s *BadgerStore) GetRecord(ctx context.Context, key string) (HistoryRecord,
 }
 
 // GetMostRecent returns the most recent history record.
-// Returns ErrNoHistory if no records exist.
+//
+// Parameters:
+//   - ctx: Context for cancellation.
+//
+// Returns:
+//   - Newest history record.
+//   - ErrNoHistory if no records exist.
 func (s *BadgerStore) GetMostRecent(ctx context.Context) (HistoryRecord, error) {
 	var record HistoryRecord
 
-	if s.closed.Load() {
-		return record, ErrDatabaseClosed
-	}
-
-	// Check for context cancellation
-	select {
-	case <-ctx.Done():
-		return record, fmt.Errorf("%w: %w", ErrContextCanceled, ctx.Err())
-	default:
+	if err := s.checkReady(ctx); err != nil {
+		return record, err
 	}
 
 	err := s.database.View(func(txn *badger.Txn) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
 		opts := badger.DefaultIteratorOptions
-		opts.Reverse = true // Iterate in reverse order to get most recent first
+		opts.Reverse = true
 
 		iterator := txn.NewIterator(opts)
 		defer iterator.Close()
@@ -339,9 +407,7 @@ func (s *BadgerStore) GetMostRecent(ctx context.Context) (HistoryRecord, error) 
 			return ErrNoHistory
 		}
 
-		item := iterator.Item()
-
-		return item.Value(func(val []byte) error {
+		return iterator.Item().Value(func(val []byte) error {
 			return json.Unmarshal(val, &record)
 		})
 	})
@@ -356,32 +422,27 @@ func (s *BadgerStore) GetMostRecent(ctx context.Context) (HistoryRecord, error) 
 	return record, nil
 }
 
-// ListRecords returns all history records matching the provided options.
-// Records are returned in reverse chronological order (newest first).
-// Supports filtering by availability and pagination via limit/offset.
+// ListRecords returns history records matching the provided options.
+//
+// Records are returned newest first and may be filtered or paginated.
+//
+// Parameters:
+//   - ctx: Context for cancellation.
+//   - opts: Filtering and pagination options.
+//
+// Returns:
+//   - Matching history records.
+//   - An error if the query fails.
 func (s *BadgerStore) ListRecords(ctx context.Context, opts ListOptions) ([]HistoryRecord, error) {
-	if s.closed.Load() {
-		return nil, ErrDatabaseClosed
-	}
-
-	// Check for context cancellation
-	select {
-	case <-ctx.Done():
-		return nil, fmt.Errorf("%w: %w", ErrContextCanceled, ctx.Err())
-	default:
+	if err := s.checkReady(ctx); err != nil {
+		return nil, err
 	}
 
 	var records []HistoryRecord
 
 	err := s.database.View(func(txn *badger.Txn) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
 		iterOpts := badger.DefaultIteratorOptions
-		iterOpts.Reverse = true // Newest first
+		iterOpts.Reverse = true
 
 		iterator := txn.NewIterator(iterOpts)
 		defer iterator.Close()
@@ -390,30 +451,22 @@ func (s *BadgerStore) ListRecords(ctx context.Context, opts ListOptions) ([]Hist
 		count := 0
 
 		for iterator.Rewind(); iterator.Valid(); iterator.Next() {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("%w: %w", ErrContextCanceled, err)
 			}
-
-			item := iterator.Item()
 
 			var record HistoryRecord
 
-			err := item.Value(func(val []byte) error {
+			if err := iterator.Item().Value(func(val []byte) error {
 				return json.Unmarshal(val, &record)
-			})
-			if err != nil {
-				// Skip corrupted records but continue iteration
+			}); err != nil {
 				continue
 			}
 
-			// Apply availability filter
 			if opts.OnlyAvailable && !record.TrashAvailable {
 				continue
 			}
 
-			// Apply offset
 			if skipped < opts.Offset {
 				skipped++
 
@@ -423,7 +476,6 @@ func (s *BadgerStore) ListRecords(ctx context.Context, opts ListOptions) ([]Hist
 			records = append(records, record)
 			count++
 
-			// Apply limit
 			if opts.Limit > 0 && count >= opts.Limit {
 				break
 			}
@@ -432,10 +484,6 @@ func (s *BadgerStore) ListRecords(ctx context.Context, opts ListOptions) ([]Hist
 		return nil
 	})
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			return nil, fmt.Errorf("%w: %w", ErrContextCanceled, err)
-		}
-
 		return nil, fmt.Errorf("listing records: %w", err)
 	}
 
@@ -443,49 +491,33 @@ func (s *BadgerStore) ListRecords(ctx context.Context, opts ListOptions) ([]Hist
 }
 
 // UpdateRecord updates an existing history record.
-// The record must have a valid key derived from Timestamp and BinaryName.
+//
+// The record key is derived from Timestamp and BinaryName.
+//
+// Parameters:
+//   - ctx: Context for cancellation.
+//   - record: History record to update.
+//
+// Returns:
+//   - An error if the record does not exist or the write fails.
 func (s *BadgerStore) UpdateRecord(ctx context.Context, record *HistoryRecord) error {
-	if s.closed.Load() {
-		return ErrDatabaseClosed
+	if err := s.checkReady(ctx); err != nil {
+		return err
 	}
 
-	// Check for context cancellation
-	select {
-	case <-ctx.Done():
-		return fmt.Errorf("%w: %w", ErrContextCanceled, ctx.Err())
-	default:
+	if err := validateRecord(record); err != nil {
+		return err
 	}
-
-	// Validate required fields
-	if record == nil {
-		return fmt.Errorf("%w: record is nil", ErrInvalidRecord)
-	}
-
-	if record.Timestamp == 0 {
-		return fmt.Errorf("%w: timestamp is required", ErrInvalidRecord)
-	}
-
-	if record.BinaryName == "" {
-		return fmt.Errorf("%w: binary_name is required", ErrInvalidRecord)
-	}
-
-	key := GenerateKey(record.Timestamp, record.BinaryName)
 
 	value, err := json.Marshal(record)
 	if err != nil {
 		return fmt.Errorf("marshaling record: %w", err)
 	}
 
-	err = s.database.Update(func(txn *badger.Txn) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
+	key := GenerateKey(record.Timestamp, record.BinaryName)
 
-		// Check if key exists
-		_, err := txn.Get([]byte(key))
-		if err != nil {
+	err = s.database.Update(func(txn *badger.Txn) error {
+		if _, err := txn.Get([]byte(key)); err != nil {
 			if errors.Is(err, badger.ErrKeyNotFound) {
 				return ErrRecordNotFound
 			}
@@ -507,34 +539,24 @@ func (s *BadgerStore) UpdateRecord(ctx context.Context, record *HistoryRecord) e
 }
 
 // DeleteRecord removes a history record from storage.
-// Returns ErrRecordNotFound if the key does not exist.
+//
+// Parameters:
+//   - ctx: Context for cancellation.
+//   - key: Composite record key.
+//
+// Returns:
+//   - An error if the record does not exist or the delete fails.
 func (s *BadgerStore) DeleteRecord(ctx context.Context, key string) error {
-	if s.closed.Load() {
-		return ErrDatabaseClosed
+	if err := s.checkReady(ctx); err != nil {
+		return err
 	}
 
-	// Check for context cancellation
-	select {
-	case <-ctx.Done():
-		return fmt.Errorf("%w: %w", ErrContextCanceled, ctx.Err())
-	default:
-	}
-
-	// Validate key format
 	if _, _, err := ParseKey(key); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidKey, err)
 	}
 
 	err := s.database.Update(func(txn *badger.Txn) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		// Check if key exists
-		_, err := txn.Get([]byte(key))
-		if err != nil {
+		if _, err := txn.Get([]byte(key)); err != nil {
 			if errors.Is(err, badger.ErrKeyNotFound) {
 				return ErrRecordNotFound
 			}
@@ -556,52 +578,41 @@ func (s *BadgerStore) DeleteRecord(ctx context.Context, key string) error {
 }
 
 // DeleteAllRecords removes all history records.
+//
 // This operation cannot be undone.
+//
+// Parameters:
+//   - ctx: Context for cancellation.
+//
+// Returns:
+//   - An error if the delete fails.
 func (s *BadgerStore) DeleteAllRecords(ctx context.Context) error {
-	if s.closed.Load() {
-		return ErrDatabaseClosed
-	}
-
-	// Check for context cancellation
-	select {
-	case <-ctx.Done():
-		return fmt.Errorf("%w: %w", ErrContextCanceled, ctx.Err())
-	default:
+	if err := s.checkReady(ctx); err != nil {
+		return err
 	}
 
 	err := s.database.Update(func(txn *badger.Txn) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
 		opts := badger.DefaultIteratorOptions
-		opts.PrefetchValues = false // Keys only, we don't need values
+		opts.PrefetchValues = false
 
 		iterator := txn.NewIterator(opts)
 		defer iterator.Close()
 
-		keys := make([][]byte, 0)
+		var keys [][]byte
 
 		for iterator.Rewind(); iterator.Valid(); iterator.Next() {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("%w: %w", ErrContextCanceled, err)
 			}
 
 			key := make([]byte, len(iterator.Item().Key()))
 			copy(key, iterator.Item().Key())
-
 			keys = append(keys, key)
 		}
 
 		for _, key := range keys {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("%w: %w", ErrContextCanceled, err)
 			}
 
 			if err := txn.Delete(key); err != nil {
@@ -612,10 +623,6 @@ func (s *BadgerStore) DeleteAllRecords(ctx context.Context) error {
 		return nil
 	})
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			return fmt.Errorf("%w: %w", ErrContextCanceled, err)
-		}
-
 		return fmt.Errorf("deleting all records: %w", err)
 	}
 
@@ -623,7 +630,9 @@ func (s *BadgerStore) DeleteAllRecords(ctx context.Context) error {
 }
 
 // Close closes the Badger database.
-// Returns an error if the database is already closed.
+//
+// Returns:
+//   - An error if the database is already closed or close fails.
 func (s *BadgerStore) Close() error {
 	if s.closed.Load() {
 		return ErrDatabaseClosed

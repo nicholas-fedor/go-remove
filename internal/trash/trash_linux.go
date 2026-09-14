@@ -33,7 +33,13 @@ type linuxTrasher struct {
 	infoDir   string
 }
 
-// newTrasher creates a new Linux-specific trash manager.
+var _ Trasher = (*linuxTrasher)(nil)
+
+// newTrasher creates a Linux trash manager using the XDG Trash specification.
+//
+// Returns:
+//   - Linux trash implementation.
+//   - An error if the trash directories cannot be created.
 func newTrasher() (Trasher, error) {
 	trashPath := getXDGTrashPath()
 	if trashPath == "" {
@@ -59,15 +65,21 @@ func newTrasher() (Trasher, error) {
 }
 
 // MoveToTrash moves a file to the XDG trash directory.
-// Returns the path to the file in trash.
+//
+// Parameters:
+//   - ctx: Context for cancellation.
+//   - filePath: Path of the file to trash.
+//
+// Returns:
+//   - Path of the file in trash.
+//   - An error if the move fails.
 func (t *linuxTrasher) MoveToTrash(ctx context.Context, filePath string) (string, error) {
 	if ctx.Err() != nil {
 		return "", fmt.Errorf("context cancelled: %w", ctx.Err())
 	}
 
 	// Verify source exists
-	fileInfo, err := os.Stat(filePath)
-	if err != nil {
+	if _, err := os.Stat(filePath); err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("%w: %s", ErrPathNotFound, filePath)
 		}
@@ -86,9 +98,8 @@ func (t *linuxTrasher) MoveToTrash(ctx context.Context, filePath string) (string
 	const maxRetries = 100
 
 	for i := range maxRetries {
-		_, err = os.Stat(trashFilePath)
-		if err != nil {
-			break // Path is available
+		if _, err := os.Stat(trashFilePath); err != nil {
+			break
 		}
 
 		uniqueName = generateUniqueName(fmt.Sprintf("%s_%d", baseName, i))
@@ -115,7 +126,7 @@ func (t *linuxTrasher) MoveToTrash(ctx context.Context, filePath string) (string
 	}
 
 	// Move file to trash
-	err = t.moveFile(filePath, trashFilePath, fileInfo)
+	err = t.moveFile(filePath, trashFilePath)
 	if err != nil {
 		// Clean up info file on failure
 		os.Remove(infoFilePath)
@@ -127,6 +138,14 @@ func (t *linuxTrasher) MoveToTrash(ctx context.Context, filePath string) (string
 }
 
 // RestoreFromTrash restores a file from trash to its original location.
+//
+// Parameters:
+//   - ctx: Context for cancellation.
+//   - trashPath: Current path of the file in trash.
+//   - originalPath: Destination path for restoration.
+//
+// Returns:
+//   - An error if restoration fails.
 func (t *linuxTrasher) RestoreFromTrash(ctx context.Context, trashPath, originalPath string) error {
 	if ctx.Err() != nil {
 		return fmt.Errorf("context cancelled: %w", ctx.Err())
@@ -168,7 +187,13 @@ func (t *linuxTrasher) RestoreFromTrash(ctx context.Context, trashPath, original
 	return nil
 }
 
-// IsInTrash checks if a file exists in trash.
+// IsInTrash reports whether a file exists in trash.
+//
+// Parameters:
+//   - trashPath: Path to check.
+//
+// Returns:
+//   - True if the file is present in trash.
 func (t *linuxTrasher) IsInTrash(trashPath string) bool {
 	_, err := os.Stat(trashPath)
 	if err != nil {
@@ -191,6 +216,10 @@ func (t *linuxTrasher) IsInTrash(trashPath string) bool {
 }
 
 // ListTrash returns all entries in trash.
+//
+// Returns:
+//   - Trash entries.
+//   - An error if the trash directory cannot be read.
 func (t *linuxTrasher) ListTrash() ([]TrashEntry, error) {
 	entries, err := os.ReadDir(t.filesDir)
 	if err != nil {
@@ -221,7 +250,14 @@ func (t *linuxTrasher) ListTrash() ([]TrashEntry, error) {
 	return result, nil
 }
 
-// DeletePermanently removes a file from trash permanently.
+// DeletePermanently removes a file from trash.
+//
+// Parameters:
+//   - ctx: Context for cancellation.
+//   - trashPath: Path of the file in trash.
+//
+// Returns:
+//   - An error if deletion fails.
 func (t *linuxTrasher) DeletePermanently(ctx context.Context, trashPath string) error {
 	if ctx.Err() != nil {
 		return fmt.Errorf("context cancelled: %w", ctx.Err())
@@ -244,11 +280,20 @@ func (t *linuxTrasher) DeletePermanently(ctx context.Context, trashPath string) 
 }
 
 // GetTrashPath returns the XDG trash files directory path.
+//
+// Returns:
+//   - Absolute path to the trash files directory.
 func (t *linuxTrasher) GetTrashPath() string {
 	return t.filesDir
 }
 
 // getInfoPath returns the path to the trashinfo file for a given trash file.
+//
+// Parameters:
+//   - trashPath: Path of the file in trash.
+//
+// Returns:
+//   - Path to the corresponding .trashinfo file.
 func (t *linuxTrasher) getInfoPath(trashPath string) string {
 	baseName := filepath.Base(trashPath)
 
@@ -256,6 +301,14 @@ func (t *linuxTrasher) getInfoPath(trashPath string) string {
 }
 
 // readTrashInfo reads and parses a trashinfo file.
+//
+// Parameters:
+//   - infoPath: Path to the .trashinfo file.
+//
+// Returns:
+//   - Original filesystem path.
+//   - Deletion timestamp.
+//   - An error if the file cannot be read or parsed.
 func (t *linuxTrasher) readTrashInfo(infoPath string) (string, time.Time, error) {
 	content, err := os.ReadFile(infoPath)
 	if err != nil {
@@ -265,21 +318,30 @@ func (t *linuxTrasher) readTrashInfo(infoPath string) (string, time.Time, error)
 	return parseTrashInfo(string(content))
 }
 
-// moveFile moves a file or directory to trash, handling cross-device moves.
+// moveFile moves a file or directory, falling back to copy-and-delete across devices.
 //
-//nolint:unparam // info parameter is kept for API consistency
-func (t *linuxTrasher) moveFile(src, dst string, info os.FileInfo) error {
-	// Try simple rename first
-	err := os.Rename(src, dst)
-	if err == nil {
+// Parameters:
+//   - src: Source path.
+//   - dst: Destination path.
+//
+// Returns:
+//   - An error if the move fails.
+func (t *linuxTrasher) moveFile(src, dst string) error {
+	if err := os.Rename(src, dst); err == nil {
 		return nil
 	}
 
-	// If rename failed (likely cross-device), copy and delete
 	return t.copyAndDelete(src, dst)
 }
 
 // copyAndDelete copies a file or directory and then deletes the source.
+//
+// Parameters:
+//   - src: Source path.
+//   - dst: Destination path.
+//
+// Returns:
+//   - An error if copy or delete fails.
 func (t *linuxTrasher) copyAndDelete(src, dst string) error {
 	srcInfo, err := os.Lstat(src)
 	if err != nil {
@@ -321,7 +383,15 @@ func (t *linuxTrasher) copyAndDelete(src, dst string) error {
 	return nil
 }
 
-// copyFile copies a single file.
+// copyFile copies a single file and preserves its timestamps.
+//
+// Parameters:
+//   - src: Source file path.
+//   - dst: Destination file path.
+//   - srcInfo: File info for the source.
+//
+// Returns:
+//   - An error if the copy fails.
 func (t *linuxTrasher) copyFile(src, dst string, srcInfo os.FileInfo) error {
 	srcFile, err := os.Open(src)
 	if err != nil {
@@ -358,6 +428,13 @@ func (t *linuxTrasher) copyFile(src, dst string, srcInfo os.FileInfo) error {
 }
 
 // copyDir recursively copies a directory.
+//
+// Parameters:
+//   - src: Source directory path.
+//   - dst: Destination directory path.
+//
+// Returns:
+//   - An error if the copy fails.
 func (t *linuxTrasher) copyDir(src, dst string) error {
 	// Use Lstat to avoid following symlinks when checking source
 	srcInfo, err := os.Lstat(src)

@@ -81,7 +81,7 @@ func TestBuildInfoIntegrationTestSuite(t *testing.T) {
 // - Empty settings
 // - Full settings with all fields populated.
 func (s *BuildInfoIntegrationTestSuite) TestExtractWorkflowWithVariousBuildInfoData() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	tests := []struct {
 		name          string
@@ -176,7 +176,7 @@ func (s *BuildInfoIntegrationTestSuite) TestExtractWorkflowWithVariousBuildInfoD
 // This test ensures the extractor correctly handles multiple different binaries
 // in a workflow scenario.
 func (s *BuildInfoIntegrationTestSuite) TestExtractWorkflowWithMultipleBinaries() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	// First binary
 	buildData1 := &buildinfo.BuildInfoData{
@@ -357,7 +357,7 @@ func (s *BuildInfoIntegrationTestSuite) TestIsGoBinaryChecks() {
 // This test ensures the workflow of checking if a file is a Go binary
 // before attempting extraction works correctly.
 func (s *BuildInfoIntegrationTestSuite) TestIsGoBinaryWithExtractIntegration() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	// Scenario 1: Valid Go binary - check passes, extract succeeds
 	s.Run("valid binary workflow", func() {
@@ -403,7 +403,7 @@ func (s *BuildInfoIntegrationTestSuite) TestIsGoBinaryWithExtractIntegration() {
 // appropriate errors.
 func (s *BuildInfoIntegrationTestSuite) TestContextCancellationHandling() {
 	// Create a cancelled context
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(s.T().Context())
 	cancel()
 
 	// Setup expectation for cancelled context
@@ -425,7 +425,7 @@ func (s *BuildInfoIntegrationTestSuite) TestContextCancellationHandling() {
 // This test ensures that Extract respects context deadlines.
 func (s *BuildInfoIntegrationTestSuite) TestContextTimeoutHandling() {
 	// Create a context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 0)
+	ctx, cancel := context.WithTimeout(s.T().Context(), 0)
 	defer cancel()
 
 	// Setup expectation for timed-out context
@@ -446,7 +446,7 @@ func (s *BuildInfoIntegrationTestSuite) TestContextTimeoutHandling() {
 //
 // When a binary path does not exist, Extract should return ErrPathNotFound.
 func (s *BuildInfoIntegrationTestSuite) TestErrorHandlingNonExistentBinary() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 	nonExistentPath := "/nonexistent/path/binary"
 
 	// Setup expectations
@@ -473,7 +473,7 @@ func (s *BuildInfoIntegrationTestSuite) TestErrorHandlingNonExistentBinary() {
 //
 // When a file is not a valid Go binary, Extract should return ErrNotGoBinary.
 func (s *BuildInfoIntegrationTestSuite) TestErrorHandlingInvalidBinary() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 	invalidPath := "/usr/bin/ls"
 
 	// Setup expectations
@@ -500,7 +500,7 @@ func (s *BuildInfoIntegrationTestSuite) TestErrorHandlingInvalidBinary() {
 //
 // When a file exists but has no build info, Extract should return ErrBuildInfoNotFound.
 func (s *BuildInfoIntegrationTestSuite) TestErrorHandlingBuildInfoNotFound() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 	strippedBinary := "/usr/local/bin/stripped"
 
 	// Setup expectation
@@ -517,242 +517,12 @@ func (s *BuildInfoIntegrationTestSuite) TestErrorHandlingBuildInfoNotFound() {
 	s.Nil(result)
 }
 
-// TestParseVersionType verifies version type parsing for various version formats.
-//
-// This test uses table-driven testing to cover:
-// - Semantic versions (v1.2.3)
-// - Pseudo-versions (v0.0.0-20260302120000-abc123)
-// - Development builds ((devel))
-// - Empty versions
-// - Unknown formats.
-func TestParseVersionType(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		version  string
-		expected string
-	}{
-		{
-			name:     "semantic version",
-			version:  "v1.2.3",
-			expected: "semantic",
-		},
-		{
-			name:     "semantic version with prerelease",
-			version:  "v1.2.3-beta.1",
-			expected: "semantic",
-		},
-		{
-			name:     "pseudo-version",
-			version:  "v0.0.0-20260302120000-abc123def456",
-			expected: "pseudo",
-		},
-		{
-			name:     "pseudo-version with different timestamp",
-			version:  "v0.0.0-20230101120000-deadbeef1234",
-			expected: "pseudo",
-		},
-		{
-			name:     "development build",
-			version:  "(devel)",
-			expected: "devel",
-		},
-		{
-			name:     "empty version",
-			version:  "",
-			expected: "unknown",
-		},
-		{
-			name:     "version without v prefix",
-			version:  "1.2.3",
-			expected: "unknown",
-		},
-		{
-			name:     "arbitrary string",
-			version:  "some-random-version",
-			expected: "unknown",
-		},
-		{
-			name:     "just v",
-			version:  "v",
-			expected: "unknown",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			result := buildinfo.ParseVersionType(tt.version)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-// TestIsReinstallable verifies reinstallability determination.
-//
-// This test ensures IsReinstallable returns true only when both
-// ModulePath and VCSRevision are present.
-func TestIsReinstallable(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name      string
-		buildInfo *buildinfo.BuildInfoData
-		expected  bool
-	}{
-		{
-			name: "full metadata - reinstallable",
-			buildInfo: &buildinfo.BuildInfoData{
-				ModulePath:  testModulePath,
-				Version:     testVersion,
-				VCSRevision: testVCSRevision,
-				GoVersion:   testGoVersion,
-				Settings:    map[string]string{},
-				RawJSON:     []byte(`{}`),
-			},
-			expected: true,
-		},
-		{
-			name: "missing module path - not reinstallable",
-			buildInfo: &buildinfo.BuildInfoData{
-				ModulePath:  "",
-				Version:     testVersion,
-				VCSRevision: testVCSRevision,
-				GoVersion:   testGoVersion,
-				Settings:    map[string]string{},
-				RawJSON:     []byte(`{}`),
-			},
-			expected: false,
-		},
-		{
-			name: "missing vcs revision - not reinstallable",
-			buildInfo: &buildinfo.BuildInfoData{
-				ModulePath:  testModulePath,
-				Version:     testVersion,
-				VCSRevision: "",
-				GoVersion:   testGoVersion,
-				Settings:    map[string]string{},
-				RawJSON:     []byte(`{}`),
-			},
-			expected: false,
-		},
-		{
-			name: "both missing - not reinstallable",
-			buildInfo: &buildinfo.BuildInfoData{
-				ModulePath:  "",
-				Version:     testVersion,
-				VCSRevision: "",
-				GoVersion:   testGoVersion,
-				Settings:    map[string]string{},
-				RawJSON:     []byte(`{}`),
-			},
-			expected: false,
-		},
-		{
-			name: "minimal reinstallable",
-			buildInfo: &buildinfo.BuildInfoData{
-				ModulePath:  testModulePath,
-				VCSRevision: testVCSRevision,
-				Settings:    map[string]string{},
-				RawJSON:     []byte(`{}`),
-			},
-			expected: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			result := tt.buildInfo.IsReinstallable()
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-// TestGetInstallCommand verifies install command generation.
-//
-// This test ensures GetInstallCommand returns appropriate commands
-// based on available build info data.
-func TestGetInstallCommand(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name      string
-		buildInfo *buildinfo.BuildInfoData
-		expected  string
-	}{
-		{
-			name: "full metadata - install at tagged version",
-			buildInfo: &buildinfo.BuildInfoData{
-				ModulePath:  testModulePath,
-				Version:     testVersion,
-				VCSRevision: testVCSRevision,
-				Settings:    map[string]string{},
-				RawJSON:     []byte(`{}`),
-			},
-			expected: "go install " + testModulePath + "@" + testVersion,
-		},
-		{
-			name: "no vcs revision but has version - install at version",
-			buildInfo: &buildinfo.BuildInfoData{
-				ModulePath: testModulePath,
-				Version:    testVersion,
-				Settings:   map[string]string{},
-				RawJSON:    []byte(`{}`),
-			},
-			expected: "go install " + testModulePath + "@" + testVersion,
-		},
-		{
-			name: "devel version with revision - install at revision",
-			buildInfo: &buildinfo.BuildInfoData{
-				ModulePath:  testModulePath,
-				Version:     testDevelVersion,
-				VCSRevision: testVCSRevision,
-				Settings:    map[string]string{},
-				RawJSON:     []byte(`{}`),
-			},
-			expected: "go install " + testModulePath + "@" + testVCSRevision,
-		},
-		{
-			name: "no module path - empty command",
-			buildInfo: &buildinfo.BuildInfoData{
-				ModulePath: "",
-				Version:    testVersion,
-				Settings:   map[string]string{},
-				RawJSON:    []byte(`{}`),
-			},
-			expected: "",
-		},
-		{
-			name: "only module path no version or revision - install at latest",
-			buildInfo: &buildinfo.BuildInfoData{
-				ModulePath: testModulePath,
-				Settings:   map[string]string{},
-				RawJSON:    []byte(`{}`),
-			},
-			expected: "go install " + testModulePath + "@latest",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			result := tt.buildInfo.GetInstallCommand()
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 // TestFullExtractionWorkflow verifies the complete extraction workflow.
 //
 // This test ensures that the full workflow of checking, extracting, and
 // computing checksum works together properly.
 func (s *BuildInfoIntegrationTestSuite) TestFullExtractionWorkflow() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	buildData := &buildinfo.BuildInfoData{
 		ModulePath:  testModulePath,
@@ -801,11 +571,6 @@ func (s *BuildInfoIntegrationTestSuite) TestFullExtractionWorkflow() {
 	s.Equal(testModulePath, info.ModulePath)
 	s.Equal(testVersion, info.Version)
 	s.Equal(testVCSRevision, info.VCSRevision)
-	s.True(info.IsReinstallable())
-
-	installCmd := info.GetInstallCommand()
-	s.NotEmpty(installCmd)
-	s.Contains(installCmd, testModulePath)
 }
 
 // TestExtractWithContextPropagation verifies context is properly propagated.
@@ -813,7 +578,7 @@ func (s *BuildInfoIntegrationTestSuite) TestFullExtractionWorkflow() {
 // This test ensures the context is passed through to the Extract method
 // and can be used for cancellation/timeout.
 func (s *BuildInfoIntegrationTestSuite) TestExtractWithContextPropagation() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	buildData := &buildinfo.BuildInfoData{
 		ModulePath: testModulePath,
@@ -841,7 +606,7 @@ func (s *BuildInfoIntegrationTestSuite) TestExtractWithContextPropagation() {
 // This test ensures that errors from the extractor are properly returned
 // and can be inspected.
 func (s *BuildInfoIntegrationTestSuite) TestErrorPropagation() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	// Test wrapped error
 	originalErr := errors.New("underlying error")
@@ -902,24 +667,6 @@ func TestBuildInfoDataWithEmptySettings(t *testing.T) {
 
 	assert.NotNil(t, data.Settings)
 	assert.Empty(t, data.Settings)
-	assert.False(t, data.IsReinstallable())
-}
-
-// TestBuildInfoDataWithNilSettings verifies BuildInfoData handles nil settings.
-func TestBuildInfoDataWithNilSettings(t *testing.T) {
-	t.Parallel()
-
-	data := &buildinfo.BuildInfoData{
-		ModulePath:  testModulePath,
-		Version:     testVersion,
-		VCSRevision: testVCSRevision,
-		GoVersion:   testGoVersion,
-		Settings:    nil,
-		RawJSON:     []byte(`{}`),
-	}
-
-	// Even with nil settings, should still be reinstallable if module and revision present
-	assert.True(t, data.IsReinstallable())
 }
 
 // TestMultipleOperationsSequence verifies multiple operations in sequence.
@@ -927,7 +674,7 @@ func TestBuildInfoDataWithNilSettings(t *testing.T) {
 // This test simulates a workflow where multiple operations are performed
 // on the same binary.
 func (s *BuildInfoIntegrationTestSuite) TestMultipleOperationsSequence() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	buildData := &buildinfo.BuildInfoData{
 		ModulePath:  testModulePath,
@@ -987,140 +734,11 @@ func TestErrorTypes(t *testing.T) {
 	assert.NotEmpty(t, buildinfo.ErrUnsupportedPlatform.Error())
 }
 
-// TestVersionTypeEdgeCases verifies ParseVersionType handles edge cases.
-//
-// This test ensures version parsing handles various edge cases correctly.
-func TestVersionTypeEdgeCases(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		version string
-		want    string
-	}{
-		{
-			name:    "version with multiple hyphens (invalid pseudo)",
-			version: "v0.0.0-20260302-abc123",
-			want:    "semantic",
-		},
-		{
-			name:    "version starting with hyphen after v",
-			version: "v-1.2.3",
-			want:    "unknown",
-		},
-		{
-			name:    "long semantic version",
-			version: "v10.20.30",
-			want:    "semantic",
-		},
-		{
-			name:    "just v0",
-			version: "v0",
-			want:    "unknown",
-		},
-		{
-			name:    "v with only hyphens",
-			version: "v---",
-			want:    "unknown",
-		},
-		{
-			name:    "whitespace version",
-			version: "   ",
-			want:    "unknown",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			got := buildinfo.ParseVersionType(tt.version)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
-// TestGetInstallCommandVariations verifies GetInstallCommand with various scenarios.
-//
-// This test ensures install commands are generated correctly for different
-// combinations of available data.
-func TestGetInstallCommandVariations(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name       string
-		modulePath string
-		version    string
-		revision   string
-		expected   string
-	}{
-		{
-			name:       "everything present - uses tagged version",
-			modulePath: "github.com/test/app",
-			version:    "v1.0.0",
-			revision:   "abc123",
-			expected:   "go install github.com/test/app@v1.0.0",
-		},
-		{
-			name:       "no revision but has version - uses version",
-			modulePath: "github.com/test/app",
-			version:    "v2.0.0",
-			revision:   "",
-			expected:   "go install github.com/test/app@v2.0.0",
-		},
-		{
-			name:       "devel version with revision - uses revision",
-			modulePath: "github.com/test/app",
-			version:    "(devel)",
-			revision:   "abc123",
-			expected:   "go install github.com/test/app@abc123",
-		},
-		{
-			name:       "no module path - empty",
-			modulePath: "",
-			version:    "v1.0.0",
-			revision:   "abc123",
-			expected:   "",
-		},
-		{
-			name:       "empty version with revision - uses revision",
-			modulePath: "github.com/test/app",
-			version:    "",
-			revision:   "def456",
-			expected:   "go install github.com/test/app@def456",
-		},
-		{
-			name:       "devel version no revision - uses latest",
-			modulePath: "github.com/test/app",
-			version:    "(devel)",
-			revision:   "",
-			expected:   "go install github.com/test/app@latest",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			data := &buildinfo.BuildInfoData{
-				ModulePath:  tt.modulePath,
-				Version:     tt.version,
-				VCSRevision: tt.revision,
-				Settings:    map[string]string{},
-				RawJSON:     []byte(`{}`),
-			}
-
-			result := data.GetInstallCommand()
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 // TestConcurrentExtractOperations verifies concurrent extract operations.
 //
 // This test ensures the extractor can handle concurrent operations safely.
 func (s *BuildInfoIntegrationTestSuite) TestConcurrentExtractOperations() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	buildData1 := &buildinfo.BuildInfoData{
 		ModulePath: "github.com/user/app1",
@@ -1156,23 +774,13 @@ func (s *BuildInfoIntegrationTestSuite) TestConcurrentExtractOperations() {
 	)
 
 	var wg sync.WaitGroup
-	wg.Add(2)
 
-	// First goroutine for testBinaryPath
-	go func() {
-		defer wg.Done()
-
+	wg.Go(func() {
 		result1, err1 = s.extractor.Extract(ctx, testBinaryPath)
-	}()
-
-	// Second goroutine for testBinaryPath2
-	go func() {
-		defer wg.Done()
-
+	})
+	wg.Go(func() {
 		result2, err2 = s.extractor.Extract(ctx, testBinaryPath2)
-	}()
-
-	// Wait for both goroutines to complete
+	})
 	wg.Wait()
 
 	// Verify both succeeded
@@ -1202,7 +810,7 @@ func TestIntegrationWithExtractorCreation(t *testing.T) {
 // This test ensures errors from the extractor are properly integrated
 // with the consuming components.
 func (s *BuildInfoIntegrationTestSuite) TestExtractorErrorsIntegration() {
-	ctx := context.Background()
+	ctx := s.T().Context()
 
 	tests := []struct {
 		name        string

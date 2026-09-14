@@ -22,10 +22,6 @@ TEST_TIMEOUT := 2m
 COVERAGE_PROFILE := coverage.out
 COVERAGE_HTML := coverage.html
 
-# Directory configuration
-INTEGRATION_TEST_DIR := ./testing/integration
-E2E_TEST_DIR := ./testing/e2e
-
 # Tool configuration
 GOLANGCI_LINT := golangci-lint
 GOLANGCI_LINT_FLAGS := run ./...
@@ -66,32 +62,6 @@ vet:
 test:
 	@echo "Running all tests with race detection..."
 	$(GO) test $(TEST_FLAGS) -timeout $(TEST_TIMEOUT) ./...
-
-# Run unit tests only (white-box tests in package directories)
-.PHONY: test-unit
-test-unit:
-	@echo "Running unit tests..."
-	$(GO) test $(TEST_FLAGS) -timeout $(TEST_TIMEOUT) ./cmd/... ./internal/...
-
-# Run integration tests in /testing/integration
-.PHONY: test-integration
-test-integration:
-	@echo "Running integration tests..."
-	@if [ -d $(INTEGRATION_TEST_DIR) ]; then \
-		$(GO) test $(TEST_FLAGS) -timeout $(TEST_TIMEOUT) $(INTEGRATION_TEST_DIR)/...; \
-	else \
-		echo "No integration tests found in $(INTEGRATION_TEST_DIR)"; \
-	fi
-
-# Run E2E tests in /testing/e2e
-.PHONY: test-e2e
-test-e2e:
-	@echo "Running E2E tests..."
-	@if [ -d $(E2E_TEST_DIR) ]; then \
-		$(GO) test $(TEST_FLAGS) -timeout $(TEST_TIMEOUT) $(E2E_TEST_DIR)/...; \
-	else \
-		echo "No E2E tests found in $(E2E_TEST_DIR)"; \
-	fi
 
 # Generate test coverage report
 .PHONY: coverage
@@ -219,9 +189,6 @@ help:
 	@echo "  lint              - Run golangci-lint (must pass without --fix flag)"
 	@echo "  vet               - Run go vet for additional static analysis"
 	@echo "  test              - Run all tests with race detection"
-	@echo "  test-unit         - Run unit tests only (white-box tests)"
-	@echo "  test-integration  - Run integration tests in /testing/integration"
-	@echo "  test-e2e          - Run E2E tests in /testing/e2e"
 	@echo "  coverage          - Generate test coverage report"
 	@echo "  coverage-html     - Generate and open HTML coverage report"
 	@echo "  benchmark         - Run benchmark tests"

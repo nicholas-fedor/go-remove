@@ -10,12 +10,12 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 // for managing deletion history and restoration operations.
 //
 // The history package enables users to:
-//   - Record binary deletions with full metadata
-//   - Undo the most recent deletion
-//   - Restore specific binaries by history entry ID
-//   - View deletion history with filtering and pagination
-//   - Permanently delete binaries from trash
-//   - Clear history entries (with optional trash clearing)
+//   - Record binary deletions with full metadata.
+//   - Undo the most recent deletion.
+//   - Restore specific binaries by history entry ID.
+//   - View deletion history with filtering and pagination.
+//   - Permanently delete binaries from trash.
+//   - Clear history entries (with optional trash clearing).
 //
 // Architecture:
 //
@@ -55,9 +55,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 //	history, err := manager.GetHistory(ctx, 10)
 //
 // Platform Support:
-//   - Linux: Full support via XDG trash specification
-//   - Windows: Full support via Windows Recycle Bin
-//   - Darwin: Not supported
+//   - Linux: Full support via XDG trash specification.
+//   - Windows: Full support via Windows Recycle Bin.
+//   - Darwin: Not supported.
 //
 // Error Handling:
 // The package defines specific error types for common failure scenarios.

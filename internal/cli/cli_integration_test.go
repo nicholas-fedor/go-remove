@@ -359,7 +359,7 @@ func (s *CLIIntegrationTestSuite) TestRunBinDirError() {
 
 	// Verify
 	s.Require().Error(err)
-	s.Require().ErrorContains(err, "failed to determine binary directory")
+	s.Require().ErrorContains(err, "determining binary directory")
 	s.Require().ErrorIs(err, binDirError)
 }
 
@@ -402,7 +402,7 @@ func (s *CLIIntegrationTestSuite) TestRunRemoveBinaryError() {
 
 	// Verify
 	s.Require().Error(err)
-	s.Require().ErrorContains(err, "failed to remove binary")
+	s.Require().ErrorContains(err, "removing binary")
 	s.Require().ErrorContains(err, testBinaryName)
 	s.Require().ErrorIs(err, removeError)
 }
@@ -448,7 +448,7 @@ func (s *CLIIntegrationTestSuite) TestRunHistoryRecordError() {
 
 	// Verify
 	s.Require().Error(err)
-	s.Require().ErrorContains(err, "failed to record deletion")
+	s.Require().ErrorContains(err, "recording deletion")
 	s.Require().ErrorIs(err, recordError)
 }
 
@@ -699,7 +699,7 @@ func (s *CLIIntegrationTestSuite) TestRunBinaryNotFoundError() {
 
 	// Verify
 	s.Require().Error(err)
-	s.Require().ErrorContains(err, "failed to remove binary")
+	s.Require().ErrorContains(err, "removing binary")
 	s.Require().ErrorIs(err, removeError)
 }
 
