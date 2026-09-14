@@ -58,7 +58,7 @@ jobs:
           egress-policy: audit
 
       - id: govulncheck
-        uses: nicholas-fedor/govulncheck-action@b438bbbcb5a07abf8d322c367da4a3d45f99e183
+        uses: nicholas-fedor/govulncheck-action@2e8328bfd2a2259f6b48ad47edc8101c86e74883 # v1.0.5
         with:
           output-format: sarif
           output-file: ${{ env.OUTPUT_FILE }}
