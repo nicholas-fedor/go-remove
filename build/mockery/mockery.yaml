@@ -165,7 +165,7 @@ pkgname: "mocks"
 
 # Add the license header to the generated mock files.
 template-data:
-  boilerplate-file: license-header.txt
+  boilerplate-file: build/mockery/license-header.txt
 
 ######################################################################################################
 # File Output Configuration                                                                          #
