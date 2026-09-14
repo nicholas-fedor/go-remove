@@ -21,11 +21,11 @@ A CLI tool to safely remove Go binaries with undo and history support
 
 - [Features](#features)
 - [Installation](#installation)
-  - [From Source](#from-source)
-  - [From Releases](#from-releases)
-    - [Linux](#linux)
-    - [Windows](#windows)
-    - [Archive Naming](#archive-naming)
+  - [Install script](#install-script)
+  - [Linux packages](#linux-packages)
+  - [Updating and uninstalling](#updating-and-uninstalling)
+  - [Source](#source)
+  - [Windows](#windows)
 - [Quick Start](#quick-start)
 - [Usage](#usage)
   - [Direct Removal](#direct-removal)
@@ -53,56 +53,74 @@ A CLI tool to safely remove Go binaries with undo and history support
 
 ## Installation
 
-### From Source
+### Install script
+
+```bash
+tmp=$(mktemp)
+curl -sSfL https://raw.githubusercontent.com/nicholas-fedor/go-remove/main/scripts/install.sh -o "$tmp" && sh "$tmp"
+rm -f "$tmp"
+```
+
+On Linux, the script installs a native package (`.deb`, `.rpm`, `.apk`, or Arch) when available; otherwise, it extracts the release archive into `$HOME/go/bin`.
+
+| Variable       | Meaning                                                            |
+|----------------|--------------------------------------------------------------------|
+| `VERSION`      | Release tag (`v1.2.0` or `1.2.0`). Default: latest.                |
+| `INSTALL_DIR`  | Directory for archive installs. Default: `$HOME/go/bin`.           |
+| `INSTALL_TYPE` | `auto` (default), `package`, or `archive`.                         |
+
+Windows: download the `.zip` from the [releases page](https://github.com/nicholas-fedor/go-remove/releases).
+
+### Linux packages
+
+GitHub Releases include distro packages built by GoReleaser (nFPM):
+
+| Format         | Distros                       |
+|----------------|-------------------------------|
+| `.deb`         | Debian, Ubuntu                |
+| `.rpm`         | Fedora, RHEL, Rocky, openSUSE |
+| `.apk`         | Alpine                        |
+| `.pkg.tar.zst` | Arch, Manjaro                 |
+
+Install a downloaded package with `dpkg -i`, `rpm -Uvh`, `apk add --allow-untrusted`, or `pacman -U`. Checksums are in `checksums.txt` on the same release.
+
+### Updating and uninstalling
+
+Re-run the script to replace the current install with the latest release (or `VERSION=…`). Native packages are upgraded in place (`dpkg`/`rpm`/`apk`/`pacman`) and archive installs overwrite `$INSTALL_DIR/go-remove`.
+
+```bash
+tmp=$(mktemp)
+curl -sSfL https://raw.githubusercontent.com/nicholas-fedor/go-remove/main/scripts/install.sh -o "$tmp"
+
+# Update
+sh "$tmp" update
+
+# Uninstall (native package and/or the stored archive install directory)
+sh "$tmp" uninstall
+
+rm -f "$tmp"
+```
+
+### Source
 
 ```bash
 go install github.com/nicholas-fedor/go-remove@latest
 ```
 
-The binary will be installed to `$GOPATH/bin` (typically `~/go/bin/go-remove`).
+The binary is installed to `$GOPATH/bin` (typically `~/go/bin/go-remove`).
 
-### From Releases
-
-Download the latest release for your platform from the [releases page](https://github.com/nicholas-fedor/go-remove/releases).
-
-#### Linux
-
-Available architectures: `amd64`, `i386`, `armhf`, `arm64v8`
-
-```bash
-# Download and extract (replace amd64 with your architecture)
-curl -LO https://github.com/nicholas-fedor/go-remove/releases/latest/download/go-remove_linux_amd64_latest.tar.gz
-tar -xzf go-remove_linux_amd64_latest.tar.gz
-chmod +x go-remove
-sudo mv go-remove /usr/local/bin/
-
-# Verify checksum (optional)
-curl -LO https://github.com/nicholas-fedor/go-remove/releases/latest/download/checksums.txt
-sha256sum -c checksums.txt --ignore-missing
-```
-
-#### Windows
+### Windows
 
 Available architectures: `amd64`, `i386`, `arm64v8`
 
 ```powershell
 # Download and extract (replace amd64 with your architecture)
-Invoke-WebRequest -Uri "https://github.com/nicholas-fedor/go-remove/releases/latest/download/go-remove_windows_amd64_latest.zip" -OutFile "go-remove.zip"
+Invoke-WebRequest -Uri "https://github.com/nicholas-fedor/go-remove/releases/download/v1.0.0/go-remove_windows_amd64_1.0.0.zip" -OutFile "go-remove.zip"
 Expand-Archive -Path "go-remove.zip" -DestinationPath "."
 
-# Move to a directory in your PATH (requires Administrator privileges)
+# Move to a directory in your PATH
 Move-Item -Path ".\go-remove.exe" -Destination "$env:LOCALAPPDATA\Microsoft\WindowsApps\"
 ```
-
-#### Archive Naming
-
-Release archives follow the pattern: `go-remove_{OS}_{ARCH}_{VERSION}.{ext}`
-
-| OS      | Architecture | Archive Name Example                    |
-|---------|--------------|-----------------------------------------|
-| Linux   | amd64        | `go-remove_linux_amd64_v1.0.0.tar.gz`   |
-| Linux   | arm64        | `go-remove_linux_arm64v8_v1.0.0.tar.gz` |
-| Windows | amd64        | `go-remove_windows_amd64_v1.0.0.zip`    |
 
 ## Quick Start
 
@@ -245,7 +263,7 @@ Run locally:
 
 ## Requirements
 
-- Go 1.26.0 or later
+- Go 1.27.0 or later
 
 ## Contributing
 

@@ -43,7 +43,7 @@ Before you begin, ensure you have the following tools installed:
 
 | Tool          | Version         | Purpose                     |
 |---------------|-----------------|-----------------------------|
-| Go            | 1.26.0 or later | Core language runtime       |
+| Go            | 1.27.0 or later | Core language runtime       |
 | Git           | Latest          | Version control             |
 | GPG           | Latest          | Commit signing (required)   |
 | golangci-lint | Latest          | Linting and static analysis |
@@ -159,7 +159,7 @@ You must address all issues identified by CodeRabbit.
 
 ### Go Version and Features
 
-This project targets **Go 1.26+** and leverages modern language features:
+This project targets **Go 1.27+** and leverages modern language features:
 
 - **Generics**: Use for type-safe generic programming
 - **Iterators**: Use for memory-efficient iteration
@@ -293,7 +293,7 @@ Run these commands before submitting a PR:
 ### Important Notes
 
 - Any use of the `nolint` directive should include a corresponding comment.
-- Updates to the Golangci-lint configuration file (`.golangci.yaml`) are permitted on an as-needed basis to address issues, such as reducing false positives or increasing compliance with modern Go best practices.
+- Updates to the Golangci-lint configuration file (`build/golangci-lint/golangci.yaml`) are permitted on an as-needed basis to address issues, such as reducing false positives or increasing compliance with modern Go best practices.
 
 ---
 
@@ -354,7 +354,7 @@ Description of the solution implemented
    ```
 
 2. **Make your changes:**
-   - Follow Go 1.26+ conventions
+   - Follow Go 1.27+ conventions
    - Write self-documenting code
 
 3. **Write/update tests:**
@@ -452,7 +452,7 @@ When you modify interfaces, you must regenerate mocks.
 
 ### Configuration
 
-- Configuration file: `.mockery.yaml`
+- Configuration file: `build/mockery/mockery.yaml`
 - Mocks stored in: `mocks/` subdirectories within packages
 
 ### Regenerating Mocks
@@ -475,19 +475,25 @@ Releases are handled by project maintainers using GoReleaser.
 
 ### Supported Platforms
 
-- **Linux**: amd64, i386, armhf, arm64v8
+- **Linux**: amd64, i386, armhf, arm64v8, riscv64
+- **macOS**: amd64, arm64v8
 - **Windows**: amd64, i386, arm64v8
+
+Users install, update, or uninstall release artifacts with `scripts/install.sh`.
 
 ### Artifacts
 
 All release artifacts are:
 
-- Signed with GPG
-- Checksummed for integrity verification
+- Linux packages (`.deb`, `.rpm`, `.apk`, `.pkg.tar.zst`)
+- Checksummed (`checksums.txt`)
+- Signed with Cosign keyless OIDC (`checksums.txt.sig`)
+- Accompanied by Syft SBOMs
+- Attested with GitHub artifact provenance
 
 ### Important
 
-- **Do not** modify `.goreleaser.yaml` without maintainer approval
+- **Do not** modify `build/goreleaser/goreleaser.yaml` without maintainer approval
 
 ---
 

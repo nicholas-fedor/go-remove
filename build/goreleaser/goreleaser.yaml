@@ -1,0 +1,127 @@
+version: 2
+project_name: go-remove
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: go-remove
+    main: ./main.go
+    binary: go-remove
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - "386"
+      - arm
+      - arm64
+      - riscv64
+
+    ignore:
+      - goos: windows
+        goarch: riscv64
+      - goos: windows
+        goarch: arm
+      - goos: darwin
+        goarch: "386"
+      - goos: darwin
+        goarch: arm
+      - goos: darwin
+        goarch: riscv64
+
+archives:
+  - name_template: >-
+      {{- .ProjectName }}_
+      {{- if eq .Os "darwin" }}macOS
+      {{- else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}amd64
+      {{- else if eq .Arch "386" }}i386
+      {{- else if eq .Arch "arm" }}armhf
+      {{- else if eq .Arch "arm64" }}arm64v8
+      {{- else }}{{ .Arch }}{{ end }}_
+      {{- .Version -}}
+    formats: ["tar.gz"]
+    format_overrides:
+      - goos: windows
+        formats: ["zip"]
+    files:
+      - LICENSE.md
+
+nfpms:
+  - id: go-remove
+    package_name: go-remove
+    ids:
+      - go-remove
+    vendor: Nicholas Fedor
+    homepage: https://github.com/nicholas-fedor/go-remove
+    maintainer: Nicholas Fedor <nick@nickfedor.com>
+    description: CLI to safely remove Go binaries with undo and history support.
+    license: AGPL-3.0-or-later
+    formats:
+      - deb
+      - rpm
+      - apk
+      - archlinux
+    bindir: /usr/bin
+    section: utils
+    priority: optional
+    mtime: "{{ .CommitDate }}"
+    file_name_template: >-
+      {{- .PackageName }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}amd64
+      {{- else if eq .Arch "386" }}i386
+      {{- else if eq .Arch "arm" }}armhf
+      {{- else if eq .Arch "arm64" }}arm64v8
+      {{- else if eq .Arch "riscv64" }}riscv64
+      {{- else }}{{ .Arch }}{{ end }}_
+      {{- .Version }}
+    contents:
+      - src: LICENSE.md
+        dst: /usr/share/doc/go-remove/LICENSE.md
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+release:
+  github:
+    owner: nicholas-fedor
+    name: go-remove
+  draft: false
+  prerelease: auto
+
+source:
+  enabled: true
+  name_template: go-remove.src
+
+checksum:
+  name_template: checksums.txt
+
+sboms:
+  - id: binaries
+    artifacts: archive
+  - id: source
+    artifacts: source
+
+signs:
+  - id: cosign-checksums
+    cmd: cosign
+    args:
+      - sign-blob
+      - "--bundle=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
