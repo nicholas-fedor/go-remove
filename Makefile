@@ -24,9 +24,12 @@ COVERAGE_HTML := coverage.html
 
 # Tool configuration
 GOLANGCI_LINT := golangci-lint
-GOLANGCI_LINT_FLAGS := run ./...
+GOLANGCI_LINT_CONFIG := build/golangci-lint/golangci.yaml
+GOLANGCI_LINT_FLAGS := run --config $(GOLANGCI_LINT_CONFIG) ./...
 MOCKERY := mockery
+MOCKERY_CONFIG := build/mockery/mockery.yaml
 GORELEASER := goreleaser
+GORELEASER_CONFIG := build/goreleaser/goreleaser.yaml
 
 # =============================================================================
 # Default Target
@@ -118,13 +121,13 @@ clean:
 .PHONY: fmt
 fmt:
 	@echo "Formatting code with golangci-lint..."
-	$(GOLANGCI_LINT) fmt ./...
+	$(GOLANGCI_LINT) fmt --config $(GOLANGCI_LINT_CONFIG) ./...
 
-# Generate mocks using mockery (based on .mockery.yaml)
+# Generate mocks using mockery (based on build/mockery/mockery.yaml)
 .PHONY: mocks
 mocks:
 	@echo "Generating mocks with mockery..."
-	$(MOCKERY)
+	$(MOCKERY) --config=$(MOCKERY_CONFIG)
 
 # Download and verify dependencies
 .PHONY: deps
@@ -156,13 +159,13 @@ verify: lint vet test
 .PHONY: release-snapshot
 release-snapshot:
 	@echo "Building release snapshot..."
-	$(GORELEASER) release --snapshot --clean
+	$(GORELEASER) release --config $(GORELEASER_CONFIG) --snapshot --clean --skip=sign,sbom
 
 # Build release binaries using goreleaser (full release)
 .PHONY: release
 release:
 	@echo "Building release..."
-	$(GORELEASER) release --clean
+	$(GORELEASER) release --config $(GORELEASER_CONFIG) --clean
 
 # =============================================================================
 # Development Helpers
