@@ -23,7 +23,6 @@ COVERAGE_PROFILE := coverage.out
 COVERAGE_HTML := coverage.html
 
 # Directory configuration
-INTEGRATION_TEST_DIR := ./testing/integration
 E2E_TEST_DIR := ./testing/e2e
 
 # Tool configuration
@@ -73,15 +72,13 @@ test-unit:
 	@echo "Running unit tests..."
 	$(GO) test $(TEST_FLAGS) -timeout $(TEST_TIMEOUT) ./cmd/... ./internal/...
 
-# Run integration tests in /testing/integration
+# Run black-box integration tests (*_integration_test.go in package directories)
 .PHONY: test-integration
 test-integration:
 	@echo "Running integration tests..."
-	@if [ -d $(INTEGRATION_TEST_DIR) ]; then \
-		$(GO) test $(TEST_FLAGS) -timeout $(TEST_TIMEOUT) $(INTEGRATION_TEST_DIR)/...; \
-	else \
-		echo "No integration tests found in $(INTEGRATION_TEST_DIR)"; \
-	fi
+	$(GO) test $(TEST_FLAGS) -timeout $(TEST_TIMEOUT) \
+		./internal/buildinfo ./internal/cli ./internal/fs \
+		./internal/history ./internal/logger ./internal/storage ./internal/trash
 
 # Run E2E tests in /testing/e2e
 .PHONY: test-e2e
@@ -220,7 +217,7 @@ help:
 	@echo "  vet               - Run go vet for additional static analysis"
 	@echo "  test              - Run all tests with race detection"
 	@echo "  test-unit         - Run unit tests only (white-box tests)"
-	@echo "  test-integration  - Run integration tests in /testing/integration"
+	@echo "  test-integration  - Run black-box integration tests in package directories"
 	@echo "  test-e2e          - Run E2E tests in /testing/e2e"
 	@echo "  coverage          - Generate test coverage report"
 	@echo "  coverage-html     - Generate and open HTML coverage report"
