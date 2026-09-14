@@ -152,7 +152,7 @@ func NewTrasher() (Trasher, error) {
 
 // encodeTrashPath encodes a path for storage in .trashinfo files.
 //
-// Non-printable characters and percent signs are percent-encoded.
+// Bytes outside printable ASCII and percent signs are percent-encoded.
 //
 // Parameters:
 //   - path: Original filesystem path.
@@ -166,8 +166,7 @@ func encodeTrashPath(path string) string {
 	for i := range len(path) {
 		c := path[i]
 
-		// Percent-encode non-printable characters and percent sign
-		if c < 0x20 || c == '%' {
+		if c <= 0x20 || c >= 0x7f || c == '%' {
 			result = fmt.Appendf(result, "%%%02X", c)
 		} else {
 			result = append(result, c)

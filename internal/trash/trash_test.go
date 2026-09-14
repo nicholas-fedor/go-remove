@@ -444,7 +444,12 @@ func TestEncodeDecodeTrashPath(t *testing.T) {
 		{
 			name:     "path with spaces",
 			path:     "/home/user/my file.txt",
-			expected: "/home/user/my file.txt",
+			expected: "/home/user/my%20file.txt",
+		},
+		{
+			name:     "path with non-ascii bytes",
+			path:     "/tmp/\xe9",
+			expected: "/tmp/%E9",
 		},
 		{
 			name:     "path with percent sign",
