@@ -25,8 +25,6 @@ GITHUB="https://github.com/${REPO}"
 DEFAULT_INSTALL_DIR="${HOME}/go/bin"
 STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/${BINARY}"
 STATE_INSTALL_DIR_FILE="${STATE_DIR}/install-dir"
-COSIGN_IDENTITY_REGEXP="^https://github.com/${REPO}/"
-COSIGN_OIDC_ISSUER="https://token.actions.githubusercontent.com"
 
 VERSION="${VERSION:-}"
 INSTALL_TYPE="${INSTALL_TYPE:-auto}"
@@ -195,20 +193,6 @@ verify_checksum() {
 	else
 		die "sha256sum or shasum is required to verify release artifacts"
 	fi
-}
-
-verify_checksum_signature() {
-	dir=$1
-	bundle="${dir}/checksums.txt.sig"
-
-	[ -f "$bundle" ] || return 1
-	command -v cosign >/dev/null 2>&1 || die "cosign is required to verify signed checksums before a privileged package install"
-
-	cosign verify-blob \
-		--bundle "$bundle" \
-		--certificate-identity-regexp "$COSIGN_IDENTITY_REGEXP" \
-		--certificate-oidc-issuer "$COSIGN_OIDC_ISSUER" \
-		"${dir}/checksums.txt" >/dev/null || return 1
 }
 
 asset_stem() {
@@ -399,12 +383,9 @@ do_install() {
 
 	info "downloading checksums"
 	download "${GITHUB}/releases/download/${tag}/checksums.txt" "${workdir}/checksums.txt"
-	try_download "${GITHUB}/releases/download/${tag}/checksums.txt.sig" "${workdir}/checksums.txt.sig" || true
 
 	if [ "$os" = "linux" ] && [ "$INSTALL_TYPE" != "archive" ]; then
-		if [ "$INSTALL_TYPE" != "package" ] && ! command -v cosign >/dev/null 2>&1; then
-			info "cosign not found; skipping native package"
-		elif kind=$(pkg_kind) && { [ "$INSTALL_TYPE" = "package" ] || can_elevate; }; then
+		if kind=$(pkg_kind) && { [ "$INSTALL_TYPE" = "package" ] || can_elevate; }; then
 			case "$kind" in
 			deb) pkg_ext="deb" ;;
 			rpm) pkg_ext="rpm" ;;
@@ -416,19 +397,13 @@ do_install() {
 			pkg_url="${GITHUB}/releases/download/${tag}/${pkg}"
 
 			if try_download "$pkg_url" "${workdir}/${pkg}"; then
-				if [ ! -f "${workdir}/checksums.txt.sig" ]; then
-					info "signed checksum bundle missing; skipping native package"
-				elif ! verify_checksum_signature "$workdir"; then
-					die "checksum signature verification failed; refusing privileged package install"
-				else
-					verify_checksum "$pkg" "${workdir}/checksums.txt"
-					info "installing native package ${pkg}"
-					if install_package "$kind" "${workdir}/${pkg}"; then
-						info "installed ${BINARY} via ${kind} package"
-						return 0
-					fi
-					info "package install failed; falling back to archive"
+				verify_checksum "$pkg" "${workdir}/checksums.txt"
+				info "installing native package ${pkg}"
+				if install_package "$kind" "${workdir}/${pkg}"; then
+					info "installed ${BINARY} via ${kind} package"
+					return 0
 				fi
+				info "package install failed; falling back to archive"
 			else
 				info "native package ${pkg} not in this release; falling back to archive"
 			fi
