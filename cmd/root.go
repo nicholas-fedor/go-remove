@@ -379,6 +379,7 @@ func runRemove(config cli.Config) error {
 var rootCmd = &cobra.Command{
 	Use:   "go-remove [binary]",
 	Short: "A tool to remove Go binaries",
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		verbose, _ := cmd.Flags().GetBool("verbose")
 		goroot, _ := cmd.Flags().GetBool("goroot")

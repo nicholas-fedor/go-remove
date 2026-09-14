@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/nicholas-fedor/go-remove/internal/buildinfo"
 	"github.com/nicholas-fedor/go-remove/internal/logger"
@@ -213,5 +214,10 @@ func isRemovableBinary(dir string, file os.DirEntry) bool {
 		return false
 	}
 
-	return goBinaryExtractor.IsGoBinary(filepath.Join(dir, file.Name()))
+	name := file.Name()
+	if runtime.GOOS == windowsOS && !strings.EqualFold(filepath.Ext(name), windowsExt) {
+		return false
+	}
+
+	return goBinaryExtractor.IsGoBinary(filepath.Join(dir, name))
 }

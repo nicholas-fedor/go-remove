@@ -451,6 +451,10 @@ func (s *BadgerStore) ListRecords(ctx context.Context, opts ListOptions) ([]Hist
 		count := 0
 
 		for iterator.Rewind(); iterator.Valid(); iterator.Next() {
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("%w: %w", ErrContextCanceled, err)
+			}
+
 			var record HistoryRecord
 
 			if err := iterator.Item().Value(func(val []byte) error {
@@ -597,12 +601,20 @@ func (s *BadgerStore) DeleteAllRecords(ctx context.Context) error {
 		var keys [][]byte
 
 		for iterator.Rewind(); iterator.Valid(); iterator.Next() {
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("%w: %w", ErrContextCanceled, err)
+			}
+
 			key := make([]byte, len(iterator.Item().Key()))
 			copy(key, iterator.Item().Key())
 			keys = append(keys, key)
 		}
 
 		for _, key := range keys {
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("%w: %w", ErrContextCanceled, err)
+			}
+
 			if err := txn.Delete(key); err != nil {
 				return fmt.Errorf("deleting key %s: %w", key, err)
 			}
