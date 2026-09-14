@@ -26,7 +26,6 @@ A CLI tool to safely remove Go binaries with undo and history support
   - [Updating and uninstalling](#updating-and-uninstalling)
   - [Source](#source)
   - [Windows](#windows)
-  - [Archive Naming](#archive-naming)
 - [Quick Start](#quick-start)
 - [Usage](#usage)
   - [Direct Removal](#direct-removal)
@@ -62,21 +61,13 @@ curl -sSfL https://raw.githubusercontent.com/nicholas-fedor/go-remove/main/scrip
 rm -f "$tmp"
 ```
 
-On Linux, the script installs a native package (`.deb`, `.rpm`, `.apk`, or Arch) when one is attached to the release and a package manager plus root/sudo are available. Otherwise it extracts the release archive into `$HOME/go/bin`.
+On Linux, the script installs a native package (`.deb`, `.rpm`, `.apk`, or Arch) when available; otherwise, it extracts the release archive into `$HOME/go/bin`.
 
-| Variable  | Meaning                                                  |
-|-----------|----------------------------------------------------------|
-| `VERSION` | Release tag (`v1.2.0` or `1.2.0`). Default: latest.      |
-| `PREFIX`  | Directory for archive installs. Default: `$HOME/go/bin`. |
-| `METHOD`  | `auto` (default), `package`, or `archive`.               |
-
-```bash
-# Pin a version
-VERSION=v1.2.0 sh scripts/install.sh
-
-# Always use the tarball into a custom directory
-METHOD=archive PREFIX="$HOME/.local/bin" sh scripts/install.sh
-```
+| Variable       | Meaning                                                            |
+|----------------|--------------------------------------------------------------------|
+| `VERSION`      | Release tag (`v1.2.0` or `1.2.0`). Default: latest.                |
+| `INSTALL_DIR`  | Directory for archive installs. Default: `$HOME/go/bin`.           |
+| `INSTALL_TYPE` | `auto` (default), `package`, or `archive`.                         |
 
 Windows: download the `.zip` from the [releases page](https://github.com/nicholas-fedor/go-remove/releases).
 
@@ -95,7 +86,7 @@ Install a downloaded package with `dpkg -i`, `rpm -Uvh`, `apk add --allow-untrus
 
 ### Updating and uninstalling
 
-Re-run the script to replace the current install with the latest release (or `VERSION=…`). Native packages are upgraded in place (`dpkg`/`rpm`/`apk`/`pacman`); archive installs overwrite `$PREFIX/go-remove`.
+Re-run the script to replace the current install with the latest release (or `VERSION=…`). Native packages are upgraded in place (`dpkg`/`rpm`/`apk`/`pacman`) and archive installs overwrite `$INSTALL_DIR/go-remove`.
 
 ```bash
 tmp=$(mktemp)
@@ -104,7 +95,7 @@ curl -sSfL https://raw.githubusercontent.com/nicholas-fedor/go-remove/main/scrip
 # Update
 sh "$tmp" update
 
-# Uninstall (native package and/or the stored archive prefix)
+# Uninstall (native package and/or the stored archive install directory)
 sh "$tmp" uninstall
 
 rm -f "$tmp"
@@ -124,23 +115,12 @@ Available architectures: `amd64`, `i386`, `arm64v8`
 
 ```powershell
 # Download and extract (replace amd64 with your architecture)
-Invoke-WebRequest -Uri "https://github.com/nicholas-fedor/go-remove/releases/latest/download/go-remove_windows_amd64_v1.0.0.zip" -OutFile "go-remove.zip"
+Invoke-WebRequest -Uri "https://github.com/nicholas-fedor/go-remove/releases/download/v1.0.0/go-remove_windows_amd64_1.0.0.zip" -OutFile "go-remove.zip"
 Expand-Archive -Path "go-remove.zip" -DestinationPath "."
 
 # Move to a directory in your PATH
 Move-Item -Path ".\go-remove.exe" -Destination "$env:LOCALAPPDATA\Microsoft\WindowsApps\"
 ```
-
-### Archive Naming
-
-Release archives follow the pattern: `go-remove_{OS}_{ARCH}_{VERSION}.{ext}`
-
-| OS      | Architecture | Archive Name Example                    |
-|---------|--------------|-----------------------------------------|
-| Linux   | amd64        | `go-remove_linux_amd64_v1.0.0.tar.gz`   |
-| Linux   | arm64        | `go-remove_linux_arm64v8_v1.0.0.tar.gz` |
-| macOS   | arm64        | `go-remove_macOS_arm64v8_v1.0.0.tar.gz` |
-| Windows | amd64        | `go-remove_windows_amd64_v1.0.0.zip`    |
 
 ## Quick Start
 

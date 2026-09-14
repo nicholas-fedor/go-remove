@@ -11,29 +11,29 @@
 #
 # Environment:
 #   VERSION   Release tag (v1.2.0 or 1.2.0). Default: latest.
-#   PREFIX    Directory for archive installs. Default: $HOME/go/bin, or the
-#             prefix stored from a previous archive install.
-#   METHOD    auto (default), package, or archive.
-#             auto installs a native package on Linux when sudo/root is
-#             available, otherwise extracts the release archive.
+#   INSTALL_DIR   Directory for archive installs. Default: $HOME/go/bin, or the
+#                 directory stored from a previous archive install.
+#   INSTALL_TYPE  auto (default), package, or archive.
+#                 auto installs a native package on Linux when sudo/root is
+#                 available, otherwise extracts the release archive.
 
 set -eu
 
 REPO="nicholas-fedor/go-remove"
 BINARY="go-remove"
 GITHUB="https://github.com/${REPO}"
-DEFAULT_PREFIX="${HOME}/go/bin"
+DEFAULT_INSTALL_DIR="${HOME}/go/bin"
 STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/${BINARY}"
-STATE_PREFIX_FILE="${STATE_DIR}/prefix"
+STATE_INSTALL_DIR_FILE="${STATE_DIR}/install-dir"
 COSIGN_IDENTITY_REGEXP="^https://github.com/${REPO}/"
 COSIGN_OIDC_ISSUER="https://token.actions.githubusercontent.com"
 
 VERSION="${VERSION:-}"
-METHOD="${METHOD:-auto}"
+INSTALL_TYPE="${INSTALL_TYPE:-auto}"
 
-PREFIX_SET=0
-if [ "${PREFIX+x}" = "x" ]; then
-	PREFIX_SET=1
+INSTALL_DIR_SET=0
+if [ "${INSTALL_DIR+x}" = "x" ]; then
+	INSTALL_DIR_SET=1
 fi
 
 info() {
@@ -75,33 +75,33 @@ try_download() {
 	fi
 }
 
-resolve_prefix() {
-	if [ "$PREFIX_SET" -eq 1 ]; then
+resolve_install_dir() {
+	if [ "$INSTALL_DIR_SET" -eq 1 ]; then
 		return 0
 	fi
 
-	if [ -f "$STATE_PREFIX_FILE" ]; then
-		PREFIX=$(tr -d '\r\n' <"$STATE_PREFIX_FILE")
-		if [ -n "$PREFIX" ]; then
+	if [ -f "$STATE_INSTALL_DIR_FILE" ]; then
+		INSTALL_DIR=$(tr -d '\r\n' <"$STATE_INSTALL_DIR_FILE")
+		if [ -n "$INSTALL_DIR" ]; then
 			return 0
 		fi
 	fi
 
-	PREFIX="$DEFAULT_PREFIX"
+	INSTALL_DIR="$DEFAULT_INSTALL_DIR"
 }
 
-save_prefix() {
+save_install_dir() {
 	mkdir -p "$STATE_DIR"
-	printf '%s\n' "$PREFIX" >"$STATE_PREFIX_FILE"
+	printf '%s\n' "$INSTALL_DIR" >"$STATE_INSTALL_DIR_FILE"
 }
 
-clear_prefix_state() {
-	rm -f "$STATE_PREFIX_FILE"
+clear_install_dir_state() {
+	rm -f "$STATE_INSTALL_DIR_FILE"
 }
 
-prefix_on_path() {
+install_dir_on_path() {
 	case ":${PATH}:" in
-	*":${PREFIX}:"*) return 0 ;;
+	*":${INSTALL_DIR}:"*) return 0 ;;
 	*) return 1 ;;
 	esac
 }
@@ -266,7 +266,7 @@ install_archive() {
 	download "$url" "${workdir}/${file}"
 	verify_checksum "$file" "${workdir}/checksums.txt"
 
-	mkdir -p "$PREFIX"
+	mkdir -p "$INSTALL_DIR"
 
 	if [ "$ext" = "zip" ]; then
 		need_cmd unzip
@@ -278,12 +278,12 @@ install_archive() {
 	bin=$(find "$workdir" -type f \( -name "$BINARY" -o -name "${BINARY}.exe" \) | awk 'NR==1')
 	[ -n "$bin" ] || die "binary ${BINARY} not found in ${file}"
 
-	install -m 755 "$bin" "${PREFIX}/${BINARY}"
-	save_prefix
-	info "installed ${PREFIX}/${BINARY}"
+	install -m 755 "$bin" "${INSTALL_DIR}/${BINARY}"
+	save_install_dir
+	info "installed ${INSTALL_DIR}/${BINARY}"
 
-	if ! prefix_on_path; then
-		info "add ${PREFIX} to PATH so ${BINARY} is discoverable"
+	if ! install_dir_on_path; then
+		info "add ${INSTALL_DIR} to PATH so ${BINARY} is discoverable"
 	fi
 }
 
@@ -336,7 +336,7 @@ remove_package() {
 }
 
 already_installed() {
-	[ -x "${PREFIX}/${BINARY}" ] && return 0
+	[ -x "${INSTALL_DIR}/${BINARY}" ] && return 0
 	command -v "$BINARY" >/dev/null 2>&1 && return 0
 	kind=$(pkg_kind) || return 1
 	pkg_installed "$kind"
@@ -352,13 +352,13 @@ do_uninstall() {
 		removed=1
 	fi
 
-	if [ -e "${PREFIX}/${BINARY}" ]; then
-		rm -f "${PREFIX}/${BINARY}"
-		info "removed ${PREFIX}/${BINARY}"
+	if [ -e "${INSTALL_DIR}/${BINARY}" ]; then
+		rm -f "${INSTALL_DIR}/${BINARY}"
+		info "removed ${INSTALL_DIR}/${BINARY}"
 		removed=1
 	fi
 
-	clear_prefix_state
+	clear_install_dir_state
 
 	if [ "$removed" -eq 0 ]; then
 		die "${BINARY} is not installed"
@@ -377,8 +377,8 @@ Usage: install.sh [install|update|uninstall]
 
 Environment:
   VERSION  Release tag (v1.2.0 or 1.2.0). Default: latest.
-  PREFIX   Directory for archive installs. Default: \$HOME/go/bin, or the last archive prefix.
-  METHOD   auto (default), package, or archive.
+  INSTALL_DIR   Directory for archive installs. Default: \$HOME/go/bin, or the last archive install directory.
+  INSTALL_TYPE  auto (default), package, or archive.
 EOF
 }
 
@@ -401,8 +401,10 @@ do_install() {
 	download "${GITHUB}/releases/download/${tag}/checksums.txt" "${workdir}/checksums.txt"
 	try_download "${GITHUB}/releases/download/${tag}/checksums.txt.sig" "${workdir}/checksums.txt.sig" || true
 
-	if [ "$os" = "linux" ] && [ "$METHOD" != "archive" ]; then
-		if kind=$(pkg_kind) && { [ "$METHOD" = "package" ] || can_elevate; }; then
+	if [ "$os" = "linux" ] && [ "$INSTALL_TYPE" != "archive" ]; then
+		if [ "$INSTALL_TYPE" != "package" ] && ! command -v cosign >/dev/null 2>&1; then
+			info "cosign not found; skipping native package"
+		elif kind=$(pkg_kind) && { [ "$INSTALL_TYPE" = "package" ] || can_elevate; }; then
 			case "$kind" in
 			deb) pkg_ext="deb" ;;
 			rpm) pkg_ext="rpm" ;;
@@ -430,12 +432,12 @@ do_install() {
 			else
 				info "native package ${pkg} not in this release; falling back to archive"
 			fi
-		elif [ "$METHOD" = "package" ]; then
+		elif [ "$INSTALL_TYPE" = "package" ]; then
 			die "native package install requested but no supported package manager or privilege elevation is available"
 		fi
 	fi
 
-	if [ "$METHOD" = "package" ]; then
+	if [ "$INSTALL_TYPE" = "package" ]; then
 		die "native package install did not complete"
 	fi
 
@@ -447,11 +449,11 @@ main() {
 
 	case "$action" in
 	install | update)
-		resolve_prefix
+		resolve_install_dir
 		do_install
 		;;
 	uninstall | remove)
-		resolve_prefix
+		resolve_install_dir
 		do_uninstall
 		;;
 	-h | --help | help)
