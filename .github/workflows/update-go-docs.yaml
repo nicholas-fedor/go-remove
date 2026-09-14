@@ -17,4 +17,4 @@ jobs:
           egress-policy: audit
 
       - name: Pull new module version
-        uses: nicholas-fedor/go-proxy-pull-action@6568a554a1ba0271d4b6641a767e7c9aa6011b6a
+        uses: nicholas-fedor/go-proxy-pull-action@b1f3a0ac79735437e667c3073d060c0c1031529d # v1.1.51
