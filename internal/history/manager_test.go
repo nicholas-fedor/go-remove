@@ -7,6 +7,8 @@ package history
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -251,12 +253,13 @@ func TestHistoryManager_UndoMostRecent(t *testing.T) {
 		manager, mockTrasher, mockStorer, _ := setupManagerTest(t)
 
 		mockStorer.EXPECT().
-			GetMostRecent(ctx).
-			Return(record, nil)
+			ListRecords(ctx, mock.AnythingOfType("storage.ListOptions")).
+			Return([]storage.HistoryRecord{record}, nil)
 
 		mockTrasher.EXPECT().
 			IsInTrash(testTrashPath).
-			Return(true)
+			Return(true).
+			Once()
 
 		mockTrasher.EXPECT().
 			RestoreFromTrash(ctx, testTrashPath, testBinaryPath).
@@ -281,8 +284,8 @@ func TestHistoryManager_UndoMostRecent(t *testing.T) {
 		manager, _, mockStorer, _ := setupManagerTest(t)
 
 		mockStorer.EXPECT().
-			GetMostRecent(ctx).
-			Return(storage.HistoryRecord{}, storage.ErrNoHistory)
+			ListRecords(ctx, mock.AnythingOfType("storage.ListOptions")).
+			Return([]storage.HistoryRecord{}, nil)
 
 		result, err := manager.UndoMostRecent(ctx)
 
@@ -290,36 +293,98 @@ func TestHistoryManager_UndoMostRecent(t *testing.T) {
 		assert.Nil(t, result)
 	})
 
-	t.Run("already restored", func(t *testing.T) {
+	t.Run("already restored is skipped and reported as unrestorable", func(t *testing.T) {
 		t.Parallel()
 
 		manager, _, mockStorer, _ := setupManagerTest(t)
 
-		restoredRecord := record
-		restoredRecord.TrashAvailable = false
+		restored := record
+		restored.TrashAvailable = false
 
 		mockStorer.EXPECT().
-			GetMostRecent(ctx).
-			Return(restoredRecord, nil)
+			ListRecords(ctx, mock.AnythingOfType("storage.ListOptions")).
+			Return([]storage.HistoryRecord{restored}, nil)
 
 		result, err := manager.UndoMostRecent(ctx)
 
-		require.ErrorIs(t, err, ErrAlreadyRestored)
+		require.ErrorIs(t, err, ErrNoRestorableHistory)
+		require.NotErrorIs(t, err, ErrAlreadyRestored)
 		assert.Nil(t, result)
 	})
 
-	t.Run("not in trash", func(t *testing.T) {
+	t.Run("missing from trash is reconciled and skipped", func(t *testing.T) {
 		t.Parallel()
 
 		manager, mockTrasher, mockStorer, _ := setupManagerTest(t)
 
 		mockStorer.EXPECT().
-			GetMostRecent(ctx).
-			Return(record, nil)
+			ListRecords(ctx, mock.AnythingOfType("storage.ListOptions")).
+			Return([]storage.HistoryRecord{record}, nil)
 
 		mockTrasher.EXPECT().
 			IsInTrash(testTrashPath).
 			Return(false)
+
+		// The stale flag must be corrected in storage.
+		mockStorer.EXPECT().
+			UpdateRecord(ctx, mock.MatchedBy(func(r *storage.HistoryRecord) bool {
+				return !r.TrashAvailable
+			})).
+			Return(nil)
+
+		result, err := manager.UndoMostRecent(ctx)
+
+		require.ErrorIs(t, err, ErrNoRestorableHistory)
+		assert.Nil(t, result)
+	})
+
+	// This is the regression the rewrite exists for. Undo used to fetch a single
+	// record and stop at the first unrestorable one, so a single successful undo
+	// made every later undo fail outright.
+	t.Run("skips unrestorable records and restores the next one", func(t *testing.T) {
+		t.Parallel()
+
+		manager, mockTrasher, mockStorer, _ := setupManagerTest(t)
+
+		newerRestored := record
+		newerRestored.TrashAvailable = false
+		newerRestored.Timestamp = now.Unix()
+
+		missingFromTrash := record
+		missingFromTrash.Timestamp = now.Unix() - 1
+		missingFromTrash.BinaryName = "vanished"
+		missingFromTrash.TrashPath = "/trash/vanished"
+		missingFromTrash.TrashAvailable = true
+
+		restorable := record
+		restorable.Timestamp = now.Unix() - 2
+		restorable.BinaryName = "recoverable"
+		restorable.TrashPath = "/trash/recoverable"
+		restorable.OriginalPath = "/bin/recoverable"
+		restorable.TrashAvailable = true
+
+		// Newest first, as ListRecords guarantees.
+		mockStorer.EXPECT().
+			ListRecords(ctx, mock.AnythingOfType("storage.ListOptions")).
+			Return([]storage.HistoryRecord{newerRestored, missingFromTrash, restorable}, nil)
+
+		mockTrasher.EXPECT().
+			IsInTrash(missingFromTrash.TrashPath).
+			Return(false).
+			Once()
+
+		mockStorer.EXPECT().
+			UpdateRecord(ctx, mock.AnythingOfType("*storage.HistoryRecord")).
+			Return(nil)
+
+		mockTrasher.EXPECT().
+			IsInTrash(restorable.TrashPath).
+			Return(true).
+			Once()
+
+		mockTrasher.EXPECT().
+			RestoreFromTrash(ctx, restorable.TrashPath, restorable.OriginalPath).
+			Return(nil)
 
 		mockStorer.EXPECT().
 			UpdateRecord(ctx, mock.AnythingOfType("*storage.HistoryRecord")).
@@ -327,8 +392,9 @@ func TestHistoryManager_UndoMostRecent(t *testing.T) {
 
 		result, err := manager.UndoMostRecent(ctx)
 
-		require.ErrorIs(t, err, ErrNotInTrash)
-		assert.Nil(t, result)
+		require.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, "recoverable", result.BinaryName)
 	})
 
 	t.Run("restore collision", func(t *testing.T) {
@@ -336,31 +402,33 @@ func TestHistoryManager_UndoMostRecent(t *testing.T) {
 
 		manager, mockTrasher, mockStorer, _ := setupManagerTest(t)
 
+		// restoreRecord checks the restore target with os.Stat, so the paths in
+		// the record must point at real files for the collision to be observed.
+		occupiedDir := t.TempDir()
+		occupiedPath := filepath.Join(occupiedDir, "occupied")
+
+		require.NoError(t, os.WriteFile(occupiedPath, []byte("in the way"), 0o600))
+
+		colliding := record
+		colliding.OriginalPath = occupiedPath
+
 		mockStorer.EXPECT().
-			GetMostRecent(ctx).
-			Return(record, nil)
+			ListRecords(ctx, mock.AnythingOfType("storage.ListOptions")).
+			Return([]storage.HistoryRecord{colliding}, nil)
 
 		mockTrasher.EXPECT().
 			IsInTrash(testTrashPath).
 			Return(true)
 
-		// Note: The implementation uses os.Stat to check if file exists at original path
-		// Since we can't mock os.Stat, this test would need a temporary file to work correctly
-		// For now, we expect the restore to succeed since the file doesn't exist
-		mockTrasher.EXPECT().
-			RestoreFromTrash(ctx, testTrashPath, testBinaryPath).
-			Return(nil)
-
-		mockStorer.EXPECT().
-			UpdateRecord(ctx, mock.AnythingOfType("*storage.HistoryRecord")).
-			Return(nil)
+		// The trash copy must not resolve, so the collision is reported rather
+		// than mistaken for an already-restored file.
+		_, trashErr := os.Stat(testTrashPath)
+		require.Error(t, trashErr, "test trash path must not exist")
 
 		result, err := manager.UndoMostRecent(ctx)
 
-		// This will actually succeed because os.Stat won't find the file
-		// In a real test with proper setup, we'd create a temp file at testBinaryPath
-		require.NoError(t, err)
-		assert.NotNil(t, result)
+		require.ErrorIs(t, err, ErrRestoreCollision)
+		assert.Nil(t, result)
 	})
 
 	t.Run("restore from trash fails", func(t *testing.T) {
@@ -369,8 +437,8 @@ func TestHistoryManager_UndoMostRecent(t *testing.T) {
 		manager, mockTrasher, mockStorer, _ := setupManagerTest(t)
 
 		mockStorer.EXPECT().
-			GetMostRecent(ctx).
-			Return(record, nil)
+			ListRecords(ctx, mock.AnythingOfType("storage.ListOptions")).
+			Return([]storage.HistoryRecord{record}, nil)
 
 		mockTrasher.EXPECT().
 			IsInTrash(testTrashPath).
@@ -383,6 +451,21 @@ func TestHistoryManager_UndoMostRecent(t *testing.T) {
 		result, err := manager.UndoMostRecent(ctx)
 
 		require.ErrorIs(t, err, ErrRestoreCollision)
+		assert.Nil(t, result)
+	})
+
+	t.Run("list records fails", func(t *testing.T) {
+		t.Parallel()
+
+		manager, _, mockStorer, _ := setupManagerTest(t)
+
+		mockStorer.EXPECT().
+			ListRecords(ctx, mock.AnythingOfType("storage.ListOptions")).
+			Return(nil, errors.New("database unavailable"))
+
+		result, err := manager.UndoMostRecent(ctx)
+
+		require.Error(t, err)
 		assert.Nil(t, result)
 	})
 }
@@ -491,11 +574,14 @@ func TestHistoryManager_GetHistory(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		t.Parallel()
 
-		manager, _, mockStorer, _ := setupManagerTest(t)
+		manager, mockTrasher, mockStorer, _ := setupManagerTest(t)
 
 		mockStorer.EXPECT().
 			ListRecords(ctx, storage.ListOptions{Limit: 10}).
 			Return(records, nil)
+
+		// InTrash reflects the live trash, not the stored flag.
+		mockTrasher.EXPECT().IsInTrash("").Return(true)
 
 		entries, err := manager.GetHistory(ctx, 10)
 
@@ -504,7 +590,38 @@ func TestHistoryManager_GetHistory(t *testing.T) {
 		assert.Equal(t, "binary1", entries[0].BinaryName)
 		assert.True(t, entries[0].InTrash)
 		assert.Equal(t, "binary2", entries[1].BinaryName)
-		assert.False(t, entries[1].InTrash)
+		assert.False(t, entries[1].InTrash,
+			"a record already marked unavailable must not be probed")
+	})
+
+	t.Run("stale flag is reported as not in trash", func(t *testing.T) {
+		t.Parallel()
+
+		manager, mockTrasher, mockStorer, _ := setupManagerTest(t)
+
+		stale := []storage.HistoryRecord{
+			{
+				Timestamp:      now.Unix(),
+				BinaryName:     "purged",
+				OriginalPath:   "/usr/local/bin/purged",
+				TrashPath:      "/trash/files/purged",
+				TrashAvailable: true,
+			},
+		}
+
+		mockStorer.EXPECT().
+			ListRecords(ctx, storage.ListOptions{Limit: 10}).
+			Return(stale, nil)
+
+		// The record claims to be in trash, but the system trash no longer has it.
+		mockTrasher.EXPECT().IsInTrash("/trash/files/purged").Return(false)
+
+		entries, err := manager.GetHistory(ctx, 10)
+
+		require.NoError(t, err)
+		require.Len(t, entries, 1)
+		assert.False(t, entries[0].InTrash,
+			"a stale availability flag must not be reported as in trash")
 	})
 
 	t.Run("empty history", func(t *testing.T) {

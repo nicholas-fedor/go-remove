@@ -479,12 +479,15 @@ func (s *BadgerStore) GetRecord(ctx context.Context, key string) (HistoryRecord,
 
 // GetMostRecent returns the most recent history record.
 //
+// Records that fail to decode are skipped rather than aborting the search, so a
+// single corrupt value cannot deny access to every valid record beneath it.
+//
 // Parameters:
 //   - ctx: Context for cancellation.
 //
 // Returns:
-//   - Newest history record.
-//   - ErrNoHistory if no records exist.
+//   - Newest decodable history record.
+//   - ErrNoHistory if no decodable records exist.
 func (s *BadgerStore) GetMostRecent(ctx context.Context) (HistoryRecord, error) {
 	var record HistoryRecord
 
@@ -495,19 +498,30 @@ func (s *BadgerStore) GetMostRecent(ctx context.Context) (HistoryRecord, error) 
 	err := s.database.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
 		opts.Reverse = true
+		opts.PrefetchValues = false
 
 		iterator := txn.NewIterator(opts)
 		defer iterator.Close()
 
-		iterator.Rewind()
+		for iterator.Rewind(); iterator.Valid(); iterator.Next() {
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("%w: %w", ErrContextCanceled, err)
+			}
 
-		if !iterator.Valid() {
-			return ErrNoHistory
+			var candidate HistoryRecord
+
+			if err := iterator.Item().Value(func(val []byte) error {
+				return json.Unmarshal(val, &candidate)
+			}); err != nil {
+				continue
+			}
+
+			record = candidate
+
+			return nil
 		}
 
-		return iterator.Item().Value(func(val []byte) error {
-			return json.Unmarshal(val, &record)
-		})
+		return ErrNoHistory
 	})
 	if err != nil {
 		if errors.Is(err, ErrNoHistory) {
