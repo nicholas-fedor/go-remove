@@ -7,15 +7,18 @@ coverage:
   precision: 2
   # Rounds down for conservative estimates.
   round: down
-  # 40%+ green, below yellow, <20% red.
-  range: "40...70"
+  # Below 60% is red, 60-95% is the gradient, above 95% is green.
+  # Calibrated against the project's real ex-mocks coverage of roughly 80%.
+  range: "60...95"
 
   status:
     # Overall project coverage.
     project:
       default:
-        # Aim for 50% coverage across the project.
-        target: 50%
+        # Aim for 75% coverage across the project. Real coverage excluding the
+        # generated mocks (ignored below) is roughly 80%, so this leaves a small
+        # margin rather than enough headroom to absorb a large regression.
+        target: 75%
         # Allow 5% drop due to uncovered new code before failing.
         threshold: 5%
         # Compare against the base branch (e.g., main).
@@ -29,8 +32,8 @@ coverage:
     # Coverage for new code in PRs.
     patch:
       default:
-        # Require 70% of new/changed code in PRs to be covered.
-        target: 70%
+        # Require 80% of new/changed code in PRs to be covered.
+        target: 80%
         # Allow 5% uncovered new code before failing.
         threshold: 5%
         # Only apply to pull requests.
@@ -43,7 +46,7 @@ coverage:
 
 comment:
   # Customize PR comment layout.
-  layout: "reach, diff, flags, files"
+  layout: "reach, diff, files"
   # Post comment on PRs with coverage info.
   behavior: default
   # Only comment if coverage changes.
@@ -64,16 +67,7 @@ parsers:
 
 # Exclude files/directories from coverage.
 ignore:
-  # Markdown files
-  - "*.md"
-  # Ignore all mocks subdirectories.
+  # Ignore all mocks subdirectories. The generated Mockery doubles are excluded
+  # because they are never exercised directly, which is what inflates the raw
+  # `go tool cover` total to ~54% while the real figure is ~80%.
   - "**/mocks/*"
-
-# Categorize coverage by module
-flags:
-  # Internal utilities and actions
-  internal:
-    paths:
-      - "internal/*"
-    # Persist coverage across commits
-    carryforward: true

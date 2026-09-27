@@ -44,7 +44,6 @@ all: verify
 # =============================================================================
 
 # Run golangci-lint for comprehensive static analysis
-# Code must pass without --fix flag per project rules
 .PHONY: lint
 lint:
 	@echo "Running golangci-lint..."
@@ -189,7 +188,7 @@ help:
 	@echo ""
 	@echo "Available targets:"
 	@echo "  all               - Default target, runs comprehensive verification"
-	@echo "  lint              - Run golangci-lint (must pass without --fix flag)"
+	@echo "  lint              - Run golangci-lint"
 	@echo "  vet               - Run go vet for additional static analysis"
 	@echo "  test              - Run all tests with race detection"
 	@echo "  coverage          - Generate test coverage report"
