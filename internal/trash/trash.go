@@ -45,6 +45,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // maxTrashNameAttempts bounds the search for an unused trash entry name.
@@ -55,6 +56,27 @@ const trashInfoExt = ".trashinfo"
 
 // filePermission is the permission for creating files in the trash.
 const filePermission = 0o600
+
+// Trash name length budget.
+//
+// A trash entry is stored as <candidate> under files and <candidate>.trashinfo
+// under info, so the candidate has to leave room for its own suffix and for the
+// metadata extension or the longest name cannot be created at all.
+const (
+	// trashNameSeparator joins the base name to its random suffix.
+	trashNameSeparator = "_"
+
+	// trashNameSuffixBytes is the length of the hexadecimal random suffix.
+	trashNameSuffixBytes = 12
+
+	// nameMaxBytes is the longest single path component most filesystems allow.
+	nameMaxBytes = 255
+
+	// maxTrashBaseBytes is the longest original file name that still leaves room
+	// for the suffix and the metadata extension.
+	maxTrashBaseBytes = nameMaxBytes - len(trashInfoExt) -
+		len(trashNameSeparator) - trashNameSuffixBytes
+)
 
 // Common errors for trash operations.
 var (
@@ -69,6 +91,9 @@ var (
 
 	// ErrInvalidPath indicates the provided path is invalid.
 	ErrInvalidPath = errors.New("invalid path")
+
+	// ErrUnsupportedFileType indicates the entry is not a regular file.
+	ErrUnsupportedFileType = errors.New("unsupported file type")
 
 	// ErrPathNotFound indicates the path does not exist.
 	ErrPathNotFound = errors.New("path not found")
@@ -299,19 +324,45 @@ func parseTrashInfo(content string) (string, time.Time, error) {
 // resolution makes two calls within the same second produce the same candidate,
 // which previously let a second trash operation silently overwrite the first.
 //
+// The base is truncated so the candidate, its suffix and the metadata extension
+// all fit within the filesystem's name limit. Without that, a long original name
+// fails permanently rather than being shortened.
+//
 // Parameters:
 //   - base: Original file name.
 //
 // Returns:
 //   - Name with a random hexadecimal suffix.
 func generateUniqueName(base string) string {
-	var suffix [6]byte
+	var suffix [trashNameSuffixBytes / 2]byte
 
 	// crypto/rand.Read never fails and always fills the buffer, so the error is
 	// deliberately discarded rather than falling back to a weaker source.
 	_, _ = rand.Read(suffix[:])
 
-	return base + "_" + hex.EncodeToString(suffix[:])
+	return truncateUTF8(base, maxTrashBaseBytes) +
+		trashNameSeparator + hex.EncodeToString(suffix[:])
+}
+
+// truncateUTF8 shortens a string to at most maxBytes without splitting a rune.
+//
+// Parameters:
+//   - value: String to shorten.
+//   - maxBytes: Maximum length in bytes.
+//
+// Returns:
+//   - The original string, or a prefix of it that ends on a rune boundary.
+func truncateUTF8(value string, maxBytes int) string {
+	if len(value) <= maxBytes {
+		return value
+	}
+
+	cut := maxBytes
+	for cut > 0 && !utf8.RuneStart(value[cut]) {
+		cut--
+	}
+
+	return value[:cut]
 }
 
 // reserveTrashEntry claims an unused trash entry name and writes its metadata.
