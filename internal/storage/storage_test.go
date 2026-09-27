@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dgraph-io/badger/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -195,6 +196,48 @@ func TestBadgerStore_GetRecord(t *testing.T) {
 }
 
 func TestBadgerStore_GetMostRecent(t *testing.T) {
+	t.Run("skips malformed records and returns the newest valid one", func(t *testing.T) {
+		store, cleanup := setupTestStore(t)
+		defer cleanup()
+
+		ctx := t.Context()
+		now := time.Now().Unix()
+
+		valid := createTestRecord(now-100, "valid-binary")
+		require.NoError(t, store.SaveRecord(ctx, &valid))
+
+		// A value that cannot be decoded, stored under a key that sorts above
+		// the valid record. Reverse iteration reaches it first.
+		corruptKey := GenerateKey(now, "corrupt-binary")
+
+		require.NoError(t, store.database.Update(func(txn *badger.Txn) error {
+			return txn.Set([]byte(corruptKey), []byte("{not valid json"))
+		}))
+
+		mostRecent, err := store.GetMostRecent(ctx)
+		require.NoError(t, err, "a malformed record must not block valid ones")
+		assert.Equal(t, "valid-binary", mostRecent.BinaryName)
+		assert.Equal(t, now-100, mostRecent.Timestamp)
+		assert.Equal(t, valid.RecordKey(), mostRecent.RecordKey())
+	})
+
+	t.Run("returns error when every record is malformed", func(t *testing.T) {
+		store, cleanup := setupTestStore(t)
+		defer cleanup()
+
+		ctx := t.Context()
+
+		corruptKey := GenerateKey(time.Now().Unix(), "corrupt-binary")
+
+		require.NoError(t, store.database.Update(func(txn *badger.Txn) error {
+			return txn.Set([]byte(corruptKey), []byte("{not valid json"))
+		}))
+
+		_, err := store.GetMostRecent(ctx)
+		assert.ErrorIs(t, err, ErrNoHistory,
+			"history of only malformed records reports no history")
+	})
+
 	t.Run("returns error when no records exist", func(t *testing.T) {
 		store, cleanup := setupTestStore(t)
 		defer cleanup()

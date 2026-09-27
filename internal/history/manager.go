@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/nicholas-fedor/go-remove/internal/buildinfo"
@@ -59,6 +60,19 @@ const (
 // Each persisted record embeds the binary's full build information, so loading
 // the whole history to restore one entry would be needlessly expensive.
 const undoPageSize = 50
+
+// platformWindows is the GOOS value for Windows systems.
+const platformWindows = "windows"
+
+// trashStateQueryable reports whether the platform's trash can confirm that a
+// path is still present.
+//
+// The Windows Recycle Bin is owned by the shell and exposes no reliable
+// membership check, so IsInTrash always reports false there. Consulting it
+// would mark every entry as absent straight after a successful deletion.
+func trashStateQueryable() bool {
+	return runtime.GOOS != platformWindows
+}
 
 // Manager defines high-level history operations.
 //
@@ -558,9 +572,18 @@ func (m *HistoryManager) GetHistory(ctx context.Context, limit int) ([]*HistoryE
 	// a record of what was true when the binary was deleted, and the system
 	// trash can be emptied independently. Reconciling here is read-only, so
 	// opening the view never rewrites history.
+	//
+	// On platforms that cannot answer the question, the stored flag is the only
+	// signal available and is kept.
+	queryable := trashStateQueryable()
+
 	for i := range entries {
-		entries[i].InTrash = records[i].TrashAvailable &&
-			m.trasher.IsInTrash(records[i].TrashPath)
+		inTrash := records[i].TrashAvailable
+		if queryable {
+			inTrash = inTrash && m.trasher.IsInTrash(records[i].TrashPath)
+		}
+
+		entries[i].InTrash = inTrash
 	}
 
 	m.logger.Debug().
