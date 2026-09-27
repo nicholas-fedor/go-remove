@@ -42,4 +42,4 @@ jobs:
 
       - name: Check for uncommitted changes after formatting
         run: |
-          git diff --exit-code || (echo "Detected unformatted files. Run 'go fmt' to format your code."; exit 1)
+          git diff --exit-code || (echo "::error::Unformatted code. Run 'make fmt' and re-run this workflow."; exit 1)
