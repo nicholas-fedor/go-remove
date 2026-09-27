@@ -84,6 +84,9 @@ var (
 
 	// ErrTrashRootUnsupported indicates the platform cannot use a caller-supplied trash root.
 	ErrTrashRootUnsupported = errors.New("custom trash root is not supported on this platform")
+
+	// ErrUnsupportedPlatform indicates no trash implementation exists for the platform.
+	ErrUnsupportedPlatform = errors.New("trash is not supported on this platform")
 )
 
 // Trasher defines operations for XDG-compliant trash management.
