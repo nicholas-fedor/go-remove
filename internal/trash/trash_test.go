@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +20,41 @@ import (
 
 // platformLinux is the GOOS value for Linux systems.
 const platformLinux = "linux"
+
+// newTestTrasher returns a Trasher rooted in a per-test temporary directory.
+//
+// Tests must never share the user's real trash. t.Setenv is not an option here
+// because it is incompatible with t.Parallel, so the root is injected instead.
+//
+// Parameters:
+//   - t: The test that owns the temporary directory.
+//
+// Returns:
+//   - A Trasher backed by a temporary trash root.
+func newTestTrasher(t *testing.T) Trasher {
+	t.Helper()
+
+	trasher, err := newTrasherAt(t.TempDir())
+	require.NoError(t, err)
+
+	return trasher
+}
+
+// newBenchTrasher returns a Trasher rooted in a per-benchmark temporary directory.
+//
+// Parameters:
+//   - b: The benchmark that owns the temporary directory.
+//
+// Returns:
+//   - A Trasher backed by a temporary trash root.
+func newBenchTrasher(b *testing.B) Trasher {
+	b.Helper()
+
+	trasher, err := newTrasherAt(b.TempDir())
+	require.NoError(b, err)
+
+	return trasher
+}
 
 // TestNewTrasher tests the creation of a new Trasher instance.
 func TestNewTrasher(t *testing.T) {
@@ -101,8 +135,7 @@ func TestMoveToTrash(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			trasher, err := NewTrasher()
-			require.NoError(t, err)
+			trasher := newTestTrasher(t)
 
 			filePath := tt.setup(t)
 			ctx := t.Context()
@@ -139,13 +172,12 @@ func TestMoveToTrash_ContextCancellation(t *testing.T) {
 
 	t.Parallel()
 
-	trasher, err := NewTrasher()
-	require.NoError(t, err)
+	trasher := newTestTrasher(t)
 
 	tempDir := t.TempDir()
 	testFile := filepath.Join(tempDir, "testfile.txt")
 
-	err = os.WriteFile(testFile, []byte("test content"), 0o644)
+	err := os.WriteFile(testFile, []byte("test content"), 0o644)
 	require.NoError(t, err)
 
 	// Create cancelled context
@@ -240,14 +272,13 @@ func TestRestoreFromTrash(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			trasher, err := NewTrasher()
-			require.NoError(t, err)
+			trasher := newTestTrasher(t)
 
 			trashPath, originalPath, cleanup := tt.setup(t, trasher)
 			defer cleanup()
 
 			ctx := t.Context()
-			err = trasher.RestoreFromTrash(ctx, trashPath, originalPath)
+			err := trasher.RestoreFromTrash(ctx, trashPath, originalPath)
 
 			if tt.wantErr {
 				require.Error(t, err)
@@ -273,13 +304,12 @@ func TestIsInTrash(t *testing.T) {
 
 	t.Parallel()
 
-	trasher, err := NewTrasher()
-	require.NoError(t, err)
+	trasher := newTestTrasher(t)
 
 	tempDir := t.TempDir()
 	testFile := filepath.Join(tempDir, "testfile.txt")
 
-	err = os.WriteFile(testFile, []byte("test content"), 0o644)
+	err := os.WriteFile(testFile, []byte("test content"), 0o644)
 	require.NoError(t, err)
 
 	// File should not be in trash initially
@@ -305,13 +335,12 @@ func TestDeletePermanently(t *testing.T) {
 
 	t.Parallel()
 
-	trasher, err := NewTrasher()
-	require.NoError(t, err)
+	trasher := newTestTrasher(t)
 
 	tempDir := t.TempDir()
 	testFile := filepath.Join(tempDir, "testfile.txt")
 
-	err = os.WriteFile(testFile, []byte("test content"), 0o644)
+	err := os.WriteFile(testFile, []byte("test content"), 0o644)
 	require.NoError(t, err)
 
 	// Move to trash
@@ -340,13 +369,12 @@ func TestDeletePermanently_NotInTrash(t *testing.T) {
 
 	t.Parallel()
 
-	trasher, err := NewTrasher()
-	require.NoError(t, err)
+	trasher := newTestTrasher(t)
 
 	tempDir := t.TempDir()
 	testFile := filepath.Join(tempDir, "testfile.txt")
 
-	err = os.WriteFile(testFile, []byte("test content"), 0o644)
+	err := os.WriteFile(testFile, []byte("test content"), 0o644)
 	require.NoError(t, err)
 
 	ctx := t.Context()
@@ -363,14 +391,13 @@ func TestListTrash(t *testing.T) {
 
 	t.Parallel()
 
-	trasher, err := NewTrasher()
-	require.NoError(t, err)
+	trasher := newTestTrasher(t)
 
 	// Create and trash multiple files
 	tempDir := t.TempDir()
 	fileNames := []string{"file1.txt", "file2.txt", "file3.txt"}
-	originalPaths := make(map[string]string)
 
+	trashedPaths := make(map[string]string, len(fileNames))
 	ctx := t.Context()
 
 	for _, name := range fileNames {
@@ -379,35 +406,31 @@ func TestListTrash(t *testing.T) {
 		err := os.WriteFile(filePath, []byte("content"), 0o644)
 		require.NoError(t, err)
 
-		absPath, _ := filepath.Abs(filePath)
-		originalPaths[name] = absPath
-
-		_, err = trasher.MoveToTrash(ctx, filePath)
+		trashPath, err := trasher.MoveToTrash(ctx, filePath)
 		require.NoError(t, err)
+
+		trashedPaths[name] = trashPath
 	}
 
 	// List trash
 	entries, err := trasher.ListTrash()
 	require.NoError(t, err)
 
-	// Our trashed files should be in the list
-	foundCount := 0
-
+	listedPaths := make(map[string]TrashEntry, len(entries))
 	for _, entry := range entries {
-		for _, name := range fileNames {
-			if strings.Contains(entry.Name, name) {
-				foundCount++
+		assert.NotEmpty(t, entry.TrashPath)
+		assert.False(t, entry.DeletionTime.IsZero())
 
-				assert.NotEmpty(t, entry.TrashPath)
-				assert.False(t, entry.DeletionTime.IsZero())
-
-				break
-			}
-		}
+		listedPaths[entry.TrashPath] = entry
 	}
 
-	assert.GreaterOrEqual(t, foundCount, len(fileNames),
-		"should find all trashed files")
+	// Match on the exact path each move returned. Substring matching against the
+	// name would also be satisfied by unrelated entries in a shared trash.
+	for name, trashPath := range trashedPaths {
+		entry, ok := listedPaths[trashPath]
+		require.Truef(t, ok, "%s (%s) missing from trash listing", name, trashPath)
+		assert.Equal(t, filepath.Join(tempDir, name), entry.OriginalPath)
+	}
 }
 
 // TestGetTrashPath tests getting the trash path.
@@ -680,8 +703,7 @@ func BenchmarkMoveToTrash(b *testing.B) {
 		b.Skip("Skipping Linux-specific benchmark on non-Linux platform")
 	}
 
-	trasher, err := NewTrasher()
-	require.NoError(b, err)
+	trasher := newBenchTrasher(b)
 
 	tempDir := b.TempDir()
 	ctx := b.Context()

@@ -64,6 +64,23 @@ func newTrasher() (Trasher, error) {
 	}, nil
 }
 
+// newTrasherAt reports that the Recycle Bin cannot be rooted at a caller path.
+//
+// Windows owns the Recycle Bin location, so there is no directory to redirect.
+// Returning an error keeps callers from silently falling back to the real bin.
+//
+// Parameters:
+//   - root: Ignored.
+//
+// Returns:
+//   - Always an error wrapping ErrTrashRootUnsupported.
+func newTrasherAt(_ string) (Trasher, error) {
+	return nil, fmt.Errorf(
+		"%w: the Windows Recycle Bin location is owned by the shell",
+		ErrTrashRootUnsupported,
+	)
+}
+
 // MoveToTrash moves a file to the Windows Recycle Bin.
 //
 // The original path is returned because Windows manages trash internally.
