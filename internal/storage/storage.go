@@ -344,14 +344,20 @@ func validateRecord(record *HistoryRecord) error {
 // The derived key is tried first so the common case keeps the legacy layout.
 //
 // Parameters:
+//   - ctx: Context for cancellation.
 //   - record: Record to persist. Its Key field is set only on success.
 //
 // Returns:
-//   - An error if the record cannot be marshaled or written, or if no key was free.
-func (s *BadgerStore) saveRecordExclusive(record *HistoryRecord) error {
+//   - An error if the record cannot be marshaled or written, if no key was
+//     free, or if the context is cancelled.
+func (s *BadgerStore) saveRecordExclusive(ctx context.Context, record *HistoryRecord) error {
 	base := GenerateKey(record.Timestamp, record.BinaryName)
 
 	for attempt := range maxRecordKeyAttempts {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("%w: %w", ErrContextCanceled, err)
+		}
+
 		key := base
 		if attempt > 0 {
 			key = base + ":" + randomKeyDiscriminator()
@@ -419,7 +425,7 @@ func (s *BadgerStore) SaveRecord(ctx context.Context, record *HistoryRecord) err
 		return err
 	}
 
-	if err := s.saveRecordExclusive(record); err != nil {
+	if err := s.saveRecordExclusive(ctx, record); err != nil {
 		return err
 	}
 
