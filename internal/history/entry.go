@@ -42,7 +42,7 @@ type RestoreResult struct {
 //   - Display-oriented history entry.
 func entryFromRecord(record *storage.HistoryRecord) *HistoryEntry {
 	return &HistoryEntry{
-		ID:          storage.GenerateKey(record.Timestamp, record.BinaryName),
+		ID:          record.RecordKey(),
 		Timestamp:   time.Unix(record.Timestamp, 0),
 		BinaryName:  record.BinaryName,
 		BinaryPath:  record.OriginalPath,

@@ -66,7 +66,15 @@ var (
 
 	// ErrContextCanceled indicates the operation was canceled.
 	ErrContextCanceled = errors.New("operation canceled")
+
+	// ErrRecordKeyExhausted indicates no unused storage key could be found.
+	ErrRecordKeyExhausted = errors.New("no unused record key available")
 )
+
+// errRecordKeyOccupied signals that a candidate storage key is already in use.
+//
+// It is internal to the save path and never escapes SaveRecord.
+var errRecordKeyOccupied = errors.New("record key already occupied")
 
 // HistoryRecord represents a single binary removal record.
 type HistoryRecord struct {
@@ -109,6 +117,30 @@ type HistoryRecord struct {
 
 	// OriginalDir is the directory containing the binary (for restoration).
 	OriginalDir string `json:"original_dir"`
+
+	// Key is the storage key this record is stored under.
+	//
+	// It is set when the record is written and is authoritative thereafter,
+	// because a random discriminator may have been appended to avoid
+	// colliding with an existing record. Records written before this field
+	// existed leave it empty, and RecordKey falls back to deriving the legacy
+	// key from Timestamp and BinaryName.
+	Key string `json:"key,omitempty"`
+}
+
+// RecordKey returns the storage key for the record.
+//
+// Parameters:
+//   - None.
+//
+// Returns:
+//   - The stored key, or the legacy derived key when none was recorded.
+func (r *HistoryRecord) RecordKey() string {
+	if r.Key != "" {
+		return r.Key
+	}
+
+	return GenerateKey(r.Timestamp, r.BinaryName)
 }
 
 // DisplayTime returns a formatted time string for TUI display.
@@ -301,7 +333,76 @@ func validateRecord(record *HistoryRecord) error {
 	return nil
 }
 
+// saveRecordExclusive writes the record under a key that is free at commit time.
+//
+// The existence probe and the write share a single read-write transaction.
+// Badger arms conflict detection for write transactions, so if another writer
+// claims the key after this transaction read it, the commit is rejected with
+// ErrConflict rather than overwriting. A collision or a conflict is retried with
+// a fresh random discriminator.
+//
+// The derived key is tried first so the common case keeps the legacy layout.
+//
+// Parameters:
+//   - record: Record to persist. Its Key field is set only on success.
+//
+// Returns:
+//   - An error if the record cannot be marshaled or written, or if no key was free.
+func (s *BadgerStore) saveRecordExclusive(record *HistoryRecord) error {
+	base := GenerateKey(record.Timestamp, record.BinaryName)
+
+	for attempt := range maxRecordKeyAttempts {
+		key := base
+		if attempt > 0 {
+			key = base + ":" + randomKeyDiscriminator()
+		}
+
+		// Marshal a copy so the caller's record only gains a key on success.
+		stored := *record
+		stored.Key = key
+
+		value, err := json.Marshal(&stored)
+		if err != nil {
+			return fmt.Errorf("marshaling record: %w", err)
+		}
+
+		err = s.database.Update(func(txn *badger.Txn) error {
+			_, getErr := txn.Get([]byte(key))
+
+			switch {
+			case getErr == nil:
+				return errRecordKeyOccupied
+			case !errors.Is(getErr, badger.ErrKeyNotFound):
+				return fmt.Errorf("probing record key: %w", getErr)
+			}
+
+			return txn.Set([]byte(key), value)
+		})
+
+		switch {
+		case err == nil:
+			record.Key = key
+
+			return nil
+		case errors.Is(err, errRecordKeyOccupied), errors.Is(err, badger.ErrConflict):
+			// Occupied by a committed record, or claimed by a writer that
+			// committed after this transaction read the key. Retry with a
+			// fresh discriminator.
+			continue
+		default:
+			return fmt.Errorf("writing record: %w", err)
+		}
+	}
+
+	return fmt.Errorf("%w: %s", ErrRecordKeyExhausted, record.BinaryName)
+}
+
 // SaveRecord persists a history record to Badger.
+//
+// The key is reserved before writing. If the derived key is already occupied by
+// a different record, a random discriminator is appended so the new record is
+// stored alongside the existing one rather than replacing it. Overwriting would
+// destroy the only index for a copy of the binary already sitting in trash.
 //
 // Parameters:
 //   - ctx: Context for cancellation.
@@ -318,17 +419,8 @@ func (s *BadgerStore) SaveRecord(ctx context.Context, record *HistoryRecord) err
 		return err
 	}
 
-	value, err := json.Marshal(record)
-	if err != nil {
-		return fmt.Errorf("marshaling record: %w", err)
-	}
-
-	key := GenerateKey(record.Timestamp, record.BinaryName)
-
-	if err := s.database.Update(func(txn *badger.Txn) error {
-		return txn.Set([]byte(key), value)
-	}); err != nil {
-		return fmt.Errorf("saving record: %w", err)
+	if err := s.saveRecordExclusive(record); err != nil {
+		return err
 	}
 
 	return nil
@@ -514,7 +606,9 @@ func (s *BadgerStore) UpdateRecord(ctx context.Context, record *HistoryRecord) e
 		return fmt.Errorf("marshaling record: %w", err)
 	}
 
-	key := GenerateKey(record.Timestamp, record.BinaryName)
+	// Use the recorded key so an update lands on the same entry the record was
+	// saved under, including when a discriminator was appended.
+	key := record.RecordKey()
 
 	err = s.database.Update(func(txn *badger.Txn) error {
 		if _, err := txn.Get([]byte(key)); err != nil {

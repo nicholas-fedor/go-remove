@@ -35,12 +35,26 @@ package trash
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// maxTrashNameAttempts bounds the search for an unused trash entry name.
+const maxTrashNameAttempts = 100
+
+// trashInfoExt is the extension of a trash metadata file.
+const trashInfoExt = ".trashinfo"
+
+// filePermission is the permission for creating files in the trash.
+const filePermission = 0o600
 
 // Common errors for trash operations.
 var (
@@ -276,13 +290,93 @@ func parseTrashInfo(content string) (string, time.Time, error) {
 	return originalPath, deletionTime, nil
 }
 
-// generateUniqueName creates a unique trash entry name from a base file name.
+// generateUniqueName creates a candidate trash entry name from a base file name.
+//
+// The suffix is random rather than clock-derived. A clock suffix of one-second
+// resolution makes two calls within the same second produce the same candidate,
+// which previously let a second trash operation silently overwrite the first.
 //
 // Parameters:
 //   - base: Original file name.
 //
 // Returns:
-//   - Name with a Unix timestamp suffix.
+//   - Name with a random hexadecimal suffix.
 func generateUniqueName(base string) string {
-	return fmt.Sprintf("%s_%d", base, time.Now().Unix())
+	var suffix [6]byte
+
+	// crypto/rand.Read never fails and always fills the buffer, so the error is
+	// deliberately discarded rather than falling back to a weaker source.
+	_, _ = rand.Read(suffix[:])
+
+	return base + "_" + hex.EncodeToString(suffix[:])
+}
+
+// reserveTrashEntry claims an unused trash entry name and writes its metadata.
+//
+// The metadata file is created with O_EXCL, so claiming a name is atomic. Two
+// callers racing for the same name cannot both win: the loser sees fs.ErrExist
+// and retries with a fresh random candidate. A leftover data file from an
+// earlier crash also blocks its own name, so an orphaned entry is never
+// overwritten.
+//
+// Parameters:
+//   - filesDir: Directory holding trashed data files.
+//   - infoDir: Directory holding trash metadata files.
+//   - baseName: Original file name, used as the candidate prefix.
+//   - infoContent: Metadata to write for the claimed name.
+//   - maxAttempts: How many candidate names to try before giving up.
+//
+// Returns:
+//   - Path of the claimed data file.
+//   - Path of the claimed metadata file.
+//   - An error if no candidate could be claimed.
+func reserveTrashEntry(
+	filesDir, infoDir, baseName, infoContent string,
+	maxAttempts int,
+) (string, string, error) {
+	for range maxAttempts {
+		candidate := generateUniqueName(baseName)
+
+		dataPath := filepath.Join(filesDir, candidate)
+		infoPath := filepath.Join(infoDir, candidate+trashInfoExt)
+
+		// An existing data file owns the name even if its metadata is gone.
+		_, statErr := os.Lstat(dataPath)
+		if statErr == nil {
+			continue
+		} else if !errors.Is(statErr, fs.ErrNotExist) {
+			return "", "", fmt.Errorf("checking trash path: %w", statErr)
+		}
+
+		file, createErr := os.OpenFile(
+			infoPath,
+			os.O_WRONLY|os.O_CREATE|os.O_EXCL,
+			filePermission,
+		)
+
+		switch {
+		case errors.Is(createErr, fs.ErrExist):
+			// Another caller claimed this name first.
+			continue
+		case createErr != nil:
+			return "", "", fmt.Errorf("creating trashinfo file: %w", createErr)
+		}
+
+		if _, writeErr := file.WriteString(infoContent); writeErr != nil {
+			file.Close()
+			os.Remove(infoPath)
+
+			return "", "", fmt.Errorf("writing trashinfo file: %w", writeErr)
+		}
+
+		if closeErr := file.Close(); closeErr != nil {
+			os.Remove(infoPath)
+
+			return "", "", fmt.Errorf("closing trashinfo file: %w", closeErr)
+		}
+
+		return dataPath, infoPath, nil
+	}
+
+	return "", "", fmt.Errorf("%w: %s", ErrTrashPathUnavailable, baseName)
 }

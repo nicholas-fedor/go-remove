@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -676,25 +677,149 @@ func TestTrashEntry(t *testing.T) {
 	assert.False(t, entry.DeletionTime.IsZero())
 }
 
+// TestMoveToTrash_SameNameRepeatedly tests that repeated trashing of the same
+// file name keeps every copy.
+//
+// The old suffix had one-second resolution, so trashing the same basename twice
+// within a second produced the same candidate name. os.Rename silently
+// overwrote, destroying the first trashed file while both calls reported
+// success.
+func TestMoveToTrash_SameNameRepeatedly(t *testing.T) {
+	if runtime.GOOS != platformLinux {
+		t.Skip("Skipping Linux-specific test on non-Linux platform")
+	}
+
+	t.Parallel()
+
+	trasher := newTestTrasher(t)
+	ctx := t.Context()
+	sourceDir := t.TempDir()
+
+	const copies = 25
+
+	trashPaths := make([]string, 0, copies)
+
+	for i := range copies {
+		filePath := filepath.Join(sourceDir, "duplicate.txt")
+
+		err := os.WriteFile(filePath, []byte(fmt.Sprintf("copy %d", i)), 0o600)
+		require.NoError(t, err)
+
+		trashPath, err := trasher.MoveToTrash(ctx, filePath)
+		require.NoError(t, err)
+
+		trashPaths = append(trashPaths, trashPath)
+	}
+
+	// Every copy must be present and hold its own content.
+	require.Len(t, trashPaths, copies)
+
+	seen := make(map[string]struct{}, copies)
+
+	for i, trashPath := range trashPaths {
+		_, duplicate := seen[trashPath]
+		require.Falsef(t, duplicate, "trash path reused: %s", trashPath)
+
+		seen[trashPath] = struct{}{}
+
+		data, err := os.ReadFile(trashPath)
+		require.NoErrorf(t, err, "trashed copy %d is missing", i)
+		assert.Equal(t, fmt.Sprintf("copy %d", i), string(data))
+	}
+}
+
+// TestMoveToTrash_ConcurrentSameName tests that concurrent trashing of the same
+// basename reserves a distinct entry per caller.
+func TestMoveToTrash_ConcurrentSameName(t *testing.T) {
+	if runtime.GOOS != platformLinux {
+		t.Skip("Skipping Linux-specific test on non-Linux platform")
+	}
+
+	t.Parallel()
+
+	trasher := newTestTrasher(t)
+	ctx := t.Context()
+	sourceDir := t.TempDir()
+
+	const callers = 8
+
+	var (
+		waitGroup sync.WaitGroup
+		mu        sync.Mutex
+		results   = make(map[string]string, callers)
+		failures  []error
+	)
+
+	for i := range callers {
+		// Each caller gets its own source file, all sharing one basename, so
+		// the trash entries must not collide.
+		callerDir := filepath.Join(sourceDir, fmt.Sprintf("caller%d", i))
+		require.NoError(t, os.MkdirAll(callerDir, 0o750))
+
+		waitGroup.Go(func() {
+			filePath := filepath.Join(callerDir, "racer.txt")
+
+			err := os.WriteFile(filePath, []byte(fmt.Sprintf("racer %d", i)), 0o600)
+			if err != nil {
+				mu.Lock()
+				defer mu.Unlock()
+
+				failures = append(failures, err)
+
+				return
+			}
+
+			trashPath, moveErr := trasher.MoveToTrash(ctx, filePath)
+			if moveErr != nil {
+				mu.Lock()
+				defer mu.Unlock()
+
+				failures = append(failures, moveErr)
+
+				return
+			}
+
+			mu.Lock()
+			defer mu.Unlock()
+
+			results[trashPath] = fmt.Sprintf("racer %d", i)
+		})
+	}
+
+	waitGroup.Wait()
+
+	require.Empty(t, failures, "concurrent trashing reported errors")
+	require.Len(t, results, callers, "each caller must own a distinct entry")
+
+	for trashPath, content := range results {
+		data, err := os.ReadFile(trashPath)
+		require.NoErrorf(t, err, "trashed entry %s is missing", trashPath)
+		assert.Equal(t, content, string(data))
+	}
+}
+
 // TestGenerateUniqueName tests unique name generation.
 func TestGenerateUniqueName(t *testing.T) {
 	t.Parallel()
 
-	name1 := generateUniqueName("test.txt")
-	name2 := generateUniqueName("test.txt")
+	// The suffix must be random, not clock-derived. Two calls in the same
+	// second previously produced the same candidate, which let a second trash
+	// operation silently overwrite the first.
+	const draws = 1000
 
-	// Names should contain the base name
-	assert.Contains(t, name1, "test.txt")
-	assert.Contains(t, name2, "test.txt")
+	seen := make(map[string]struct{}, draws)
 
-	// Names should contain timestamp (underscore and digits)
-	assert.Contains(t, name1, "_")
-	assert.Regexp(t, `test\.txt_\d+`, name1)
+	for range draws {
+		name := generateUniqueName("test.txt")
 
-	// Names may or may not be different depending on timing
-	// We just verify the format is correct
-	assert.NotEmpty(t, name1)
-	assert.NotEmpty(t, name2)
+		assert.Contains(t, name, "test.txt")
+		assert.Regexp(t, `^test\.txt_[0-9a-f]{12}$`, name)
+
+		_, duplicate := seen[name]
+		require.Falsef(t, duplicate, "generateUniqueName repeated %s", name)
+
+		seen[name] = struct{}{}
+	}
 }
 
 // BenchmarkMoveToTrash benchmarks moving files to trash.

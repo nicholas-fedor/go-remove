@@ -22,8 +22,6 @@ import (
 const (
 	// dirPermission is the permission for creating directories.
 	dirPermission = 0o700
-	// filePermission is the permission for creating files.
-	filePermission = 0o600
 )
 
 // darwinTrasher implements Trasher for Darwin (macOS) using XDG Trash specification.
@@ -101,42 +99,23 @@ func (t *darwinTrasher) MoveToTrash(ctx context.Context, filePath string) (strin
 		return "", fmt.Errorf("checking file: %w", err)
 	}
 
-	// Generate unique trash entry name using timestamp
-	baseName := filepath.Base(filePath)
-	uniqueName := generateUniqueName(baseName)
-
-	trashFilePath := filepath.Join(t.filesDir, uniqueName)
-	infoFilePath := filepath.Join(t.infoDir, uniqueName+".trashinfo")
-
-	// Check for collisions and retry if necessary
-	const maxRetries = 100
-
-	for i := range maxRetries {
-		if _, err := os.Stat(trashFilePath); err != nil {
-			break
-		}
-
-		uniqueName = generateUniqueName(fmt.Sprintf("%s_%d", baseName, i))
-		trashFilePath = filepath.Join(t.filesDir, uniqueName)
-		infoFilePath = filepath.Join(t.infoDir, uniqueName+".trashinfo")
-	}
-
-	// Verify we found an available path
-	if _, err := os.Stat(trashFilePath); err == nil {
-		return "", ErrTrashPathUnavailable
-	}
-
-	// Create trashinfo file first
+	// Claim a unique trash entry name. The metadata file is written first, so a
+	// crash between the two writes leaves metadata with no data rather than a
+	// file in trash with no way to trace it back.
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {
 		absPath = filePath
 	}
 
-	infoContent := generateTrashInfo(absPath, time.Now())
-
-	err = os.WriteFile(infoFilePath, []byte(infoContent), filePermission)
+	trashFilePath, infoFilePath, err := reserveTrashEntry(
+		t.filesDir,
+		t.infoDir,
+		filepath.Base(filePath),
+		generateTrashInfo(absPath, time.Now()),
+		maxTrashNameAttempts,
+	)
 	if err != nil {
-		return "", fmt.Errorf("creating trashinfo file: %w", err)
+		return "", err
 	}
 
 	// Move file to trash
@@ -160,7 +139,10 @@ func (t *darwinTrasher) MoveToTrash(ctx context.Context, filePath string) (strin
 //
 // Returns:
 //   - An error if restoration fails.
-func (t *darwinTrasher) RestoreFromTrash(ctx context.Context, trashPath, originalPath string) error {
+func (t *darwinTrasher) RestoreFromTrash(
+	ctx context.Context,
+	trashPath, originalPath string,
+) error {
 	if ctx.Err() != nil {
 		return fmt.Errorf("context cancelled: %w", ctx.Err())
 	}
