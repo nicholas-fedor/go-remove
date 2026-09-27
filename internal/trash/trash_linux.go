@@ -46,10 +46,24 @@ func newTrasher() (Trasher, error) {
 		return nil, fmt.Errorf("%w: could not determine trash path", ErrTrashFull)
 	}
 
+	return newTrasherAt(trashPath)
+}
+
+// newTrasherAt creates a Linux trash manager rooted at the given path.
+//
+// The files and info subdirectories are created beneath root when absent.
+//
+// Parameters:
+//   - root: Absolute path to use as the trash root.
+//
+// Returns:
+//   - Linux trash implementation.
+//   - An error if the trash directories cannot be created.
+func newTrasherAt(root string) (Trasher, error) {
 	trasher := &linuxTrasher{
-		trashPath: trashPath,
-		filesDir:  filepath.Join(trashPath, "files"),
-		infoDir:   filepath.Join(trashPath, "info"),
+		trashPath: root,
+		filesDir:  filepath.Join(root, "files"),
+		infoDir:   filepath.Join(root, "info"),
 	}
 
 	// Ensure trash directories exist
