@@ -642,8 +642,10 @@ func TestHistoryManager_GetHistory(t *testing.T) {
 			ListRecords(ctx, storage.ListOptions{Limit: 10}).
 			Return(records, nil)
 
-		// InTrash reflects the live trash, not the stored flag.
-		mockTrasher.EXPECT().IsInTrash("").Return(true)
+		// InTrash reflects the live trash where the platform can report it.
+		if trashStateQueryable() {
+			mockTrasher.EXPECT().IsInTrash("").Return(true)
+		}
 
 		entries, err := manager.GetHistory(ctx, 10)
 
@@ -656,8 +658,37 @@ func TestHistoryManager_GetHistory(t *testing.T) {
 			"a record already marked unavailable must not be probed")
 	})
 
+	t.Run("preserves the stored flag where the trash cannot report", func(t *testing.T) {
+		t.Parallel()
+
+		if trashStateQueryable() {
+			t.Skip("platform trash can report membership, so the stored flag is not authoritative")
+		}
+
+		manager, mockTrasher, mockStorer, _ := setupManagerTest(t)
+
+		mockStorer.EXPECT().
+			ListRecords(ctx, storage.ListOptions{Limit: 10}).
+			Return(records, nil)
+
+		entries, err := manager.GetHistory(ctx, 10)
+
+		require.NoError(t, err)
+		require.Len(t, entries, 2)
+		assert.True(t, entries[0].InTrash,
+			"a stored flag must survive where membership cannot be queried")
+		assert.False(t, entries[1].InTrash)
+
+		// Asking anyway would report every entry as absent.
+		mockTrasher.AssertNotCalled(t, "IsInTrash", mock.Anything)
+	})
+
 	t.Run("stale flag is reported as not in trash", func(t *testing.T) {
 		t.Parallel()
+
+		if !trashStateQueryable() {
+			t.Skip("platform trash cannot report membership, so a stale flag is undetectable")
+		}
 
 		manager, mockTrasher, mockStorer, _ := setupManagerTest(t)
 
