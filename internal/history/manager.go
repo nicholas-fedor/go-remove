@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/nicholas-fedor/go-remove/internal/buildinfo"
@@ -38,6 +39,12 @@ var (
 
 	// ErrNoHistory indicates no deletion history exists.
 	ErrNoHistory = errors.New("no deletion history found")
+
+	// ErrNoRestorableHistory indicates history exists but nothing in it can be restored.
+	ErrNoRestorableHistory = errors.New("no restorable deletion found in history")
+
+	// ErrInvalidRecord indicates a history record is missing required data.
+	ErrInvalidRecord = errors.New("invalid history record")
 )
 
 // Log field keys used across history operations.
@@ -47,6 +54,25 @@ const (
 	logFieldPath    = "path"
 	logFieldTrash   = "trash"
 )
+
+// undoPageSize bounds how many history records UndoMostRecent reads at a time.
+//
+// Each persisted record embeds the binary's full build information, so loading
+// the whole history to restore one entry would be needlessly expensive.
+const undoPageSize = 50
+
+// platformWindows is the GOOS value for Windows systems.
+const platformWindows = "windows"
+
+// trashStateQueryable reports whether the platform's trash can confirm that a
+// path is still present.
+//
+// The Windows Recycle Bin is owned by the shell and exposes no reliable
+// membership check, so IsInTrash always reports false there. Consulting it
+// would mark every entry as absent straight after a successful deletion.
+func trashStateQueryable() bool {
+	return runtime.GOOS != platformWindows
+}
 
 // Manager defines high-level history operations.
 //
@@ -294,20 +320,104 @@ func (m *HistoryManager) RecordDeletion(
 // Returns:
 //   - The result of the restore operation.
 //   - An error if the operation fails or no history exists.
+//
+// UndoMostRecent restores the most recent deletion that can still be restored.
+//
+// Records are examined newest first, one bounded page at a time. One that is
+// already restored, or whose trash copy has since been removed, is reconciled
+// and skipped rather than ending the search, because those are expected states
+// rather than failures. Previously a single restored record made every later
+// undo fail outright.
+//
+// Parameters:
+//   - ctx: Context for cancellation.
+//
+// Returns:
+//   - The result of the restore operation.
+//   - ErrNoHistory if no records exist.
+//   - ErrNoRestorableHistory if no record can be restored.
+//   - An error if the operation fails.
 func (m *HistoryManager) UndoMostRecent(ctx context.Context) (*RestoreResult, error) {
 	m.logger.Debug().Msg("Undoing most recent deletion")
 
-	// Get most recent record
-	record, err := m.storer.GetMostRecent(ctx)
-	if err != nil {
-		if errors.Is(err, storage.ErrNoHistory) {
-			return nil, ErrNoHistory
+	for offset := 0; ; offset += undoPageSize {
+		records, err := m.storer.ListRecords(ctx, storage.ListOptions{
+			Limit:  undoPageSize,
+			Offset: offset,
+		})
+		if err != nil {
+			if errors.Is(err, storage.ErrNoHistory) {
+				return nil, ErrNoHistory
+			}
+
+			return nil, fmt.Errorf("listing history records: %w", err)
 		}
 
-		return nil, fmt.Errorf("getting most recent record: %w", err)
+		// An empty page means the history is exhausted. Distinguish a history
+		// that never had entries from one where everything was unrestorable.
+		if len(records) == 0 {
+			if offset == 0 {
+				return nil, ErrNoHistory
+			}
+
+			return nil, ErrNoRestorableHistory
+		}
+
+		for i := range records {
+			record := &records[i]
+
+			result, restoreErr := m.restoreRecord(ctx, record)
+			if restoreErr == nil {
+				return result, nil
+			}
+
+			// Only an unrestorable record is worth skipping. Any other failure is
+			// real and must reach the caller rather than being masked by an older
+			// entry.
+			if !errors.Is(restoreErr, ErrAlreadyRestored) &&
+				!errors.Is(restoreErr, ErrNotInTrash) {
+				return nil, restoreErr
+			}
+
+			m.logger.Debug().
+				Str(logFieldBinary, record.BinaryName).
+				Err(restoreErr).
+				Msg("Skipping unrestorable history entry during undo")
+		}
+	}
+}
+
+// reconcileTrashState checks a record against the filesystem and persists the
+// correction when the stored availability flag is stale.
+//
+// Parameters:
+//   - ctx: Context for cancellation.
+//   - record: Record to reconcile. Its TrashAvailable field may be corrected.
+//
+// Returns:
+//   - True if the record's binary is still in trash and can be restored.
+func (m *HistoryManager) reconcileTrashState(
+	ctx context.Context,
+	record *storage.HistoryRecord,
+) bool {
+	if !record.TrashAvailable {
+		return false
 	}
 
-	return m.restoreRecord(ctx, &record)
+	if m.trasher.IsInTrash(record.TrashPath) {
+		return true
+	}
+
+	record.TrashAvailable = false
+
+	if err := m.storer.UpdateRecord(ctx, record); err != nil {
+		m.logger.Warn().
+			Err(err).
+			Str(logFieldBinary, record.BinaryName).
+			Msg("Failed to persist reconciled trash state")
+	}
+
+	return false
 }
 
 // Restore restores a specific binary from history by ID.
@@ -363,22 +473,13 @@ func (m *HistoryManager) restoreRecord(
 	}
 
 	// Check if still in trash
-	if !m.trasher.IsInTrash(record.TrashPath) {
-		// Update storage to reflect trash status
-		record.TrashAvailable = false
-
-		if err := m.storer.UpdateRecord(ctx, record); err != nil {
-			m.logger.Warn().
-				Err(err).
-				Msg("Failed to update record after trash check")
-		}
-
+	if !m.reconcileTrashState(ctx, record) {
 		return nil, fmt.Errorf("%w: %s", ErrNotInTrash, record.BinaryName)
 	}
 
 	// Check if file exists at original location
 	if record.OriginalPath == "" {
-		return nil, fmt.Errorf("%w: original path is empty", ErrRestoreCollision)
+		return nil, fmt.Errorf("%w: original path is empty", ErrInvalidRecord)
 	}
 
 	// Check if a file already exists at the original location
@@ -466,6 +567,24 @@ func (m *HistoryManager) GetHistory(ctx context.Context, limit int) ([]*HistoryE
 	}
 
 	entries := entriesFromRecords(records)
+
+	// Report the live trash state rather than the stored flag. The flag is only
+	// a record of what was true when the binary was deleted, and the system
+	// trash can be emptied independently. Reconciling here is read-only, so
+	// opening the view never rewrites history.
+	//
+	// On platforms that cannot answer the question, the stored flag is the only
+	// signal available and is kept.
+	queryable := trashStateQueryable()
+
+	for i := range entries {
+		inTrash := records[i].TrashAvailable
+		if queryable {
+			inTrash = inTrash && m.trasher.IsInTrash(records[i].TrashPath)
+		}
+
+		entries[i].InTrash = inTrash
+	}
 
 	m.logger.Debug().
 		Int("count", len(entries)).
