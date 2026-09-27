@@ -54,6 +54,12 @@ const (
 	logFieldTrash   = "trash"
 )
 
+// undoPageSize bounds how many history records UndoMostRecent reads at a time.
+//
+// Each persisted record embeds the binary's full build information, so loading
+// the whole history to restore one entry would be needlessly expensive.
+const undoPageSize = 50
+
 // Manager defines high-level history operations.
 //
 // This interface provides the orchestration layer that coordinates trash,
@@ -303,10 +309,11 @@ func (m *HistoryManager) RecordDeletion(
 //
 // UndoMostRecent restores the most recent deletion that can still be restored.
 //
-// Records are examined newest first. One that is already restored, or whose
-// trash copy has since been removed, is reconciled and skipped rather than
-// ending the search, because those are expected states rather than failures.
-// Previously a single restored record made every later undo fail outright.
+// Records are examined newest first, one bounded page at a time. One that is
+// already restored, or whose trash copy has since been removed, is reconciled
+// and skipped rather than ending the search, because those are expected states
+// rather than failures. Previously a single restored record made every later
+// undo fail outright.
 //
 // Parameters:
 //   - ctx: Context for cancellation.
@@ -319,42 +326,51 @@ func (m *HistoryManager) RecordDeletion(
 func (m *HistoryManager) UndoMostRecent(ctx context.Context) (*RestoreResult, error) {
 	m.logger.Debug().Msg("Undoing most recent deletion")
 
-	records, err := m.storer.ListRecords(ctx, storage.ListOptions{})
-	if err != nil {
-		if errors.Is(err, storage.ErrNoHistory) {
-			return nil, ErrNoHistory
+	for offset := 0; ; offset += undoPageSize {
+		records, err := m.storer.ListRecords(ctx, storage.ListOptions{
+			Limit:  undoPageSize,
+			Offset: offset,
+		})
+		if err != nil {
+			if errors.Is(err, storage.ErrNoHistory) {
+				return nil, ErrNoHistory
+			}
+
+			return nil, fmt.Errorf("listing history records: %w", err)
 		}
 
-		return nil, fmt.Errorf("listing history records: %w", err)
-	}
+		// An empty page means the history is exhausted. Distinguish a history
+		// that never had entries from one where everything was unrestorable.
+		if len(records) == 0 {
+			if offset == 0 {
+				return nil, ErrNoHistory
+			}
 
-	if len(records) == 0 {
-		return nil, ErrNoHistory
-	}
-
-	for i := range records {
-		record := &records[i]
-
-		result, restoreErr := m.restoreRecord(ctx, record)
-		if restoreErr == nil {
-			return result, nil
+			return nil, ErrNoRestorableHistory
 		}
 
-		// Only an unrestorable record is worth skipping. Any other failure is
-		// real and must reach the caller rather than being masked by an older
-		// entry.
-		if !errors.Is(restoreErr, ErrAlreadyRestored) &&
-			!errors.Is(restoreErr, ErrNotInTrash) {
-			return nil, restoreErr
+		for i := range records {
+			record := &records[i]
+
+			result, restoreErr := m.restoreRecord(ctx, record)
+			if restoreErr == nil {
+				return result, nil
+			}
+
+			// Only an unrestorable record is worth skipping. Any other failure is
+			// real and must reach the caller rather than being masked by an older
+			// entry.
+			if !errors.Is(restoreErr, ErrAlreadyRestored) &&
+				!errors.Is(restoreErr, ErrNotInTrash) {
+				return nil, restoreErr
+			}
+
+			m.logger.Debug().
+				Str(logFieldBinary, record.BinaryName).
+				Err(restoreErr).
+				Msg("Skipping unrestorable history entry during undo")
 		}
-
-		m.logger.Debug().
-			Str(logFieldBinary, record.BinaryName).
-			Err(restoreErr).
-			Msg("Skipping unrestorable history entry during undo")
 	}
-
-	return nil, ErrNoRestorableHistory
 }
 
 // reconcileTrashState checks a record against the filesystem and persists the

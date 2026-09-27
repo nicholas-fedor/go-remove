@@ -7,6 +7,7 @@ package history
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -253,7 +254,7 @@ func TestHistoryManager_UndoMostRecent(t *testing.T) {
 		manager, mockTrasher, mockStorer, _ := setupManagerTest(t)
 
 		mockStorer.EXPECT().
-			ListRecords(ctx, mock.AnythingOfType("storage.ListOptions")).
+			ListRecords(ctx, storage.ListOptions{Limit: undoPageSize, Offset: 0}).
 			Return([]storage.HistoryRecord{record}, nil)
 
 		mockTrasher.EXPECT().
@@ -284,7 +285,7 @@ func TestHistoryManager_UndoMostRecent(t *testing.T) {
 		manager, _, mockStorer, _ := setupManagerTest(t)
 
 		mockStorer.EXPECT().
-			ListRecords(ctx, mock.AnythingOfType("storage.ListOptions")).
+			ListRecords(ctx, storage.ListOptions{Limit: undoPageSize, Offset: 0}).
 			Return([]storage.HistoryRecord{}, nil)
 
 		result, err := manager.UndoMostRecent(ctx)
@@ -301,9 +302,16 @@ func TestHistoryManager_UndoMostRecent(t *testing.T) {
 		restored := record
 		restored.TrashAvailable = false
 
+		// The first page holds the unrestorable record, the second is empty.
 		mockStorer.EXPECT().
-			ListRecords(ctx, mock.AnythingOfType("storage.ListOptions")).
-			Return([]storage.HistoryRecord{restored}, nil)
+			ListRecords(ctx, storage.ListOptions{Limit: undoPageSize, Offset: 0}).
+			Return([]storage.HistoryRecord{restored}, nil).
+			Once()
+
+		mockStorer.EXPECT().
+			ListRecords(ctx, storage.ListOptions{Limit: undoPageSize, Offset: undoPageSize}).
+			Return([]storage.HistoryRecord{}, nil).
+			Once()
 
 		result, err := manager.UndoMostRecent(ctx)
 
@@ -318,12 +326,19 @@ func TestHistoryManager_UndoMostRecent(t *testing.T) {
 		manager, mockTrasher, mockStorer, _ := setupManagerTest(t)
 
 		mockStorer.EXPECT().
-			ListRecords(ctx, mock.AnythingOfType("storage.ListOptions")).
-			Return([]storage.HistoryRecord{record}, nil)
+			ListRecords(ctx, storage.ListOptions{Limit: undoPageSize, Offset: 0}).
+			Return([]storage.HistoryRecord{record}, nil).
+			Once()
+
+		mockStorer.EXPECT().
+			ListRecords(ctx, storage.ListOptions{Limit: undoPageSize, Offset: undoPageSize}).
+			Return([]storage.HistoryRecord{}, nil).
+			Once()
 
 		mockTrasher.EXPECT().
 			IsInTrash(testTrashPath).
-			Return(false)
+			Return(false).
+			Once()
 
 		// The stale flag must be corrected in storage.
 		mockStorer.EXPECT().
@@ -365,7 +380,7 @@ func TestHistoryManager_UndoMostRecent(t *testing.T) {
 
 		// Newest first, as ListRecords guarantees.
 		mockStorer.EXPECT().
-			ListRecords(ctx, mock.AnythingOfType("storage.ListOptions")).
+			ListRecords(ctx, storage.ListOptions{Limit: undoPageSize, Offset: 0}).
 			Return([]storage.HistoryRecord{newerRestored, missingFromTrash, restorable}, nil)
 
 		mockTrasher.EXPECT().
@@ -413,7 +428,7 @@ func TestHistoryManager_UndoMostRecent(t *testing.T) {
 		colliding.OriginalPath = occupiedPath
 
 		mockStorer.EXPECT().
-			ListRecords(ctx, mock.AnythingOfType("storage.ListOptions")).
+			ListRecords(ctx, storage.ListOptions{Limit: undoPageSize, Offset: 0}).
 			Return([]storage.HistoryRecord{colliding}, nil)
 
 		mockTrasher.EXPECT().
@@ -437,7 +452,7 @@ func TestHistoryManager_UndoMostRecent(t *testing.T) {
 		manager, mockTrasher, mockStorer, _ := setupManagerTest(t)
 
 		mockStorer.EXPECT().
-			ListRecords(ctx, mock.AnythingOfType("storage.ListOptions")).
+			ListRecords(ctx, storage.ListOptions{Limit: undoPageSize, Offset: 0}).
 			Return([]storage.HistoryRecord{record}, nil)
 
 		mockTrasher.EXPECT().
@@ -460,13 +475,60 @@ func TestHistoryManager_UndoMostRecent(t *testing.T) {
 		manager, _, mockStorer, _ := setupManagerTest(t)
 
 		mockStorer.EXPECT().
-			ListRecords(ctx, mock.AnythingOfType("storage.ListOptions")).
+			ListRecords(ctx, storage.ListOptions{Limit: undoPageSize, Offset: 0}).
 			Return(nil, errors.New("database unavailable"))
 
 		result, err := manager.UndoMostRecent(ctx)
 
 		require.Error(t, err)
 		assert.Nil(t, result)
+	})
+
+	t.Run("walks pages until a restorable record is found", func(t *testing.T) {
+		t.Parallel()
+
+		manager, mockTrasher, mockStorer, _ := setupManagerTest(t)
+
+		// A full first page of unrestorable entries forces a second page.
+		firstPage := make([]storage.HistoryRecord, 0, undoPageSize)
+		for i := range undoPageSize {
+			entry := record
+			entry.BinaryName = fmt.Sprintf("gone-%d", i)
+			entry.TrashPath = fmt.Sprintf("/trash/gone-%d", i)
+			entry.TrashAvailable = false
+			firstPage = append(firstPage, entry)
+		}
+
+		secondPage := []storage.HistoryRecord{record}
+
+		mockStorer.EXPECT().
+			ListRecords(ctx, storage.ListOptions{Limit: undoPageSize, Offset: 0}).
+			Return(firstPage, nil).
+			Once()
+
+		mockStorer.EXPECT().
+			ListRecords(ctx, storage.ListOptions{Limit: undoPageSize, Offset: undoPageSize}).
+			Return(secondPage, nil).
+			Once()
+
+		mockTrasher.EXPECT().
+			IsInTrash(testTrashPath).
+			Return(true).
+			Once()
+
+		mockTrasher.EXPECT().
+			RestoreFromTrash(ctx, testTrashPath, testBinaryPath).
+			Return(nil)
+
+		mockStorer.EXPECT().
+			UpdateRecord(ctx, mock.AnythingOfType("*storage.HistoryRecord")).
+			Return(nil)
+
+		result, err := manager.UndoMostRecent(ctx)
+
+		require.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, testBinaryName, result.BinaryName)
 	})
 }
 
