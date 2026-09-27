@@ -433,7 +433,7 @@ func (m *HistoryManager) restoreRecord(
 		Msg("Binary restored from trash")
 
 	return &RestoreResult{
-		EntryID:    storage.GenerateKey(record.Timestamp, record.BinaryName),
+		EntryID:    record.RecordKey(),
 		BinaryName: record.BinaryName,
 		RestoredTo: record.OriginalPath,
 		FromTrash:  true,

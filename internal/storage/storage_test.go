@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -735,6 +736,213 @@ func TestParseKey(t *testing.T) {
 			assert.Equal(t, tt.expectedBinaryName, binaryName)
 		})
 	}
+}
+
+// TestSaveRecord_KeyCollisionPreservesBothRecords verifies that two records
+// sharing a timestamp and basename are both stored.
+//
+// The key used to be written with a blind txn.Set, so the second record
+// replaced the first. The first record is the only index for a copy of the
+// binary already sitting in trash, so overwriting it made that copy
+// unreachable.
+func TestSaveRecord_KeyCollisionPreservesBothRecords(t *testing.T) {
+	t.Parallel()
+
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	timestamp := time.Now().Unix()
+
+	first := HistoryRecord{
+		Timestamp:  timestamp,
+		BinaryName: "tool",
+		OriginalPath: filepath.Join(
+			t.TempDir(),
+			"first",
+			"tool",
+		),
+		TrashPath:      "/trash/files/tool_aaa",
+		TrashAvailable: true,
+		ModulePath:     "example.com/first",
+		OriginalDir:    "/first/bin",
+	}
+	second := HistoryRecord{
+		Timestamp:  timestamp,
+		BinaryName: "tool",
+		OriginalPath: filepath.Join(
+			t.TempDir(),
+			"second",
+			"tool",
+		),
+		TrashPath:      "/trash/files/tool_bbb",
+		TrashAvailable: true,
+		ModulePath:     "example.com/second",
+		OriginalDir:    "/second/bin",
+	}
+
+	require.NoError(t, store.SaveRecord(ctx, &first))
+	require.NoError(t, store.SaveRecord(ctx, &second))
+
+	// The colliding key must have been separated.
+	assert.NotEqual(t, first.Key, second.Key,
+		"colliding records were stored under the same key")
+	assert.Equal(t, GenerateKey(timestamp, "tool"), first.Key,
+		"the first record should keep the legacy key layout")
+
+	// Both records must be retrievable, each with its own content intact.
+	for _, want := range []HistoryRecord{first, second} {
+		got, err := store.GetRecord(ctx, want.Key)
+		require.NoErrorf(t, err, "record %s is unreachable", want.OriginalPath)
+		assert.Equal(t, want.OriginalPath, got.OriginalPath)
+		assert.Equal(t, want.ModulePath, got.ModulePath)
+		assert.Equal(t, want.TrashPath, got.TrashPath)
+	}
+
+	// The history must report both entries.
+	records, err := store.ListRecords(ctx, ListOptions{})
+	require.NoError(t, err)
+	assert.Len(t, records, 2, "a colliding record was lost")
+}
+
+// TestSaveRecord_UpdateUsesRecordedKey verifies that updating a record that was
+// stored under a discriminated key updates that same entry.
+func TestSaveRecord_UpdateUsesRecordedKey(t *testing.T) {
+	t.Parallel()
+
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	timestamp := time.Now().Unix()
+
+	// Occupy the legacy key so the record below is forced onto a new one.
+	require.NoError(t, store.SaveRecord(ctx, &HistoryRecord{
+		Timestamp:      timestamp,
+		BinaryName:     "tool",
+		OriginalPath:   "/first/bin/tool",
+		TrashAvailable: true,
+	}))
+
+	collided := HistoryRecord{
+		Timestamp:      timestamp,
+		BinaryName:     "tool",
+		OriginalPath:   "/second/bin/tool",
+		TrashPath:      "/trash/files/tool_bbb",
+		TrashAvailable: true,
+	}
+	require.NoError(t, store.SaveRecord(ctx, &collided))
+	require.NotEqual(t, GenerateKey(timestamp, "tool"), collided.Key)
+
+	collided.TrashAvailable = false
+	require.NoError(t, store.UpdateRecord(ctx, &collided))
+
+	// The update must land on the recorded key, not create a duplicate at the
+	// legacy key.
+	got, err := store.GetRecord(ctx, collided.Key)
+	require.NoError(t, err)
+	assert.False(t, got.TrashAvailable)
+	assert.Equal(t, "/second/bin/tool", got.OriginalPath)
+
+	records, err := store.ListRecords(ctx, ListOptions{})
+	require.NoError(t, err)
+	assert.Len(t, records, 2, "update created a duplicate record")
+}
+
+// TestHistoryRecord_RecordKey verifies the legacy fallback for records written
+// before the Key field existed.
+func TestHistoryRecord_RecordKey(t *testing.T) {
+	t.Parallel()
+
+	legacy := HistoryRecord{Timestamp: 1709321234, BinaryName: "tool"}
+	assert.Equal(t, GenerateKey(1709321234, "tool"), legacy.RecordKey())
+
+	recorded := HistoryRecord{
+		Timestamp:  1709321234,
+		BinaryName: "tool",
+		Key:        "00000000001709321234:tool:abcdef012345",
+	}
+	assert.Equal(t, recorded.Key, recorded.RecordKey(),
+		"a recorded key must take precedence over the derived one")
+}
+
+// TestSaveRecord_ConcurrentCollision verifies that concurrent saves sharing a
+// timestamp and basename all survive.
+//
+// Probing for a free key in a separate read transaction left a window in which
+// two writers could both observe the key as free and then both write it, so the
+// second silently replaced the first. Probing inside the write transaction lets
+// Badger's conflict detection reject the loser, which retries on a new key.
+func TestSaveRecord_ConcurrentCollision(t *testing.T) {
+	t.Parallel()
+
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	timestamp := time.Now().Unix()
+
+	const writers = 32
+
+	// Release every writer at once so they contend for the same key instead of
+	// trickling in, which is what makes a probe-then-write race observable.
+	start := make(chan struct{})
+
+	var (
+		waitGroup sync.WaitGroup
+		mu        sync.Mutex
+		keys      = make([]string, 0, writers)
+		failures  []error
+	)
+
+	for i := range writers {
+		waitGroup.Go(func() {
+			<-start
+
+			record := HistoryRecord{
+				Timestamp:      timestamp,
+				BinaryName:     "tool",
+				OriginalPath:   fmt.Sprintf("/bin/tool-%d", i),
+				TrashPath:      fmt.Sprintf("/trash/files/tool_%d", i),
+				TrashAvailable: true,
+			}
+
+			if err := store.SaveRecord(ctx, &record); err != nil {
+				mu.Lock()
+				defer mu.Unlock()
+
+				failures = append(failures, err)
+
+				return
+			}
+
+			mu.Lock()
+			defer mu.Unlock()
+
+			keys = append(keys, record.Key)
+		})
+	}
+
+	close(start)
+
+	waitGroup.Wait()
+
+	require.Empty(t, failures, "concurrent saves reported errors")
+	require.Len(t, keys, writers, "every writer must receive a key")
+
+	// No key may be handed to two writers.
+	unique := make(map[string]struct{}, writers)
+	for _, key := range keys {
+		_, duplicate := unique[key]
+		require.Falsef(t, duplicate, "two writers received key %s", key)
+
+		unique[key] = struct{}{}
+	}
+
+	// Every record must be readable back under its own key.
+	records, err := store.ListRecords(ctx, ListOptions{})
+	require.NoError(t, err)
+	assert.Len(t, records, writers, "a concurrent save was lost")
 }
 
 func TestHistoryRecord_DisplayTime(t *testing.T) {
