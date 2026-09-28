@@ -438,7 +438,14 @@ func (t *xdgTrasher) copyAndDelete(src, dst string) error {
 			return fmt.Errorf("reading symlink: %w", err)
 		}
 
+		// The destination is claimed the same way as for files and directories,
+		// so an occupied destination is reported as a collision rather than a
+		// generic symlink failure.
 		if err := os.Symlink(linkTarget, dst); err != nil {
+			if errors.Is(err, fs.ErrExist) {
+				return fmt.Errorf("%w: %s", ErrRestoreCollision, dst)
+			}
+
 			return fmt.Errorf("creating symlink: %w", err)
 		}
 

@@ -114,6 +114,38 @@ func TestCopyAndDelete_RejectsExistingDirectory(t *testing.T) {
 	assert.DirExists(t, source, "a refused copy must not consume the source")
 }
 
+// TestCopyAndDelete_RejectsExistingSymlinkDestination verifies the symlink
+// branch of the copy path claims its destination exclusively.
+//
+// A hard link to a symlink normally succeeds, so this branch is only reached on
+// a cross-device move, where os.Link has not already reported the collision.
+func TestCopyAndDelete_RejectsExistingSymlinkDestination(t *testing.T) {
+	t.Parallel()
+
+	trasher, ok := newTestTrasher(t).(*xdgTrasher)
+	require.True(t, ok)
+
+	dir := t.TempDir()
+
+	target := filepath.Join(dir, "target")
+	require.NoError(t, os.WriteFile(target, []byte("payload"), 0o600))
+
+	src := filepath.Join(dir, "link")
+	require.NoError(t, os.Symlink(target, src))
+
+	// Occupy the destination with a file, which symlink() refuses to replace.
+	occupied := filepath.Join(t.TempDir(), "dst")
+	require.NoError(t, os.WriteFile(occupied, []byte("existing"), 0o600))
+
+	err := trasher.copyAndDelete(src, occupied)
+	require.ErrorIs(t, err, ErrRestoreCollision)
+
+	data, readErr := os.ReadFile(occupied)
+	require.NoError(t, readErr)
+	assert.Equal(t, "existing", string(data), "an existing destination must be untouched")
+	assert.FileExists(t, target, "the symlink target must not be moved")
+}
+
 // assertDirContainsOnly asserts the directory holds exactly the named entries.
 func assertDirContainsOnly(t *testing.T, dir string, names ...string) {
 	t.Helper()
