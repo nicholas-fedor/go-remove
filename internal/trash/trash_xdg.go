@@ -9,19 +9,27 @@ package trash
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
 // Permission constants for file operations.
 const (
-	// dirPermission is the permission for creating directories.
+	// dirPermission is the permission for creating directories inside the trash.
 	dirPermission = 0o700
+
+	// restoreDirPermission is the permission for a directory recreated during a
+	// restore. The trash keeps its own directories private, but a restore target
+	// belongs to the user, so recreating it at 0o700 would silently change the
+	// permissions of a location such as /usr/local/bin.
+	restoreDirPermission = 0o755
 )
 
 // getXDGTrashPath returns the XDG trash path for the current environment.
@@ -115,8 +123,10 @@ func (t *xdgTrasher) MoveToTrash(ctx context.Context, filePath string) (string, 
 		return "", fmt.Errorf("context cancelled: %w", ctx.Err())
 	}
 
-	// Verify source exists
-	if _, err := os.Stat(filePath); err != nil {
+	// Verify source exists. Lstat rather than Stat, because a symlink whose
+	// target is missing still exists and is what should be trashed, whereas
+	// Stat would report it as absent.
+	if _, err := os.Lstat(filePath); err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("%w: %s", ErrPathNotFound, filePath)
 		}
@@ -174,33 +184,79 @@ func (t *xdgTrasher) RestoreFromTrash(ctx context.Context, trashPath, originalPa
 		return fmt.Errorf("%w: %s", ErrFileNotInTrash, trashPath)
 	}
 
-	// Check if destination already exists
-	_, err := os.Stat(originalPath)
-	if err == nil {
-		return fmt.Errorf("%w: %s", ErrRestoreCollision, originalPath)
+	// A relative or unclean destination would resolve against the working
+	// directory, which is not where the file came from.
+	if !filepath.IsAbs(originalPath) {
+		return fmt.Errorf(
+			"%w: restore target must be absolute: %s",
+			ErrInvalidPath,
+			originalPath,
+		)
 	}
 
-	if !os.IsNotExist(err) {
-		return fmt.Errorf("checking destination: %w", err)
-	}
+	originalPath = filepath.Clean(originalPath)
 
 	// Ensure parent directory exists
 	parentDir := filepath.Dir(originalPath)
-	if err := os.MkdirAll(parentDir, dirPermission); err != nil {
+	if err := os.MkdirAll(parentDir, restoreDirPermission); err != nil {
 		return fmt.Errorf("creating parent directory: %w", err)
 	}
 
-	// Move file from trash to original location
-	if err := os.Rename(trashPath, originalPath); err != nil {
-		// Try copy-and-delete for cross-device moves
-		if err := t.copyAndDelete(trashPath, originalPath); err != nil {
-			return fmt.Errorf("restoring file: %w", err)
-		}
+	if err := t.restoreTo(ctx, trashPath, originalPath); err != nil {
+		return err
 	}
 
 	// Clean up trashinfo file
 	infoPath := t.getInfoPath(trashPath)
 	os.Remove(infoPath) // Ignore error
+
+	return nil
+}
+
+// restoreTo places a trashed file at its original location without ever
+// overwriting an existing file.
+//
+// A hard link is attempted first because the kernel refuses to create one when
+// the destination already exists, which makes the collision check atomic rather
+// than a check-then-act that a concurrent writer can slip through. When the two
+// paths sit on different devices, or the entry is not a regular file, the copy
+// path claims the destination exclusively for the same reason.
+//
+// Parameters:
+//   - ctx: Context for cancellation.
+//   - trashPath: Path of the file in trash.
+//   - originalPath: Absolute destination to restore to.
+//
+// Returns:
+//   - ErrRestoreCollision if the destination was created in the meantime.
+//   - An error if the restore fails.
+func (t *xdgTrasher) restoreTo(ctx context.Context, trashPath, originalPath string) error {
+	linkErr := os.Link(trashPath, originalPath)
+
+	switch {
+	case linkErr == nil:
+		if err := os.Remove(trashPath); err != nil {
+			return fmt.Errorf("removing trashed copy after restore: %w", err)
+		}
+
+		return nil
+	case errors.Is(linkErr, fs.ErrExist):
+		return fmt.Errorf("%w: %s", ErrRestoreCollision, originalPath)
+	case ctx.Err() != nil:
+		return fmt.Errorf("context cancelled: %w", ctx.Err())
+	}
+
+	// The entry is a directory, or the two paths are on different devices.
+	// os.Link cannot link a directory, so it reports something other than
+	// ErrExist and the collision check is deferred to the exclusive create in
+	// copyDir, which maps it back to ErrRestoreCollision.
+	if err := t.copyAndDelete(trashPath, originalPath); err != nil {
+		if errors.Is(err, ErrRestoreCollision) {
+			return fmt.Errorf("%w: %s", ErrRestoreCollision, originalPath)
+		}
+
+		return fmt.Errorf("restoring file: %w", err)
+	}
 
 	return nil
 }
@@ -345,8 +401,17 @@ func (t *xdgTrasher) readTrashInfo(infoPath string) (string, time.Time, error) {
 // Returns:
 //   - An error if the move fails.
 func (t *xdgTrasher) moveFile(src, dst string) error {
-	if err := os.Rename(src, dst); err == nil {
+	err := os.Rename(src, dst)
+	if err == nil {
 		return nil
+	}
+
+	// Only a cross-device move is worth the copy fallback. Treating a
+	// read-only or permission-denied source as a device mismatch would copy the
+	// whole file, fail to unlink the original, and leave an unreferenced
+	// duplicate behind while reporting failure.
+	if !errors.Is(err, syscall.EXDEV) {
+		return fmt.Errorf("moving %s: %w", src, err)
 	}
 
 	return t.copyAndDelete(src, dst)
@@ -373,7 +438,14 @@ func (t *xdgTrasher) copyAndDelete(src, dst string) error {
 			return fmt.Errorf("reading symlink: %w", err)
 		}
 
+		// The destination is claimed the same way as for files and directories,
+		// so an occupied destination is reported as a collision rather than a
+		// generic symlink failure.
 		if err := os.Symlink(linkTarget, dst); err != nil {
+			if errors.Is(err, fs.ErrExist) {
+				return fmt.Errorf("%w: %s", ErrRestoreCollision, dst)
+			}
+
 			return fmt.Errorf("creating symlink: %w", err)
 		}
 
@@ -411,14 +483,35 @@ func (t *xdgTrasher) copyAndDelete(src, dst string) error {
 // Returns:
 //   - An error if the copy fails.
 func (t *xdgTrasher) copyFile(src, dst string, srcInfo os.FileInfo) error {
+	// Opening a named pipe blocks until a writer appears, and nothing in this
+	// path can be cancelled, so anything but a regular file is refused up front.
+	if !srcInfo.Mode().IsRegular() {
+		return fmt.Errorf(
+			"%w: %s is a %s",
+			ErrUnsupportedFileType,
+			src,
+			srcInfo.Mode().Type(),
+		)
+	}
+
 	srcFile, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("opening source file: %w", err)
 	}
 	defer srcFile.Close()
 
-	dstFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, srcInfo.Mode()&fs.ModePerm)
+	// The destination is claimed exclusively so a file created after the
+	// caller's collision check is never truncated.
+	dstFile, err := os.OpenFile(
+		dst,
+		os.O_WRONLY|os.O_CREATE|os.O_EXCL,
+		srcInfo.Mode()&fs.ModePerm,
+	)
 	if err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return fmt.Errorf("%w: %s", ErrRestoreCollision, dst)
+		}
+
 		return fmt.Errorf("creating destination file: %w", err)
 	}
 
@@ -431,6 +524,10 @@ func (t *xdgTrasher) copyFile(src, dst string, srcInfo os.FileInfo) error {
 
 	// Close destination file before setting times
 	if err := dstFile.Close(); err != nil {
+		// A close failure can mean the copy never reached disk, so the partial
+		// destination has to go the same way the copy-error branch removes it.
+		os.Remove(dst)
+
 		return fmt.Errorf("closing destination file: %w", err)
 	}
 
@@ -460,7 +557,14 @@ func (t *xdgTrasher) copyDir(src, dst string) error {
 		return fmt.Errorf("stating source directory: %w", err)
 	}
 
-	if err := os.MkdirAll(dst, srcInfo.Mode()&fs.ModePerm); err != nil {
+	// The destination root is claimed exclusively. MkdirAll would succeed when
+	// the directory already exists and then merge the two trees, which silently
+	// interleaves files instead of refusing the restore.
+	if err := os.Mkdir(dst, srcInfo.Mode()&fs.ModePerm); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return fmt.Errorf("%w: %s", ErrRestoreCollision, dst)
+		}
+
 		return fmt.Errorf("creating destination directory: %w", err)
 	}
 
