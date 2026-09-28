@@ -22,6 +22,9 @@ import (
 // platformLinux is the GOOS value for Linux systems.
 const platformLinux = "linux"
 
+// platformWindows is the GOOS value for Windows systems.
+const platformWindows = "windows"
+
 // newTestTrasher returns a Trasher rooted in a per-test temporary directory.
 //
 // Tests must never share the user's real trash. t.Setenv is not an option here

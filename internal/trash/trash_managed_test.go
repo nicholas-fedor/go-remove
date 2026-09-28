@@ -10,6 +10,7 @@ package trash
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -55,16 +56,25 @@ func TestManagedTrash_RoundTripsReservedCharacters(t *testing.T) {
 		// rather than derived from the encoder so the assertion is not
 		// self-referential.
 		wantEncoded string
+		// skipOnWindows marks a name Windows cannot create. It reserves the
+		// wildcard character ?, so a file with one in its name cannot exist
+		// there to be trashed. A # and square brackets are ordinary characters
+		// on Windows, so those cases still run there.
+		skipOnWindows bool
 	}{
-		{name: "tool?v2", wantEncoded: "tool%3Fv2"},
+		{name: "tool?v2", wantEncoded: "tool%3Fv2", skipOnWindows: true},
 		{name: "a#b", wantEncoded: "a%23b"},
 		{name: "weird[name]", wantEncoded: "weird%5Bname%5D"},
-		{name: "mixed ?#% name", wantEncoded: "mixed%20%3F%23%25%20name"},
+		{name: "mixed ?#% name", wantEncoded: "mixed%20%3F%23%25%20name", skipOnWindows: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+
+			if tt.skipOnWindows && runtime.GOOS == platformWindows {
+				t.Skip("Windows reserves the wildcard character, so this name cannot be created")
+			}
 
 			ctx := t.Context()
 			binDir := t.TempDir()
