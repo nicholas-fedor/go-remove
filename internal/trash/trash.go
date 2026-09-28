@@ -195,9 +195,27 @@ func NewTrasher() (Trasher, error) {
 	return newTrasher()
 }
 
+// trashPathSafe lists the characters g_filename_to_uri leaves unescaped, which
+// is the escaping a .trashinfo Path is written against and read back with.
+//
+// This is the RFC 3986 unreserved set plus the sub-delimiters and path
+// delimiters, verified against GLib rather than its header comment: the
+// documented G_URI_RESERVED_CHARS_ALLOWED_IN_PATH also lists a semicolon, but
+// g_filename_to_uri escapes one to %3B, so the semicolon is deliberately absent
+// here. The delimiters a desktop splits on must be escaped: a binary named
+// tool?v2 would otherwise be read back as the path .../tool carrying the query
+// v2, and a name containing # is truncated at the fragment.
+const trashPathSafe = "abcdefghijklmnopqrstuvwxyz" +
+	"ABCDEFGHIJKLMNOPQRSTUVWXYZ" +
+	"0123456789" +
+	"-_.~!$&'()*+,=:@/"
+
 // encodeTrashPath encodes a path for storage in .trashinfo files.
 //
-// Bytes outside printable ASCII and percent signs are percent-encoded.
+// Every byte outside trashPathSafe is percent-encoded, so the value stays
+// unambiguous when a desktop splits it on the query and fragment delimiters.
+// Bytes outside printable ASCII were already escaped, and still are, since
+// they are not in the safe set.
 //
 // Parameters:
 //   - path: Original filesystem path.
@@ -205,17 +223,18 @@ func NewTrasher() (Trasher, error) {
 // Returns:
 //   - Encoded path suitable for a .trashinfo file.
 func encodeTrashPath(path string) string {
-	// URL-encode special characters
 	var result []byte
 
 	for i := range len(path) {
 		c := path[i]
 
-		if c <= 0x20 || c >= 0x7f || c == '%' {
+		if strings.IndexByte(trashPathSafe, c) < 0 {
 			result = fmt.Appendf(result, "%%%02X", c)
-		} else {
-			result = append(result, c)
+
+			continue
 		}
+
+		result = append(result, c)
 	}
 
 	return string(result)
