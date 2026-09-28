@@ -16,7 +16,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -404,7 +403,7 @@ func (t *managedTrasher) moveFile(src, dst string) error {
 	// read-only or permission-denied source as a device mismatch would copy the
 	// whole file, fail to unlink the original, and leave an unreferenced
 	// duplicate behind while reporting failure.
-	if !errors.Is(err, syscall.EXDEV) {
+	if !isCrossDevice(err) {
 		return fmt.Errorf("moving %s: %w", src, err)
 	}
 
