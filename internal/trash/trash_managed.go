@@ -1,4 +1,4 @@
-//go:build linux || darwin
+//go:build linux || darwin || windows
 
 /*
 Copyright © 2026 Nicholas Fedor <nick@nickfedor.com>
@@ -16,7 +16,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -32,47 +31,27 @@ const (
 	restoreDirPermission = 0o755
 )
 
-// getXDGTrashPath returns the XDG trash path for the current environment.
+// managedTrasher implements Trasher against a trash directory go-remove owns.
 //
-// It uses $XDG_DATA_HOME/Trash when that value is an absolute path, otherwise
-// ~/.local/share/Trash.
-//
-// Returns:
-//   - Absolute trash directory path, or empty if the home directory cannot be
-//     resolved.
-func getXDGTrashPath() string {
-	xdgDataHome := os.Getenv("XDG_DATA_HOME")
-	if xdgDataHome == "" || !filepath.IsAbs(xdgDataHome) {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return ""
-		}
-
-		xdgDataHome = filepath.Join(home, ".local", "share")
-	}
-
-	return filepath.Join(xdgDataHome, "Trash")
-}
-
-// xdgTrasher implements Trasher using the XDG Trash specification.
-//
-// The specification is shared by Linux and macOS, so one implementation
-// serves both.
-type xdgTrasher struct {
+// The layout follows the XDG Trash specification on every platform, with the
+// files and info subdirectories and a .trashinfo file per entry. Owning the
+// directory is what makes restore, listing and permanent deletion possible,
+// which the platform trash cannot offer on Windows.
+type managedTrasher struct {
 	trashPath string
 	filesDir  string
 	infoDir   string
 }
 
-var _ Trasher = (*xdgTrasher)(nil)
+var _ Trasher = (*managedTrasher)(nil)
 
-// newTrasher creates a trash manager using the XDG Trash specification.
+// newTrasher creates a trash manager rooted at the platform default location.
 //
 // Returns:
-//   - XDG trash implementation.
+//   - Managed trash implementation.
 //   - An error if the trash directories cannot be created.
 func newTrasher() (Trasher, error) {
-	trashPath := getXDGTrashPath()
+	trashPath := platformTrashRoot()
 	if trashPath == "" {
 		return nil, fmt.Errorf("%w: could not determine trash path", ErrTrashFull)
 	}
@@ -80,7 +59,7 @@ func newTrasher() (Trasher, error) {
 	return newTrasherAt(trashPath)
 }
 
-// newTrasherAt creates an XDG trash manager rooted at the given path.
+// newTrasherAt creates a managed trash manager rooted at the given path.
 //
 // The files and info subdirectories are created beneath root when absent.
 //
@@ -88,10 +67,10 @@ func newTrasher() (Trasher, error) {
 //   - root: Absolute path to use as the trash root.
 //
 // Returns:
-//   - XDG trash implementation.
+//   - Managed trash implementation.
 //   - An error if the trash directories cannot be created.
 func newTrasherAt(root string) (Trasher, error) {
-	trasher := &xdgTrasher{
+	trasher := &managedTrasher{
 		trashPath: root,
 		filesDir:  filepath.Join(root, "files"),
 		infoDir:   filepath.Join(root, "info"),
@@ -118,7 +97,7 @@ func newTrasherAt(root string) (Trasher, error) {
 // Returns:
 //   - Path of the file in trash.
 //   - An error if the move fails.
-func (t *xdgTrasher) MoveToTrash(ctx context.Context, filePath string) (string, error) {
+func (t *managedTrasher) MoveToTrash(ctx context.Context, filePath string) (string, error) {
 	if ctx.Err() != nil {
 		return "", fmt.Errorf("context cancelled: %w", ctx.Err())
 	}
@@ -174,7 +153,10 @@ func (t *xdgTrasher) MoveToTrash(ctx context.Context, filePath string) (string, 
 //
 // Returns:
 //   - An error if restoration fails.
-func (t *xdgTrasher) RestoreFromTrash(ctx context.Context, trashPath, originalPath string) error {
+func (t *managedTrasher) RestoreFromTrash(
+	ctx context.Context,
+	trashPath, originalPath string,
+) error {
 	if ctx.Err() != nil {
 		return fmt.Errorf("context cancelled: %w", ctx.Err())
 	}
@@ -230,26 +212,35 @@ func (t *xdgTrasher) RestoreFromTrash(ctx context.Context, trashPath, originalPa
 // Returns:
 //   - ErrRestoreCollision if the destination was created in the meantime.
 //   - An error if the restore fails.
-func (t *xdgTrasher) restoreTo(ctx context.Context, trashPath, originalPath string) error {
-	linkErr := os.Link(trashPath, originalPath)
-
-	switch {
-	case linkErr == nil:
-		if err := os.Remove(trashPath); err != nil {
-			return fmt.Errorf("removing trashed copy after restore: %w", err)
-		}
-
-		return nil
-	case errors.Is(linkErr, fs.ErrExist):
-		return fmt.Errorf("%w: %s", ErrRestoreCollision, originalPath)
-	case ctx.Err() != nil:
-		return fmt.Errorf("context cancelled: %w", ctx.Err())
+func (t *managedTrasher) restoreTo(ctx context.Context, trashPath, originalPath string) error {
+	info, statErr := os.Lstat(trashPath)
+	if statErr != nil {
+		return fmt.Errorf("stating trashed entry: %w", statErr)
 	}
 
-	// The entry is a directory, or the two paths are on different devices.
-	// os.Link cannot link a directory, so it reports something other than
-	// ErrExist and the collision check is deferred to the exclusive create in
-	// copyDir, which maps it back to ErrRestoreCollision.
+	// Only a regular file takes the hard-link route. link() does not follow
+	// symlinks, so linking one would hard-link the link itself, and every other
+	// entry type is already handled explicitly by the copy path.
+	if info.Mode().IsRegular() {
+		linkErr := os.Link(trashPath, originalPath)
+
+		switch {
+		case linkErr == nil:
+			if err := os.Remove(trashPath); err != nil {
+				return fmt.Errorf("removing trashed copy after restore: %w", err)
+			}
+
+			return nil
+		case errors.Is(linkErr, fs.ErrExist):
+			return fmt.Errorf("%w: %s", ErrRestoreCollision, originalPath)
+		case ctx.Err() != nil:
+			return fmt.Errorf("context cancelled: %w", ctx.Err())
+		}
+	}
+
+	// Directories, symlinks, and cross-device moves go through the copy path,
+	// which recreates the entry with its original type and claims the
+	// destination exclusively.
 	if err := t.copyAndDelete(trashPath, originalPath); err != nil {
 		if errors.Is(err, ErrRestoreCollision) {
 			return fmt.Errorf("%w: %s", ErrRestoreCollision, originalPath)
@@ -268,25 +259,27 @@ func (t *xdgTrasher) restoreTo(ctx context.Context, trashPath, originalPath stri
 //
 // Returns:
 //   - True if the file is present in trash.
-func (t *xdgTrasher) IsInTrash(trashPath string) bool {
-	_, err := os.Stat(trashPath)
-	if err != nil {
+func (t *managedTrasher) IsInTrash(trashPath string) bool {
+	// Lstat rather than Stat. A symlink whose target has since been removed is
+	// still an entry in the trash, and Stat would report it as absent, which
+	// would make it neither restorable nor deletable.
+	if _, err := os.Lstat(trashPath); err != nil {
 		return false
 	}
 
-	// Verify it's within the trash files directory
 	rel, err := filepath.Rel(t.filesDir, trashPath)
 	if err != nil {
 		return false
 	}
 
-	// Only reject parent-traversal (".." or starting with "../")
-	// Hidden files (starting with ".") are allowed
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if rel == "." || rel == ".." ||
+		strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return false
 	}
 
-	return rel != "" && rel != "."
+	// A trash entry is always a direct child of the files directory, so a
+	// nested path is not one and must not be treated as restorable.
+	return filepath.Dir(rel) == "."
 }
 
 // ListTrash returns all entries in trash.
@@ -294,7 +287,7 @@ func (t *xdgTrasher) IsInTrash(trashPath string) bool {
 // Returns:
 //   - Trash entries.
 //   - An error if the trash directory cannot be read.
-func (t *xdgTrasher) ListTrash() ([]TrashEntry, error) {
+func (t *managedTrasher) ListTrash() ([]TrashEntry, error) {
 	entries, err := os.ReadDir(t.filesDir)
 	if err != nil {
 		return nil, fmt.Errorf("reading trash directory: %w", err)
@@ -332,7 +325,7 @@ func (t *xdgTrasher) ListTrash() ([]TrashEntry, error) {
 //
 // Returns:
 //   - An error if deletion fails.
-func (t *xdgTrasher) DeletePermanently(ctx context.Context, trashPath string) error {
+func (t *managedTrasher) DeletePermanently(ctx context.Context, trashPath string) error {
 	if ctx.Err() != nil {
 		return fmt.Errorf("context cancelled: %w", ctx.Err())
 	}
@@ -357,7 +350,7 @@ func (t *xdgTrasher) DeletePermanently(ctx context.Context, trashPath string) er
 //
 // Returns:
 //   - Absolute path to the trash files directory.
-func (t *xdgTrasher) GetTrashPath() string {
+func (t *managedTrasher) GetTrashPath() string {
 	return t.filesDir
 }
 
@@ -368,7 +361,7 @@ func (t *xdgTrasher) GetTrashPath() string {
 //
 // Returns:
 //   - Path to the corresponding .trashinfo file.
-func (t *xdgTrasher) getInfoPath(trashPath string) string {
+func (t *managedTrasher) getInfoPath(trashPath string) string {
 	baseName := filepath.Base(trashPath)
 
 	return filepath.Join(t.infoDir, baseName+".trashinfo")
@@ -383,7 +376,7 @@ func (t *xdgTrasher) getInfoPath(trashPath string) string {
 //   - Original filesystem path.
 //   - Deletion timestamp.
 //   - An error if the file cannot be read or parsed.
-func (t *xdgTrasher) readTrashInfo(infoPath string) (string, time.Time, error) {
+func (t *managedTrasher) readTrashInfo(infoPath string) (string, time.Time, error) {
 	content, err := os.ReadFile(infoPath)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("reading trashinfo file: %w", err)
@@ -400,7 +393,7 @@ func (t *xdgTrasher) readTrashInfo(infoPath string) (string, time.Time, error) {
 //
 // Returns:
 //   - An error if the move fails.
-func (t *xdgTrasher) moveFile(src, dst string) error {
+func (t *managedTrasher) moveFile(src, dst string) error {
 	err := os.Rename(src, dst)
 	if err == nil {
 		return nil
@@ -410,7 +403,7 @@ func (t *xdgTrasher) moveFile(src, dst string) error {
 	// read-only or permission-denied source as a device mismatch would copy the
 	// whole file, fail to unlink the original, and leave an unreferenced
 	// duplicate behind while reporting failure.
-	if !errors.Is(err, syscall.EXDEV) {
+	if !isCrossDevice(err) {
 		return fmt.Errorf("moving %s: %w", src, err)
 	}
 
@@ -425,7 +418,7 @@ func (t *xdgTrasher) moveFile(src, dst string) error {
 //
 // Returns:
 //   - An error if copy or delete fails.
-func (t *xdgTrasher) copyAndDelete(src, dst string) error {
+func (t *managedTrasher) copyAndDelete(src, dst string) error {
 	srcInfo, err := os.Lstat(src)
 	if err != nil {
 		return fmt.Errorf("stating source: %w", err)
@@ -482,7 +475,7 @@ func (t *xdgTrasher) copyAndDelete(src, dst string) error {
 //
 // Returns:
 //   - An error if the copy fails.
-func (t *xdgTrasher) copyFile(src, dst string, srcInfo os.FileInfo) error {
+func (t *managedTrasher) copyFile(src, dst string, srcInfo os.FileInfo) error {
 	// Opening a named pipe blocks until a writer appears, and nothing in this
 	// path can be cancelled, so anything but a regular file is refused up front.
 	if !srcInfo.Mode().IsRegular() {
@@ -550,11 +543,33 @@ func (t *xdgTrasher) copyFile(src, dst string, srcInfo os.FileInfo) error {
 //
 // Returns:
 //   - An error if the copy fails.
-func (t *xdgTrasher) copyDir(src, dst string) error {
+func (t *managedTrasher) copyDir(src, dst string) error {
+	created, err := t.copyDirContents(src, dst)
+	if err != nil && created {
+		// The destination was made by this call, so a partial tree must not be
+		// stranded. A destination this call did not create belongs to the
+		// caller and is left alone, which is what stops a collision from
+		// deleting the very directory it detected.
+		os.RemoveAll(dst)
+	}
+
+	return err
+}
+
+// copyDirContents copies the entries of src beneath dst.
+//
+// Parameters:
+//   - src: Source directory path.
+//   - dst: Destination directory path.
+//
+// Returns:
+//   - True if this call created the destination directory.
+//   - An error if the copy fails.
+func (t *managedTrasher) copyDirContents(src, dst string) (bool, error) {
 	// Use Lstat to avoid following symlinks when checking source
 	srcInfo, err := os.Lstat(src)
 	if err != nil {
-		return fmt.Errorf("stating source directory: %w", err)
+		return false, fmt.Errorf("stating source directory: %w", err)
 	}
 
 	// The destination root is claimed exclusively. MkdirAll would succeed when
@@ -562,15 +577,15 @@ func (t *xdgTrasher) copyDir(src, dst string) error {
 	// interleaves files instead of refusing the restore.
 	if err := os.Mkdir(dst, srcInfo.Mode()&fs.ModePerm); err != nil {
 		if errors.Is(err, fs.ErrExist) {
-			return fmt.Errorf("%w: %s", ErrRestoreCollision, dst)
+			return false, fmt.Errorf("%w: %s", ErrRestoreCollision, dst)
 		}
 
-		return fmt.Errorf("creating destination directory: %w", err)
+		return false, fmt.Errorf("creating destination directory: %w", err)
 	}
 
 	entries, err := os.ReadDir(src)
 	if err != nil {
-		return fmt.Errorf("reading source directory: %w", err)
+		return true, fmt.Errorf("reading source directory: %w", err)
 	}
 
 	for _, entry := range entries {
@@ -580,18 +595,18 @@ func (t *xdgTrasher) copyDir(src, dst string) error {
 		// Use Lstat to detect symlinks without following them
 		info, err := os.Lstat(srcPath)
 		if err != nil {
-			return fmt.Errorf("getting entry info: %w", err)
+			return true, fmt.Errorf("getting entry info: %w", err)
 		}
 
 		// Handle symlinks specially to preserve them
 		if info.Mode()&os.ModeSymlink != 0 {
 			linkTarget, err := os.Readlink(srcPath)
 			if err != nil {
-				return fmt.Errorf("reading symlink: %w", err)
+				return true, fmt.Errorf("reading symlink: %w", err)
 			}
 
 			if err := os.Symlink(linkTarget, dstPath); err != nil {
-				return fmt.Errorf("creating symlink: %w", err)
+				return true, fmt.Errorf("creating symlink: %w", err)
 			}
 
 			continue
@@ -599,14 +614,14 @@ func (t *xdgTrasher) copyDir(src, dst string) error {
 
 		if info.IsDir() {
 			if err := t.copyDir(srcPath, dstPath); err != nil {
-				return err
+				return true, err
 			}
 		} else {
 			if err := t.copyFile(srcPath, dstPath, info); err != nil {
-				return err
+				return true, err
 			}
 		}
 	}
 
-	return nil
+	return true, nil
 }
