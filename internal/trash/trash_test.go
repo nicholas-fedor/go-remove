@@ -22,6 +22,9 @@ import (
 // platformLinux is the GOOS value for Linux systems.
 const platformLinux = "linux"
 
+// platformWindows is the GOOS value for Windows systems.
+const platformWindows = "windows"
+
 // newTestTrasher returns a Trasher rooted in a per-test temporary directory.
 //
 // Tests must never share the user's real trash. t.Setenv is not an option here
@@ -484,6 +487,34 @@ func TestEncodeDecodeTrashPath(t *testing.T) {
 			name:     "path with control characters",
 			path:     "/home/user/file\x01\x02.txt",
 			expected: "/home/user/file%01%02.txt",
+		},
+		// The query and fragment delimiters must be escaped. A desktop splits
+		// the Path value on them, so leaving them bare makes a binary named
+		// tool?v2 restore to .../tool and a name containing # truncate there.
+		{
+			name:     "path with question mark",
+			path:     "/tmp/a?b",
+			expected: "/tmp/a%3Fb",
+		},
+		{
+			name:     "path with hash",
+			path:     "/tmp/a#b",
+			expected: "/tmp/a%23b",
+		},
+		{
+			name:     "path with brackets",
+			path:     "/tmp/a[b]",
+			expected: "/tmp/a%5Bb%5D",
+		},
+		{
+			name:     "path with semicolon",
+			path:     "/tmp/a;b",
+			expected: "/tmp/a%3Bb",
+		},
+		{
+			name:     "path with reserved characters left safe",
+			path:     "/tmp/a-b_c.d~e!f$g&h'i(j)k*l+m,n=o:p@q/r",
+			expected: "/tmp/a-b_c.d~e!f$g&h'i(j)k*l+m,n=o:p@q/r",
 		},
 	}
 

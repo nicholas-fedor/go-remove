@@ -10,6 +10,7 @@ package trash
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -33,6 +34,91 @@ func requireSymlinkSupport(t *testing.T) {
 
 	if err := os.Symlink(target, filepath.Join(dir, "link")); err != nil {
 		t.Skipf("symlinks unavailable on this platform: %v", err)
+	}
+}
+
+// TestManagedTrash_RoundTripsReservedCharacters verifies that a binary whose
+// name contains the query and fragment delimiters survives a full trash and
+// restore cycle.
+//
+// A desktop parses the .trashinfo Path by splitting on those characters, so an
+// unescaped name would restore to the wrong location: tool?v2 would come back
+// as .../tool, and a name containing # would truncate at the fragment.
+func TestManagedTrash_RoundTripsReservedCharacters(t *testing.T) {
+	t.Parallel()
+
+	trasher, ok := newTestTrasher(t).(*managedTrasher)
+	require.True(t, ok)
+
+	tests := []struct {
+		name string
+		// wantEncoded is the literal escaped form of the file name, written out
+		// rather than derived from the encoder so the assertion is not
+		// self-referential.
+		wantEncoded string
+		// skipOnWindows marks a name Windows cannot create. It reserves the
+		// wildcard character ?, so a file with one in its name cannot exist
+		// there to be trashed. A # and square brackets are ordinary characters
+		// on Windows, so those cases still run there.
+		skipOnWindows bool
+	}{
+		{name: "tool?v2", wantEncoded: "tool%3Fv2", skipOnWindows: true},
+		{name: "a#b", wantEncoded: "a%23b"},
+		{name: "weird[name]", wantEncoded: "weird%5Bname%5D"},
+		{name: "mixed ?#% name", wantEncoded: "mixed%20%3F%23%25%20name", skipOnWindows: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if tt.skipOnWindows && runtime.GOOS == platformWindows {
+				t.Skip("Windows reserves the wildcard character, so this name cannot be created")
+			}
+
+			ctx := t.Context()
+			binDir := t.TempDir()
+			binary := filepath.Join(binDir, tt.name)
+
+			require.NoError(t, os.WriteFile(binary, []byte("payload"), 0o600))
+
+			trashPath, err := trasher.MoveToTrash(ctx, binary)
+			require.NoError(t, err)
+
+			// Our own reader would accept an unescaped value, so assert the
+			// literal bytes on disk. A desktop parses the Path by splitting on
+			// the query and fragment delimiters, so a bare ? or # makes it
+			// restore to the wrong location.
+			infoContent, readFileErr := os.ReadFile(trasher.getInfoPath(trashPath))
+			require.NoError(t, readFileErr)
+			assert.Contains(t, string(infoContent), tt.wantEncoded,
+				"the stored Path must escape the delimiters a desktop splits on")
+
+			original, _, readErr := parseTrashInfo(string(infoContent))
+			require.NoError(t, readErr)
+			assert.Equal(t, binary, original,
+				"the recorded original path must survive the reserved characters")
+
+			// The listing, which is what a user reads, must agree.
+			entries, listErr := trasher.ListTrash()
+			require.NoError(t, listErr)
+
+			var listed bool
+
+			for _, entry := range entries {
+				if entry.TrashPath == trashPath {
+					listed = true
+
+					assert.Equal(t, binary, entry.OriginalPath)
+				}
+			}
+
+			assert.True(t, listed, "the entry must appear in the listing")
+
+			// And the restore must put the file back where it started.
+			require.NoError(t, trasher.RestoreFromTrash(ctx, trashPath, binary))
+			assert.FileExists(t, binary)
+		})
 	}
 }
 
