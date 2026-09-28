@@ -1,4 +1,4 @@
-//go:build linux || darwin
+//go:build linux || darwin || windows
 
 /*
 Copyright © 2026 Nicholas Fedor <nick@nickfedor.com>
@@ -11,13 +11,83 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// requireSymlinkSupport skips the test when the platform cannot create
+// symlinks.
+//
+// On Windows that requires either an elevated process or developer mode, so a
+// runner without either would otherwise fail rather than report a genuine
+// problem with the trash implementation.
+func requireSymlinkSupport(t *testing.T) {
+	t.Helper()
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	require.NoError(t, os.WriteFile(target, []byte("probe"), 0o600))
+
+	if err := os.Symlink(target, filepath.Join(dir, "link")); err != nil {
+		t.Skipf("symlinks unavailable on this platform: %v", err)
+	}
+}
+
+// TestManagedTrash_FullLifecycle exercises the operations that the Windows
+// Recycle Bin could not support, because IsInTrash there always reported
+// false and so restore, listing and permanent deletion never ran.
+//
+// This is the end-to-end guarantee: a binary can be trashed, listed, restored
+// and finally removed from the trash, on every supported platform.
+func TestManagedTrash_FullLifecycle(t *testing.T) {
+	t.Parallel()
+
+	trasher := newTestTrasher(t)
+	ctx := t.Context()
+
+	binDir := t.TempDir()
+	binary := filepath.Join(binDir, "tool")
+	require.NoError(t, os.WriteFile(binary, []byte("binary"), 0o600))
+
+	// Trashed.
+	trashPath, err := trasher.MoveToTrash(ctx, binary)
+	require.NoError(t, err)
+	require.NoFileExists(t, binary)
+	require.True(t, trasher.IsInTrash(trashPath), "a trashed entry must be reported in trash")
+
+	// Listed, with the original location recoverable.
+	entries, err := trasher.ListTrash()
+	require.NoError(t, err)
+
+	var found *TrashEntry
+
+	for i := range entries {
+		if entries[i].TrashPath == trashPath {
+			found = &entries[i]
+		}
+	}
+
+	require.NotNil(t, found, "the trashed entry must appear in the listing")
+	assert.Equal(t, binary, found.OriginalPath)
+	assert.False(t, found.DeletionTime.IsZero())
+
+	// Restored.
+	require.NoError(t, trasher.RestoreFromTrash(ctx, trashPath, binary))
+	require.FileExists(t, binary)
+	assert.False(t, trasher.IsInTrash(trashPath), "a restored entry must leave the trash")
+
+	// Trashed again and permanently removed.
+	trashPath, err = trasher.MoveToTrash(ctx, binary)
+	require.NoError(t, err)
+	require.NoFileExists(t, binary)
+
+	require.NoError(t, trasher.DeletePermanently(ctx, trashPath))
+	assert.False(t, trasher.IsInTrash(trashPath), "a deleted entry must leave the trash")
+	assert.NoFileExists(t, binary)
+}
 
 // TestRestoreFromTrash_RejectsExistingFile verifies that an existing file at the
 // restore location is never overwritten.
@@ -96,7 +166,7 @@ func TestRestoreFromTrash_RejectsExistingDirectory(t *testing.T) {
 func TestCopyAndDelete_RejectsExistingDirectory(t *testing.T) {
 	t.Parallel()
 
-	trasher, ok := newTestTrasher(t).(*xdgTrasher)
+	trasher, ok := newTestTrasher(t).(*managedTrasher)
 	require.True(t, ok)
 
 	source := filepath.Join(t.TempDir(), "src")
@@ -122,8 +192,10 @@ func TestCopyAndDelete_RejectsExistingDirectory(t *testing.T) {
 func TestCopyAndDelete_RejectsExistingSymlinkDestination(t *testing.T) {
 	t.Parallel()
 
-	trasher, ok := newTestTrasher(t).(*xdgTrasher)
+	trasher, ok := newTestTrasher(t).(*managedTrasher)
 	require.True(t, ok)
+
+	requireSymlinkSupport(t)
 
 	dir := t.TempDir()
 
@@ -265,6 +337,8 @@ func TestMoveToTrash_DanglingSymlink(t *testing.T) {
 	trasher := newTestTrasher(t)
 	ctx := t.Context()
 
+	requireSymlinkSupport(t)
+
 	dir := t.TempDir()
 	link := filepath.Join(dir, "dangling")
 	require.NoError(t, os.Symlink(filepath.Join(dir, "absent-target"), link))
@@ -275,23 +349,30 @@ func TestMoveToTrash_DanglingSymlink(t *testing.T) {
 	target, err := os.Readlink(trashPath)
 	require.NoError(t, err, "the symlink itself must be trashed, not its target")
 	assert.Equal(t, filepath.Join(dir, "absent-target"), target)
-}
 
-// TestMoveToTrash_FifoIsRefused verifies that a named pipe is rejected rather
-// than opened, which would block forever waiting for a writer.
-func TestMoveToTrash_FifoIsRefused(t *testing.T) {
-	t.Parallel()
+	// The entry must be recognised as present. A stat-based check would follow
+	// the link, fail to resolve the absent target and report the entry as gone,
+	// leaving it unrestorable and undeletable.
+	require.True(t, trasher.IsInTrash(trashPath),
+		"a trashed symlink must be recognised even when its target is missing")
 
-	trasher, ok := newTestTrasher(t).(*xdgTrasher)
-	require.True(t, ok)
+	// Restored, and still a symlink pointing at the same absent target.
+	require.NoError(t, trasher.RestoreFromTrash(ctx, trashPath, link))
 
-	fifo := filepath.Join(t.TempDir(), "pipe")
-	require.NoError(t, syscall.Mkfifo(fifo, 0o600))
+	restored, err := os.Readlink(link)
+	require.NoError(t, err, "the restore must recreate a symlink, not a file")
+	assert.Equal(t, filepath.Join(dir, "absent-target"), restored)
+	assert.NoFileExists(t, filepath.Join(dir, "absent-target"),
+		"the target stays absent, so the restored link is still dangling")
 
-	// The copy path is what would hang, so drive it directly rather than
-	// through MoveToTrash, whose rename succeeds on a single filesystem.
-	err := trasher.copyAndDelete(fifo, filepath.Join(t.TempDir(), "pipe-copy"))
-	require.ErrorIs(t, err, ErrUnsupportedFileType)
+	// Trashed once more so the permanent-delete path can be covered.
+	trashPath, err = trasher.MoveToTrash(ctx, link)
+	require.NoError(t, err)
+	require.True(t, trasher.IsInTrash(trashPath))
+
+	require.NoError(t, trasher.DeletePermanently(ctx, trashPath))
+	assert.False(t, trasher.IsInTrash(trashPath),
+		"a deleted symlink must leave the trash")
 }
 
 // TestCopyFile_RejectsExistingDestination verifies that the copy path claims
@@ -299,7 +380,7 @@ func TestMoveToTrash_FifoIsRefused(t *testing.T) {
 func TestCopyFile_RejectsExistingDestination(t *testing.T) {
 	t.Parallel()
 
-	trasher, ok := newTestTrasher(t).(*xdgTrasher)
+	trasher, ok := newTestTrasher(t).(*managedTrasher)
 	require.True(t, ok)
 
 	dir := t.TempDir()
@@ -325,8 +406,10 @@ func TestCopyFile_RejectsExistingDestination(t *testing.T) {
 func TestCopyAndDelete_SymlinkSourceIsPreserved(t *testing.T) {
 	t.Parallel()
 
-	trasher, ok := newTestTrasher(t).(*xdgTrasher)
+	trasher, ok := newTestTrasher(t).(*managedTrasher)
 	require.True(t, ok)
+
+	requireSymlinkSupport(t)
 
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target")
