@@ -147,8 +147,12 @@ func (r *RealFS) DetermineBinDir(useGoroot bool) (string, error) {
 //     inside it.
 func (r *RealFS) AdjustBinaryPath(dir, binary string) string {
 	name := filepath.Base(binary)
+
+	// A base of ".." or "." names no entry inside dir, so the directory itself is
+	// the answer. Return before the Windows suffix, which would otherwise turn
+	// the directory into "bin.exe".
 	if name == ".." || name == "." {
-		name = ""
+		return dir
 	}
 
 	path := filepath.Join(dir, name)

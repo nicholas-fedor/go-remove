@@ -303,6 +303,52 @@ func TestToggleVerboseLogging_PreservesStartupVerbose(t *testing.T) {
 	})
 }
 
+// TestRefreshChoices_ReportsReadFailure verifies a failed rescan is visible
+// rather than silently leaving a stale list on screen.
+func TestRefreshChoices_ReportsReadFailure(t *testing.T) {
+	t.Parallel()
+
+	readErr := errors.New("permission denied")
+	fsMock := mockFS.NewMockFS(t)
+	fsMock.On("ListBinaries", "/bin").Return(nil, readErr)
+
+	m := &model{
+		dir:     "/bin",
+		choices: []string{"existing"},
+		logger:  &tuiMockLogger{},
+		styles:  defaultStyleConfig(),
+		fs:      fsMock,
+	}
+
+	m.refreshChoices()
+
+	assert.Contains(t, m.status, "Could not read", "a failed rescan must be visible")
+	assert.Contains(t, m.status, "permission denied")
+	assert.Equal(t, []string{"existing"}, m.choices, "the existing list must be preserved")
+}
+
+// TestRefreshChoices_ReplacesListOnSuccess verifies a successful rescan
+// replaces the list, which is the success counterpart to the failure case.
+func TestRefreshChoices_ReplacesListOnSuccess(t *testing.T) {
+	t.Parallel()
+
+	fsMock := mockFS.NewMockFS(t)
+	fsMock.On("ListBinaries", "/bin").Return([]string{"tool"}, nil)
+
+	m := &model{
+		dir:     "/bin",
+		choices: []string{"stale"},
+		status:  "Could not read /bin: permission denied",
+		logger:  &tuiMockLogger{},
+		styles:  defaultStyleConfig(),
+		fs:      fsMock,
+	}
+
+	m.refreshChoices()
+
+	assert.Equal(t, []string{"tool"}, m.choices)
+}
+
 // levelRecordingLogger records the last level applied to it.
 type levelRecordingLogger struct {
 	logger.Logger

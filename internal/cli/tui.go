@@ -260,6 +260,10 @@ func (m *model) refreshChoices() {
 			Str("dir", m.dir).
 			Msg("Could not rescan the binary directory")
 
+		// Surface it rather than only logging, so a stale list is not passed off
+		// as current.
+		m.status = fmt.Sprintf("Could not read %s: %v", m.dir, err)
+
 		return
 	}
 
@@ -556,10 +560,13 @@ func (m *model) updateHistoryMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "b":
 		// Back to binary mode
 		m.mode = modeBinaries
+
+		// Clear the history-view status first, so a failed rescan below can set
+		// its own rather than being wiped here.
+		m.status = ""
 		m.refreshChoices()
 		m.sortChoices()
 		m.updateGrid()
-		m.status = ""
 
 	case "up", "k":
 		// Move cursor up in history list
@@ -708,6 +715,12 @@ func (m *model) updateBinaryMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				}
 
 				m.status = "Removed " + name
+
+				// Drop the deleted entry before rescanning, so a failed rescan
+				// cannot leave the view showing a binary that is already gone.
+				m.choices = slices.DeleteFunc(m.choices, func(choice string) bool {
+					return choice == name
+				})
 				m.refreshChoices()
 				m.sortChoices()
 

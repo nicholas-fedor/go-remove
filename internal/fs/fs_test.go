@@ -356,19 +356,39 @@ func TestRealFS_AdjustBinaryPath_StaysInDirectory(t *testing.T) {
 	realFS := &RealFS{}
 	dir := filepath.Join(string(filepath.Separator), "home", "user", "go", "bin")
 
+	// AdjustBinaryPath appends the executable suffix on Windows, so an ordinary
+	// name is expected to resolve with it. The parent cases resolve to the
+	// directory itself and carry no suffix.
+	exe := ""
+	if runtime.GOOS == windowsOS {
+		exe = windowsExt
+	}
+
 	tests := []struct {
 		name     string
 		binary   string
 		contains string
 	}{
-		{name: "plain name", binary: "tool", contains: filepath.Join(dir, "tool")},
+		{
+			name:     "plain name",
+			binary:   "tool",
+			contains: filepath.Join(dir, "tool"+exe),
+		},
 		{
 			name:     "parent traversal",
 			binary:   "../../bin/kubectl",
-			contains: filepath.Join(dir, "kubectl"),
+			contains: filepath.Join(dir, "kubectl"+exe),
 		},
-		{name: "absolute path", binary: "/etc/passwd", contains: filepath.Join(dir, "passwd")},
-		{name: "nested path", binary: "sub/tool", contains: filepath.Join(dir, "tool")},
+		{
+			name:     "absolute path",
+			binary:   "/etc/passwd",
+			contains: filepath.Join(dir, "passwd"+exe),
+		},
+		{
+			name:     "nested path",
+			binary:   "sub/tool",
+			contains: filepath.Join(dir, "tool"+exe),
+		},
 		// filepath.Base leaves ".." unchanged, so joining it would step out of
 		// the binary directory even though the separators were removed.
 		{name: "parent only", binary: "..", contains: dir},

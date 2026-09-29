@@ -405,9 +405,10 @@ var rootCmd = &cobra.Command{
 	Short: "A tool to remove Go binaries",
 	Args:  cobra.MaximumNArgs(1),
 	// Errors are reported once, by Execute. SilenceErrors stops cobra printing a
-	// second copy. SilenceUsage stays off so a mistyped flag or a bad argument
-	// count still shows the valid flags, and RunE switches it on so an error
-	// from the work itself, such as a flag combination, does not.
+	// second copy. SilenceUsage stays off so cobra prints the usage block itself
+	// for a mistyped flag or a bad argument count, and RunE switches it on so an
+	// error from the work itself, such as a flag combination, does not. A
+	// SetFlagErrorFunc calling Usage here would print that block a second time.
 	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// From here on, failures are about the operation rather than the
@@ -478,14 +479,6 @@ var rootCmd = &cobra.Command{
 
 // init registers flags for the root command.
 func init() {
-	// Guarantee the usage block for a flag parse error even if SilenceUsage is
-	// toggled later by RunE. Argument count errors are covered by leaving
-	// SilenceUsage off, since cobra validates positional arguments before RunE.
-	rootCmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
-		_ = cmd.Usage()
-
-		return err
-	})
 	rootCmd.Flags().BoolP("verbose", "v", false, "Enable verbose output")
 	rootCmd.Flags().BoolP("goroot", "", false, "Target GOROOT/bin instead of GOBIN or GOPATH/bin")
 	rootCmd.Flags().StringP("log-level", "l", "info", "Set log level (debug, info, warn, error)")

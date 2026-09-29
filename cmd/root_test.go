@@ -112,8 +112,10 @@ func TestFlagErrorsShowUsage(t *testing.T) {
 			// A previous RunE leaves SilenceUsage set on the shared command, and
 			// an earlier -h leaves the help flag true, which makes cobra short
 			// circuit before validating arguments. Restore what a fresh process
-			// would have.
+			// would have. The help flag is added lazily, so force it to exist.
 			rootCmd.SilenceUsage = false
+			rootCmd.InitDefaultHelpFlag()
+
 			if err := rootCmd.Flags().Set("help", "false"); err != nil {
 				t.Fatalf("resetting the help flag: %v", err)
 			}
@@ -137,8 +139,12 @@ func TestFlagErrorsShowUsage(t *testing.T) {
 
 			// SilenceErrors means cobra does not print the message here; the
 			// top-level Execute does, so only usage is expected on stderr.
-			if !strings.Contains(got, "Usage:") {
-				t.Errorf("output must show usage, got %q", got)
+			if gotCount := strings.Count(got, "Usage:"); gotCount != 1 {
+				t.Errorf(
+					"usage must be printed exactly once, got %d occurrences: %q",
+					gotCount,
+					got,
+				)
 			}
 
 			if !strings.Contains(got, "--goroot") {
