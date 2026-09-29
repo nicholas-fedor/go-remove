@@ -21,6 +21,11 @@ type HistoryEntry struct {
 	Version     string
 	VCSRevision string
 	InTrash     bool
+
+	// Pending marks a deletion that was interrupted before it completed, so the
+	// binary may be in trash with no record pointing at it. Such an entry is
+	// neither restorable nor evidence that a restore already happened.
+	Pending bool
 }
 
 // RestoreResult is the outcome of a restore or undo operation.
@@ -50,6 +55,7 @@ func entryFromRecord(record *storage.HistoryRecord) *HistoryEntry {
 		Version:     record.Version,
 		VCSRevision: record.VCSRevision,
 		InTrash:     record.TrashAvailable,
+		Pending:     deletionPending(record),
 	}
 }
 
