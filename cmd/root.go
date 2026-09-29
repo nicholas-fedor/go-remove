@@ -148,8 +148,11 @@ func getPlatformDataHomeCandidates() []string {
 			)
 		}
 	default: // Linux and other Unix-like systems
-		// Try $XDG_DATA_HOME first, then ~/.local/share
-		if dataHome := os.Getenv("XDG_DATA_HOME"); dataHome != "" {
+		// Try $XDG_DATA_HOME first, then ~/.local/share. The XDG specification
+		// requires the value to be absolute, and a relative one would build a
+		// data directory against the working directory. The trash layer
+		// validates this too.
+		if dataHome := os.Getenv("XDG_DATA_HOME"); filepath.IsAbs(dataHome) {
 			candidates = append(candidates, dataHome)
 		}
 

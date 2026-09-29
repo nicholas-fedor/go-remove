@@ -8,11 +8,14 @@ package cmd
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/nicholas-fedor/go-remove/internal/logger"
 )
 
 // TestRootCommand verifies the behavior of the root command.
@@ -66,6 +69,145 @@ func TestRootCommand(t *testing.T) {
 			}
 		})
 	}
+}
+
+// runCommand executes the root command with the given arguments after restoring
+// the state a previous run leaves behind, and returns the error plus anything
+// written to stderr.
+//
+// Parameters:
+//   - t: Test that owns the run.
+//   - args: Command line arguments.
+//
+// Returns:
+//   - What the command wrote to stderr.
+//   - The error reported by the command, if any.
+func runCommand(t *testing.T, args []string) (string, error) {
+	t.Helper()
+
+	oldStderr := os.Stderr
+
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	t.Cleanup(func() {
+		os.Stderr = oldStderr
+
+		w.Close()
+	})
+
+	rootCmd.SetOut(os.Stderr)
+	rootCmd.SetErr(os.Stderr)
+	rootCmd.InitDefaultHelpFlag()
+	rootCmd.SilenceUsage = false
+
+	// Undo and restore keep their values on the shared command between runs.
+	for _, name := range []string{"undo", "restore"} {
+		if err := rootCmd.Flags().Set(name, "false"); err != nil {
+			t.Fatalf("resetting --%s: %v", name, err)
+		}
+	}
+
+	if err := rootCmd.Flags().Set("help", "false"); err != nil {
+		t.Fatalf("resetting the help flag: %v", err)
+	}
+
+	rootCmd.SetArgs(args)
+
+	err := execute()
+
+	w.Close()
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+
+	return buf.String(), err
+}
+
+// TestRunE_FlagValidation verifies the argument combinations that are rejected
+// before any work is done.
+//
+// These branches had no coverage at all, which is how a duplicated usage block
+// and a blank binary name reaching the TUI went unnoticed. Each message is
+// self explanatory, so the flag list is deliberately not repeated for them.
+func TestRunE_FlagValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want error
+	}{
+		{
+			name: "undo and restore together",
+			args: []string{"--undo", "--restore"},
+			want: ErrUndoWithRestore,
+		},
+		{
+			name: "undo with a binary name",
+			args: []string{"--undo", "vhs"},
+			want: ErrUndoWithBinary,
+		},
+		{
+			name: "restore with a binary name",
+			args: []string{"--restore", "vhs"},
+			want: ErrRestoreWithBinary,
+		},
+		{
+			name: "empty binary name",
+			args: []string{""},
+			want: ErrEmptyBinaryName,
+		},
+		{
+			name: "whitespace binary name",
+			args: []string{"   "},
+			want: ErrEmptyBinaryName,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := runCommand(t, tt.args)
+
+			require.ErrorIs(t, err, tt.want)
+			assert.NotContains(t, out, "Usage:",
+				"a rejected combination explains itself, so the flag list is not repeated")
+		})
+	}
+}
+
+// TestRunE_RejectsUnknownLogLevel verifies an unrecognised level is reported.
+//
+// It used to fall back to info silently, so someone who asked for debug output
+// was told nothing and saw none. The check happens before the history database
+// is opened, so it has no side effects.
+func TestRunE_RejectsUnknownLogLevel(t *testing.T) {
+	_, err := runCommand(t, []string{"--log-level", "banana", "vhs"})
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, logger.ErrInvalidLogLevel)
+	assert.Contains(t, err.Error(), "debug, info, warn, error",
+		"the error must list the accepted values")
+}
+
+// TestGetWritableDataHome_RejectsRelativeXDG verifies a relative XDG_DATA_HOME
+// is ignored rather than used to build a data directory.
+//
+// Only a path can be trusted, and the XDG specification says a relative value
+// must be treated as unset.
+func TestGetWritableDataHome_RejectsRelativeXDG(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	// A relative value must not be used, and the platform default is selected.
+	t.Setenv("XDG_DATA_HOME", "relative/data")
+
+	dir, err := getWritableDataHome()
+	require.NoError(t, err)
+
+	require.NotEmpty(t, dir)
+	assert.True(t, filepath.IsAbs(dir), "the data home must be absolute, got %q", dir)
+	assert.NotContains(t, dir, filepath.Join("relative", "data"),
+		"a relative XDG_DATA_HOME must be ignored")
 }
 
 // TestExecute_ResetsSilenceUsageEachRun verifies the usage suppression set by
