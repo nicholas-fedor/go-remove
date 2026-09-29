@@ -20,10 +20,19 @@ func NewMockFS(t interface {
 	mock.TestingT
 	Cleanup(func())
 }) *MockFS {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+
 	mock := &MockFS{}
 	mock.Mock.Test(t)
 
-	t.Cleanup(func() { mock.AssertExpectations(t) })
+	t.Cleanup(func() {
+		if helper, ok := t.(interface{ Helper() }); ok {
+			helper.Helper()
+		}
+		mock.AssertExpectations(t)
+	})
 
 	return mock
 }
@@ -66,7 +75,7 @@ type MockFS_AdjustBinaryPath_Call struct {
 // AdjustBinaryPath is a helper method to define mock.On call
 //   - dir string
 //   - binary string
-func (_e *MockFS_Expecter) AdjustBinaryPath(dir interface{}, binary interface{}) *MockFS_AdjustBinaryPath_Call {
+func (_e *MockFS_Expecter) AdjustBinaryPath(dir any, binary any) *MockFS_AdjustBinaryPath_Call {
 	return &MockFS_AdjustBinaryPath_Call{Call: _e.mock.On("AdjustBinaryPath", dir, binary)}
 }
 
@@ -131,7 +140,7 @@ type MockFS_DetermineBinDir_Call struct {
 
 // DetermineBinDir is a helper method to define mock.On call
 //   - useGoroot bool
-func (_e *MockFS_Expecter) DetermineBinDir(useGoroot interface{}) *MockFS_DetermineBinDir_Call {
+func (_e *MockFS_Expecter) DetermineBinDir(useGoroot any) *MockFS_DetermineBinDir_Call {
 	return &MockFS_DetermineBinDir_Call{Call: _e.mock.On("DetermineBinDir", useGoroot)}
 }
 
@@ -159,7 +168,7 @@ func (_c *MockFS_DetermineBinDir_Call) RunAndReturn(run func(useGoroot bool) (st
 }
 
 // ListBinaries provides a mock function for the type MockFS
-func (_mock *MockFS) ListBinaries(dir string) []string {
+func (_mock *MockFS) ListBinaries(dir string) ([]string, error) {
 	ret := _mock.Called(dir)
 
 	if len(ret) == 0 {
@@ -167,6 +176,10 @@ func (_mock *MockFS) ListBinaries(dir string) []string {
 	}
 
 	var r0 []string
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(string) ([]string, error)); ok {
+		return returnFunc(dir)
+	}
 	if returnFunc, ok := ret.Get(0).(func(string) []string); ok {
 		r0 = returnFunc(dir)
 	} else {
@@ -174,7 +187,12 @@ func (_mock *MockFS) ListBinaries(dir string) []string {
 			r0 = ret.Get(0).([]string)
 		}
 	}
-	return r0
+	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
+		r1 = returnFunc(dir)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
 }
 
 // MockFS_ListBinaries_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListBinaries'
@@ -184,7 +202,7 @@ type MockFS_ListBinaries_Call struct {
 
 // ListBinaries is a helper method to define mock.On call
 //   - dir string
-func (_e *MockFS_Expecter) ListBinaries(dir interface{}) *MockFS_ListBinaries_Call {
+func (_e *MockFS_Expecter) ListBinaries(dir any) *MockFS_ListBinaries_Call {
 	return &MockFS_ListBinaries_Call{Call: _e.mock.On("ListBinaries", dir)}
 }
 
@@ -201,12 +219,12 @@ func (_c *MockFS_ListBinaries_Call) Run(run func(dir string)) *MockFS_ListBinari
 	return _c
 }
 
-func (_c *MockFS_ListBinaries_Call) Return(strings []string) *MockFS_ListBinaries_Call {
-	_c.Call.Return(strings)
+func (_c *MockFS_ListBinaries_Call) Return(strings []string, err error) *MockFS_ListBinaries_Call {
+	_c.Call.Return(strings, err)
 	return _c
 }
 
-func (_c *MockFS_ListBinaries_Call) RunAndReturn(run func(dir string) []string) *MockFS_ListBinaries_Call {
+func (_c *MockFS_ListBinaries_Call) RunAndReturn(run func(dir string) ([]string, error)) *MockFS_ListBinaries_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -238,7 +256,7 @@ type MockFS_RemoveBinary_Call struct {
 //   - name string
 //   - verbose bool
 //   - logger1 logger.Logger
-func (_e *MockFS_Expecter) RemoveBinary(binaryPath interface{}, name interface{}, verbose interface{}, logger1 interface{}) *MockFS_RemoveBinary_Call {
+func (_e *MockFS_Expecter) RemoveBinary(binaryPath any, name any, verbose any, logger1 any) *MockFS_RemoveBinary_Call {
 	return &MockFS_RemoveBinary_Call{Call: _e.mock.On("RemoveBinary", binaryPath, name, verbose, logger1)}
 }
 

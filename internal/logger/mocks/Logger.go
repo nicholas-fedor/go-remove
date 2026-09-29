@@ -21,10 +21,19 @@ func NewMockLogger(t interface {
 	mock.TestingT
 	Cleanup(func())
 }) *MockLogger {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+
 	mock := &MockLogger{}
 	mock.Mock.Test(t)
 
-	t.Cleanup(func() { mock.AssertExpectations(t) })
+	t.Cleanup(func() {
+		if helper, ok := t.(interface{ Helper() }); ok {
+			helper.Helper()
+		}
+		mock.AssertExpectations(t)
+	})
 
 	return mock
 }
@@ -193,7 +202,7 @@ type MockLogger_Level_Call struct {
 
 // Level is a helper method to define mock.On call
 //   - level zerolog.Level
-func (_e *MockLogger_Expecter) Level(level interface{}) *MockLogger_Level_Call {
+func (_e *MockLogger_Expecter) Level(level any) *MockLogger_Level_Call {
 	return &MockLogger_Level_Call{Call: _e.mock.On("Level", level)}
 }
 
@@ -233,7 +242,7 @@ type MockLogger_SetCaptureFunc_Call struct {
 
 // SetCaptureFunc is a helper method to define mock.On call
 //   - captureFunc logger.LogCaptureFunc
-func (_e *MockLogger_Expecter) SetCaptureFunc(captureFunc interface{}) *MockLogger_SetCaptureFunc_Call {
+func (_e *MockLogger_Expecter) SetCaptureFunc(captureFunc any) *MockLogger_SetCaptureFunc_Call {
 	return &MockLogger_SetCaptureFunc_Call{Call: _e.mock.On("SetCaptureFunc", captureFunc)}
 }
 

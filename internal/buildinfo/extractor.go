@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"runtime"
 )
@@ -147,8 +148,13 @@ func (e *DefaultExtractor) Extract(ctx context.Context, binaryPath string) (*Bui
 	// Read build info directly from binary
 	info, err := buildinfo.ReadFile(binaryPath)
 	if err != nil {
-		// Any error from ReadFile indicates this is not a valid Go binary
-		// or build info could not be extracted
+		// A file that could not be read is not the same as a file that is not
+		// a Go binary. Reporting both as ErrNotGoBinary dropped an unreadable
+		// entry from the listing without saying why.
+		if pathErr := (*fs.PathError)(nil); errors.As(err, &pathErr) {
+			return nil, fmt.Errorf("reading build info from %s: %w", binaryPath, err)
+		}
+
 		return nil, fmt.Errorf("%w: %w", ErrNotGoBinary, err)
 	}
 

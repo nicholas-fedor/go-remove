@@ -84,6 +84,10 @@ func (m *tuiMockRunner) RunProgram(
 
 // TestRunTUI verifies the RunTUI function's behavior under various conditions.
 func TestRunTUI(t *testing.T) {
+	// go test attaches no terminal, so without this every subtest would take
+	// the no-terminal branch and never reach the runner or the binary listing.
+	withTerminal(t)
+
 	type args struct {
 		dir    string
 		config Config
@@ -105,7 +109,7 @@ func TestRunTUI(t *testing.T) {
 				logger: &tuiMockLogger{},
 				fs: func() *mockFS.MockFS {
 					m := mockFS.NewMockFS(t)
-					m.On("ListBinaries", "/bin").Return([]string{"vhs"})
+					m.On("ListBinaries", "/bin").Return([]string{"vhs"}, nil)
 
 					return m
 				}(),
@@ -121,7 +125,7 @@ func TestRunTUI(t *testing.T) {
 				logger: &tuiMockLogger{},
 				fs: func() *mockFS.MockFS {
 					m := mockFS.NewMockFS(t)
-					m.On("ListBinaries", "/bin").Return([]string{})
+					m.On("ListBinaries", "/bin").Return([]string{}, nil)
 
 					return m
 				}(),
@@ -137,7 +141,7 @@ func TestRunTUI(t *testing.T) {
 				logger: &tuiMockLogger{},
 				fs: func() *mockFS.MockFS {
 					m := mockFS.NewMockFS(t)
-					m.On("ListBinaries", "/bin").Return([]string{"vhs"})
+					m.On("ListBinaries", "/bin").Return([]string{"vhs"}, nil)
 
 					return m
 				}(),
@@ -297,6 +301,52 @@ func TestToggleVerboseLogging_PreservesStartupVerbose(t *testing.T) {
 		assert.Equal(t, zerolog.WarnLevel, recorder.level,
 			"closing the panel returns to the configured level")
 	})
+}
+
+// TestRefreshChoices_ReportsReadFailure verifies a failed rescan is visible
+// rather than silently leaving a stale list on screen.
+func TestRefreshChoices_ReportsReadFailure(t *testing.T) {
+	t.Parallel()
+
+	readErr := errors.New("permission denied")
+	fsMock := mockFS.NewMockFS(t)
+	fsMock.On("ListBinaries", "/bin").Return(nil, readErr)
+
+	m := &model{
+		dir:     "/bin",
+		choices: []string{"existing"},
+		logger:  &tuiMockLogger{},
+		styles:  defaultStyleConfig(),
+		fs:      fsMock,
+	}
+
+	m.refreshChoices()
+
+	assert.Contains(t, m.status, "Could not read", "a failed rescan must be visible")
+	assert.Contains(t, m.status, "permission denied")
+	assert.Equal(t, []string{"existing"}, m.choices, "the existing list must be preserved")
+}
+
+// TestRefreshChoices_ReplacesListOnSuccess verifies a successful rescan
+// replaces the list, which is the success counterpart to the failure case.
+func TestRefreshChoices_ReplacesListOnSuccess(t *testing.T) {
+	t.Parallel()
+
+	fsMock := mockFS.NewMockFS(t)
+	fsMock.On("ListBinaries", "/bin").Return([]string{"tool"}, nil)
+
+	m := &model{
+		dir:     "/bin",
+		choices: []string{"stale"},
+		status:  "Could not read /bin: permission denied",
+		logger:  &tuiMockLogger{},
+		styles:  defaultStyleConfig(),
+		fs:      fsMock,
+	}
+
+	m.refreshChoices()
+
+	assert.Equal(t, []string{"tool"}, m.choices)
 }
 
 // levelRecordingLogger records the last level applied to it.
@@ -488,7 +538,7 @@ func Test_model_Update(t *testing.T) {
 					m := mockFS.NewMockFS(t)
 					m.On("AdjustBinaryPath", "/bin", "age").Return("/bin/age")
 					m.On("RemoveBinary", "/bin/age", "age", false, mock.Anything).Return(nil)
-					m.On("ListBinaries", "/bin").Return([]string{"vhs"})
+					m.On("ListBinaries", "/bin").Return([]string{"vhs"}, nil)
 
 					return m
 				}(),
@@ -811,7 +861,7 @@ func Test_model_Update_EnterWithHistoryManager(t *testing.T) {
 	fsMock.On("AdjustBinaryPath", "/bin", "test").Return("/bin/test")
 	historyMock.On("RecordDeletion", mock.Anything, "/bin/test").
 		Return(&history.HistoryEntry{ID: "123", BinaryName: "test"}, nil)
-	fsMock.On("ListBinaries", "/bin").Return([]string{"other"})
+	fsMock.On("ListBinaries", "/bin").Return([]string{"other"}, nil)
 
 	m := &model{
 		choices:        []string{"test"},
@@ -877,7 +927,7 @@ func Test_model_Update_BinaryRemovedFromChoicesAfterHistoryRecord(t *testing.T) 
 	fsMock.On("AdjustBinaryPath", "/bin", "binary1").Return("/bin/binary1")
 	historyMock.On("RecordDeletion", mock.Anything, "/bin/binary1").
 		Return(&history.HistoryEntry{ID: "entry1", BinaryName: "binary1"}, nil)
-	fsMock.On("ListBinaries", "/bin").Return([]string{"binary2", "binary3"})
+	fsMock.On("ListBinaries", "/bin").Return([]string{"binary2", "binary3"}, nil)
 
 	m := &model{
 		choices:        []string{"binary1", "binary2", "binary3"},
@@ -917,7 +967,7 @@ func Test_handleRestore_RefreshesBinaryList(t *testing.T) {
 
 	historyMock.On("Restore", mock.Anything, "entry1").
 		Return(&history.RestoreResult{BinaryName: "restored_binary", RestoredTo: "/bin/restored_binary"}, nil)
-	fsMock.On("ListBinaries", "/bin").Return([]string{"restored_binary", "existing"})
+	fsMock.On("ListBinaries", "/bin").Return([]string{"restored_binary", "existing"}, nil)
 
 	m := &model{
 		choices:        []string{"existing"},
@@ -955,7 +1005,7 @@ func Test_handleRestore_BinaryAppearsInChoices(t *testing.T) {
 
 	historyMock.On("Restore", mock.Anything, "entry1").
 		Return(&history.RestoreResult{BinaryName: "newbinary", RestoredTo: "/bin/newbinary"}, nil)
-	fsMock.On("ListBinaries", "/bin").Return([]string{"newbinary"})
+	fsMock.On("ListBinaries", "/bin").Return([]string{"newbinary"}, nil)
 
 	m := &model{
 		choices:        []string{},
@@ -993,7 +1043,7 @@ func Test_handleRestore_HistoryRefreshed(t *testing.T) {
 		Return(&history.RestoreResult{BinaryName: "testbin", RestoredTo: "/bin/testbin"}, nil)
 
 	fsMock := mockFS.NewMockFS(t)
-	fsMock.On("ListBinaries", "/bin").Return([]string{"testbin"})
+	fsMock.On("ListBinaries", "/bin").Return([]string{"testbin"}, nil)
 
 	m := &model{
 		choices:        []string{},
@@ -1120,7 +1170,7 @@ func Test_handleUndo_BinaryModeRefresh(t *testing.T) {
 
 	historyMock.On("UndoMostRecent", mock.Anything).
 		Return(&history.RestoreResult{BinaryName: "undone_binary", RestoredTo: "/bin/undone_binary"}, nil)
-	fsMock.On("ListBinaries", "/bin").Return([]string{"undone_binary", "existing"})
+	fsMock.On("ListBinaries", "/bin").Return([]string{"undone_binary", "existing"}, nil)
 
 	m := &model{
 		choices:        []string{"existing"},
@@ -1273,7 +1323,7 @@ func Test_model_Update_ModeSwitchToHistory(t *testing.T) {
 // Test_model_Update_ModeSwitchToBinaries verifies 'b' returns to binary mode.
 func Test_model_Update_ModeSwitchToBinaries(t *testing.T) {
 	fsMock := mockFS.NewMockFS(t)
-	fsMock.On("ListBinaries", "/bin").Return([]string{"test"})
+	fsMock.On("ListBinaries", "/bin").Return([]string{"test"}, nil)
 
 	m := &model{
 		choices:       []string{"test"},
@@ -1414,7 +1464,7 @@ func Test_updateHistoryMode_EnterRestore(t *testing.T) {
 
 	historyMock.On("Restore", mock.Anything, "entry1").
 		Return(&history.RestoreResult{BinaryName: "restoreme", RestoredTo: "/bin/restoreme"}, nil)
-	fsMock.On("ListBinaries", "/bin").Return([]string{"restoreme"})
+	fsMock.On("ListBinaries", "/bin").Return([]string{"restoreme"}, nil)
 
 	m := &model{
 		choices:        []string{},
@@ -1696,7 +1746,7 @@ func Test_model_statusUpdates(t *testing.T) {
 
 	fsMock.On("AdjustBinaryPath", "/bin", "test").Return("/bin/test")
 	fsMock.On("RemoveBinary", "/bin/test", "test", false, mock.Anything).Return(nil)
-	fsMock.On("ListBinaries", "/bin").Return([]string{})
+	fsMock.On("ListBinaries", "/bin").Return([]string{}, nil)
 
 	m := &model{
 		choices:       []string{"test"},
@@ -2273,7 +2323,7 @@ func Test_model_Update_UndoKey(t *testing.T) {
 
 	historyMock.On("UndoMostRecent", mock.Anything).
 		Return(&history.RestoreResult{BinaryName: "undone", RestoredTo: "/bin/undone"}, nil)
-	fsMock.On("ListBinaries", "/bin").Return([]string{"undone"})
+	fsMock.On("ListBinaries", "/bin").Return([]string{"undone"}, nil)
 
 	m := &model{
 		choices:        []string{},
@@ -2438,7 +2488,7 @@ func Test_handleRestore_HistoryModeRefresh(t *testing.T) {
 
 	historyMock.On("Restore", mock.Anything, "entry1").
 		Return(&history.RestoreResult{BinaryName: "restoreme", RestoredTo: "/bin/restoreme"}, nil)
-	fsMock.On("ListBinaries", "/bin").Return([]string{"restoreme"})
+	fsMock.On("ListBinaries", "/bin").Return([]string{"restoreme"}, nil)
 
 	m := &model{
 		choices:        []string{},

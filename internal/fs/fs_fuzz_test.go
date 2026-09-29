@@ -34,7 +34,7 @@ func FuzzListBinaries(f *testing.F) {
 	f.Fuzz(func(t *testing.T, name string) {
 		dir := t.TempDir()
 		fs := &RealFS{}
-		_ = fs.ListBinaries(dir)
+		_, _ = fs.ListBinaries(dir)
 
 		base := filepath.Base(name)
 		if base == "" || base == "." || base == ".." {
@@ -46,7 +46,11 @@ func FuzzListBinaries(f *testing.F) {
 			return
 		}
 
-		got := fs.ListBinaries(dir)
+		got, err := fs.ListBinaries(dir)
+		if err != nil {
+			return
+		}
+
 		for _, listed := range got {
 			if listed == base {
 				t.Errorf("non-Go file %q was listed as a binary", base)

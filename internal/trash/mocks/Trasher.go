@@ -22,10 +22,19 @@ func NewMockTrasher(t interface {
 	mock.TestingT
 	Cleanup(func())
 }) *MockTrasher {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+
 	mock := &MockTrasher{}
 	mock.Mock.Test(t)
 
-	t.Cleanup(func() { mock.AssertExpectations(t) })
+	t.Cleanup(func() {
+		if helper, ok := t.(interface{ Helper() }); ok {
+			helper.Helper()
+		}
+		mock.AssertExpectations(t)
+	})
 
 	return mock
 }
@@ -68,7 +77,7 @@ type MockTrasher_DeletePermanently_Call struct {
 // DeletePermanently is a helper method to define mock.On call
 //   - ctx context.Context
 //   - trashPath string
-func (_e *MockTrasher_Expecter) DeletePermanently(ctx interface{}, trashPath interface{}) *MockTrasher_DeletePermanently_Call {
+func (_e *MockTrasher_Expecter) DeletePermanently(ctx any, trashPath any) *MockTrasher_DeletePermanently_Call {
 	return &MockTrasher_DeletePermanently_Call{Call: _e.mock.On("DeletePermanently", ctx, trashPath)}
 }
 
@@ -168,7 +177,7 @@ type MockTrasher_IsInTrash_Call struct {
 
 // IsInTrash is a helper method to define mock.On call
 //   - trashPath string
-func (_e *MockTrasher_Expecter) IsInTrash(trashPath interface{}) *MockTrasher_IsInTrash_Call {
+func (_e *MockTrasher_Expecter) IsInTrash(trashPath any) *MockTrasher_IsInTrash_Call {
 	return &MockTrasher_IsInTrash_Call{Call: _e.mock.On("IsInTrash", trashPath)}
 }
 
@@ -284,7 +293,7 @@ type MockTrasher_MoveToTrash_Call struct {
 // MoveToTrash is a helper method to define mock.On call
 //   - ctx context.Context
 //   - filePath string
-func (_e *MockTrasher_Expecter) MoveToTrash(ctx interface{}, filePath interface{}) *MockTrasher_MoveToTrash_Call {
+func (_e *MockTrasher_Expecter) MoveToTrash(ctx any, filePath any) *MockTrasher_MoveToTrash_Call {
 	return &MockTrasher_MoveToTrash_Call{Call: _e.mock.On("MoveToTrash", ctx, filePath)}
 }
 
@@ -342,7 +351,7 @@ type MockTrasher_RestoreFromTrash_Call struct {
 //   - ctx context.Context
 //   - trashPath string
 //   - originalPath string
-func (_e *MockTrasher_Expecter) RestoreFromTrash(ctx interface{}, trashPath interface{}, originalPath interface{}) *MockTrasher_RestoreFromTrash_Call {
+func (_e *MockTrasher_Expecter) RestoreFromTrash(ctx any, trashPath any, originalPath any) *MockTrasher_RestoreFromTrash_Call {
 	return &MockTrasher_RestoreFromTrash_Call{Call: _e.mock.On("RestoreFromTrash", ctx, trashPath, originalPath)}
 }
 

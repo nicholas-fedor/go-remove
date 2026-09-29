@@ -22,10 +22,19 @@ func NewMockExtractor(t interface {
 	mock.TestingT
 	Cleanup(func())
 }) *MockExtractor {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+
 	mock := &MockExtractor{}
 	mock.Mock.Test(t)
 
-	t.Cleanup(func() { mock.AssertExpectations(t) })
+	t.Cleanup(func() {
+		if helper, ok := t.(interface{ Helper() }); ok {
+			helper.Helper()
+		}
+		mock.AssertExpectations(t)
+	})
 
 	return mock
 }
@@ -76,7 +85,7 @@ type MockExtractor_CalculateChecksum_Call struct {
 
 // CalculateChecksum is a helper method to define mock.On call
 //   - binaryPath string
-func (_e *MockExtractor_Expecter) CalculateChecksum(binaryPath interface{}) *MockExtractor_CalculateChecksum_Call {
+func (_e *MockExtractor_Expecter) CalculateChecksum(binaryPath any) *MockExtractor_CalculateChecksum_Call {
 	return &MockExtractor_CalculateChecksum_Call{Call: _e.mock.On("CalculateChecksum", binaryPath)}
 }
 
@@ -139,7 +148,7 @@ type MockExtractor_Extract_Call struct {
 // Extract is a helper method to define mock.On call
 //   - ctx context.Context
 //   - binaryPath string
-func (_e *MockExtractor_Expecter) Extract(ctx interface{}, binaryPath interface{}) *MockExtractor_Extract_Call {
+func (_e *MockExtractor_Expecter) Extract(ctx any, binaryPath any) *MockExtractor_Extract_Call {
 	return &MockExtractor_Extract_Call{Call: _e.mock.On("Extract", ctx, binaryPath)}
 }
 
@@ -195,7 +204,7 @@ type MockExtractor_IsGoBinary_Call struct {
 
 // IsGoBinary is a helper method to define mock.On call
 //   - binaryPath string
-func (_e *MockExtractor_Expecter) IsGoBinary(binaryPath interface{}) *MockExtractor_IsGoBinary_Call {
+func (_e *MockExtractor_Expecter) IsGoBinary(binaryPath any) *MockExtractor_IsGoBinary_Call {
 	return &MockExtractor_IsGoBinary_Call{Call: _e.mock.On("IsGoBinary", binaryPath)}
 }
 
