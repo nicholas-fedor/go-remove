@@ -12,9 +12,12 @@ import (
 	"reflect"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/rs/zerolog"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/nicholas-fedor/go-remove/internal/logger"
 	"github.com/nicholas-fedor/go-remove/internal/logger/mocks"
@@ -342,6 +345,55 @@ func TestRealFS_RemoveBinary_VerboseLogging(t *testing.T) {
 	log.AssertCalled(t, "Info")
 }
 
+// TestRealFS_AdjustBinaryPath_StaysInDirectory verifies a positional argument
+// cannot reach outside the binary directory.
+//
+// filepath.Join resolves "..", so joining the raw argument let
+// "go-remove ../../bin/kubectl" target a file outside the intended directory.
+func TestRealFS_AdjustBinaryPath_StaysInDirectory(t *testing.T) {
+	t.Parallel()
+
+	realFS := &RealFS{}
+	dir := filepath.Join(string(filepath.Separator), "home", "user", "go", "bin")
+
+	tests := []struct {
+		name     string
+		binary   string
+		contains string
+	}{
+		{name: "plain name", binary: "tool", contains: filepath.Join(dir, "tool")},
+		{
+			name:     "parent traversal",
+			binary:   "../../bin/kubectl",
+			contains: filepath.Join(dir, "kubectl"),
+		},
+		{name: "absolute path", binary: "/etc/passwd", contains: filepath.Join(dir, "passwd")},
+		{name: "nested path", binary: "sub/tool", contains: filepath.Join(dir, "tool")},
+		// filepath.Base leaves ".." unchanged, so joining it would step out of
+		// the binary directory even though the separators were removed.
+		{name: "parent only", binary: "..", contains: dir},
+		{name: "nested parent only", binary: "foo/..", contains: dir},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := realFS.AdjustBinaryPath(dir, tt.binary)
+
+			assert.Equal(t, tt.contains, got)
+
+			// Containment rather than a parent comparison, since the resolved
+			// path may legitimately be the directory itself.
+			rel, relErr := filepath.Rel(dir, got)
+			require.NoError(t, relErr)
+			assert.NotEqual(t, "..", rel)
+			assert.False(t, strings.HasPrefix(rel, ".."+string(filepath.Separator)),
+				"the resolved path must stay inside the binary directory, got %s", got)
+		})
+	}
+}
+
 // TestRealFS_ListBinaries verifies the ListBinaries method's directory listing.
 func TestRealFS_ListBinaries(t *testing.T) {
 	type args struct {
@@ -349,11 +401,12 @@ func TestRealFS_ListBinaries(t *testing.T) {
 	}
 
 	tests := []struct {
-		name  string
-		r     *RealFS
-		args  args
-		setup func() string // Returns temp dir
-		want  []string
+		name    string
+		r       *RealFS
+		args    args
+		setup   func() string // Returns temp dir
+		want    []string
+		wantErr bool
 	}{
 		{
 			name: "list binaries",
@@ -423,10 +476,22 @@ func TestRealFS_ListBinaries(t *testing.T) {
 			want: []string{},
 		},
 		{
-			name: "non-existent dir",
-			r:    &RealFS{},
-			args: args{dir: "/nonexistent"},
-			want: nil,
+			// Previously reported as an empty directory, which pointed the user
+			// at missing binaries instead of an unreadable path.
+			name:    "non-existent dir",
+			r:       &RealFS{},
+			args:    args{dir: "/nonexistent"},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name:  "missing subdirectory",
+			r:     &RealFS{},
+			args:  args{},
+			setup: func() string { return filepath.Join(t.TempDir(), "missing") },
+			want:  nil,
+
+			wantErr: true,
 		},
 	}
 	for _, tt := range tests {
@@ -436,7 +501,20 @@ func TestRealFS_ListBinaries(t *testing.T) {
 				tt.args.dir = tt.setup()
 			}
 
-			got := tt.r.ListBinaries(tt.args.dir)
+			got, err := tt.r.ListBinaries(tt.args.dir)
+			// A read failure is now reported rather than presented as an empty
+			// directory, so a case that cannot read must expect an error.
+			if err != nil {
+				if tt.wantErr {
+					return
+				}
+
+				t.Fatalf("ListBinaries() unexpected error: %v", err)
+			}
+
+			if tt.wantErr {
+				t.Fatalf("ListBinaries() = %v, want an error", got)
+			}
 
 			if tt.name == "list binaries" {
 				sortedGot := slices.Clone(got)

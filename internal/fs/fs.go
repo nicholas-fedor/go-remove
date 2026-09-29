@@ -75,7 +75,9 @@ type FS interface {
 	//
 	// Returns:
 	//   - Names of Go binaries in the directory.
-	ListBinaries(dir string) []string
+	//   - An error if the directory cannot be read, so a permission or I/O failure
+	//     is not reported as an empty directory.
+	ListBinaries(dir string) ([]string, error)
 }
 
 // RealFS implements the FS interface using real filesystem operations.
@@ -129,14 +131,27 @@ func (r *RealFS) DetermineBinDir(useGoroot bool) (string, error) {
 
 // AdjustBinaryPath constructs a full binary path, adding .exe on Windows if needed.
 //
+// The argument is a name from the scanned directory, not a path. Separators and
+// parent references are ignored rather than joined, because filepath.Join would
+// resolve them and let a positional argument reach outside the binary
+// directory, which is the one thing this tool is meant to prevent. A base of
+// ".." is normalised to ".", since filepath.Base keeps ".." unchanged and
+// joining it would step out of the directory.
+//
 // Parameters:
 //   - dir: Directory containing the binary.
 //   - binary: Binary file name.
 //
 // Returns:
-//   - Absolute path to the binary.
+//   - Path of the binary within dir, or dir itself when binary names no entry
+//     inside it.
 func (r *RealFS) AdjustBinaryPath(dir, binary string) string {
-	path := filepath.Join(dir, binary)
+	name := filepath.Base(binary)
+	if name == ".." || name == "." {
+		name = ""
+	}
+
+	path := filepath.Join(dir, name)
 	if binary != "" && runtime.GOOS == windowsOS && filepath.Ext(binary) != windowsExt {
 		path += windowsExt
 	}
@@ -183,11 +198,14 @@ func (r *RealFS) RemoveBinary(binaryPath, name string, verbose bool, log logger.
 //   - dir: Directory to scan.
 //
 // Returns:
-//   - Names of Go binaries in the directory, or nil if the directory cannot be read.
-func (r *RealFS) ListBinaries(dir string) []string {
+//   - Names of Go binaries in the directory.
+//   - An error if the directory cannot be read. A read failure used to be
+//     reported as an empty directory, which sent the user looking for missing
+//     binaries rather than a permission problem.
+func (r *RealFS) ListBinaries(dir string) ([]string, error) {
 	files, err := os.ReadDir(dir)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("reading directory %s: %w", dir, err)
 	}
 
 	var choices []string
@@ -198,7 +216,7 @@ func (r *RealFS) ListBinaries(dir string) []string {
 		}
 	}
 
-	return choices
+	return choices, nil
 }
 
 // isRemovableBinary reports whether a directory entry is a Go binary.

@@ -20,7 +20,9 @@ func (fuzzFS) AdjustBinaryPath(dir, binary string) string { return dir + "/" + b
 
 func (fuzzFS) RemoveBinary(string, string, bool, logger.Logger) error { return nil }
 
-func (fuzzFS) ListBinaries(string) []string { return []string{"test1", "test2", "test3"} }
+func (fuzzFS) ListBinaries(string) ([]string, error) {
+	return []string{"test1", "test2", "test3"}, nil
+}
 
 // Fuzz_model_Update fuzz tests the Update() method with random key sequences.
 // It verifies that Update() doesn't panic with any input and maintains state consistency.

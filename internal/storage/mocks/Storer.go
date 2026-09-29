@@ -22,10 +22,19 @@ func NewMockStorer(t interface {
 	mock.TestingT
 	Cleanup(func())
 }) *MockStorer {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+
 	mock := &MockStorer{}
 	mock.Mock.Test(t)
 
-	t.Cleanup(func() { mock.AssertExpectations(t) })
+	t.Cleanup(func() {
+		if helper, ok := t.(interface{ Helper() }); ok {
+			helper.Helper()
+		}
+		mock.AssertExpectations(t)
+	})
 
 	return mock
 }
@@ -111,7 +120,7 @@ type MockStorer_DeleteAllRecords_Call struct {
 
 // DeleteAllRecords is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockStorer_Expecter) DeleteAllRecords(ctx interface{}) *MockStorer_DeleteAllRecords_Call {
+func (_e *MockStorer_Expecter) DeleteAllRecords(ctx any) *MockStorer_DeleteAllRecords_Call {
 	return &MockStorer_DeleteAllRecords_Call{Call: _e.mock.On("DeleteAllRecords", ctx)}
 }
 
@@ -163,7 +172,7 @@ type MockStorer_DeleteRecord_Call struct {
 // DeleteRecord is a helper method to define mock.On call
 //   - ctx context.Context
 //   - key string
-func (_e *MockStorer_Expecter) DeleteRecord(ctx interface{}, key interface{}) *MockStorer_DeleteRecord_Call {
+func (_e *MockStorer_Expecter) DeleteRecord(ctx any, key any) *MockStorer_DeleteRecord_Call {
 	return &MockStorer_DeleteRecord_Call{Call: _e.mock.On("DeleteRecord", ctx, key)}
 }
 
@@ -228,7 +237,7 @@ type MockStorer_GetMostRecent_Call struct {
 
 // GetMostRecent is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockStorer_Expecter) GetMostRecent(ctx interface{}) *MockStorer_GetMostRecent_Call {
+func (_e *MockStorer_Expecter) GetMostRecent(ctx any) *MockStorer_GetMostRecent_Call {
 	return &MockStorer_GetMostRecent_Call{Call: _e.mock.On("GetMostRecent", ctx)}
 }
 
@@ -289,7 +298,7 @@ type MockStorer_GetRecord_Call struct {
 // GetRecord is a helper method to define mock.On call
 //   - ctx context.Context
 //   - key string
-func (_e *MockStorer_Expecter) GetRecord(ctx interface{}, key interface{}) *MockStorer_GetRecord_Call {
+func (_e *MockStorer_Expecter) GetRecord(ctx any, key any) *MockStorer_GetRecord_Call {
 	return &MockStorer_GetRecord_Call{Call: _e.mock.On("GetRecord", ctx, key)}
 }
 
@@ -357,7 +366,7 @@ type MockStorer_ListRecords_Call struct {
 // ListRecords is a helper method to define mock.On call
 //   - ctx context.Context
 //   - opts storage.ListOptions
-func (_e *MockStorer_Expecter) ListRecords(ctx interface{}, opts interface{}) *MockStorer_ListRecords_Call {
+func (_e *MockStorer_Expecter) ListRecords(ctx any, opts any) *MockStorer_ListRecords_Call {
 	return &MockStorer_ListRecords_Call{Call: _e.mock.On("ListRecords", ctx, opts)}
 }
 
@@ -413,8 +422,8 @@ type MockStorer_SaveRecord_Call struct {
 
 // SaveRecord is a helper method to define mock.On call
 //   - ctx context.Context
-//   - record storage.HistoryRecord
-func (_e *MockStorer_Expecter) SaveRecord(ctx interface{}, record interface{}) *MockStorer_SaveRecord_Call {
+//   - record *storage.HistoryRecord
+func (_e *MockStorer_Expecter) SaveRecord(ctx any, record any) *MockStorer_SaveRecord_Call {
 	return &MockStorer_SaveRecord_Call{Call: _e.mock.On("SaveRecord", ctx, record)}
 }
 
@@ -470,8 +479,8 @@ type MockStorer_UpdateRecord_Call struct {
 
 // UpdateRecord is a helper method to define mock.On call
 //   - ctx context.Context
-//   - record storage.HistoryRecord
-func (_e *MockStorer_Expecter) UpdateRecord(ctx interface{}, record interface{}) *MockStorer_UpdateRecord_Call {
+//   - record *storage.HistoryRecord
+func (_e *MockStorer_Expecter) UpdateRecord(ctx any, record any) *MockStorer_UpdateRecord_Call {
 	return &MockStorer_UpdateRecord_Call{Call: _e.mock.On("UpdateRecord", ctx, record)}
 }
 

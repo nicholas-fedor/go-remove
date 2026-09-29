@@ -14,7 +14,9 @@ import (
 	"testing"
 
 	"github.com/rs/zerolog"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -44,7 +46,9 @@ func newMockLoggerWithDefaults(t *testing.T) *mockLogger.MockLogger {
 	m.On("Info").Return(nopLog.Info()).Maybe()
 	m.On("Warn").Return(nopLog.Warn()).Maybe()
 	m.On("Error").Return(nopLog.Error()).Maybe()
-	m.On("Sync").Return(nil)
+	// Sync is only reached through Run, so it stays optional for tests that
+	// call RunTUI directly.
+	m.On("Sync").Return(nil).Maybe()
 	m.On("Level", mock.Anything).Return().Maybe()
 	m.On("SetCaptureFunc", mock.Anything).Return().Maybe()
 
@@ -169,6 +173,12 @@ type testCase struct {
 func runTestCase(t *testing.T, tt *testCase) {
 	t.Helper()
 
+	// A case with no binary name exercises the interactive path, which needs a
+	// terminal that go test does not provide.
+	if tt.config.Binary == "" {
+		withTerminal(t)
+	}
+
 	// Capture stdout for output verification.
 	getOutput := captureStdout(t)
 
@@ -203,6 +213,57 @@ func runTestCase(t *testing.T, tt *testCase) {
 	if mr, ok := runner.(*mockRunner.MockProgramRunner); ok {
 		mr.AssertExpectations(t)
 	}
+}
+
+// withTerminal makes stdinIsTerminal report a terminal for the duration of a
+// test.
+//
+// go test attaches no terminal to stdin, so the interactive path would take
+// the no-terminal branch and the TUI cases would never run. The assignment is
+// safe because these tests are sequential.
+func withTerminal(t *testing.T) {
+	t.Helper()
+
+	original := stdinIsTerminal
+	stdinIsTerminal = func() bool { return true }
+
+	t.Cleanup(func() { stdinIsTerminal = original })
+}
+
+// TestRunTUI_NoTerminal verifies the interactive path refuses to start without
+// a terminal, and says so in terms the user can act on.
+func TestRunTUI_NoTerminal(t *testing.T) {
+	original := stdinIsTerminal
+	stdinIsTerminal = func() bool { return false }
+
+	t.Cleanup(func() { stdinIsTerminal = original })
+
+	mockFSInstance := mockFS.NewMockFS(t)
+	mockFSInstance.On("ListBinaries", "/bin").Return([]string{"vhs"}, nil).Maybe()
+
+	err := RunTUI("/bin", Config{}, newMockLoggerWithDefaults(t), mockFSInstance,
+		mockRunner.NewMockProgramRunner(t), nil)
+
+	require.ErrorIs(t, err, ErrNotATerminal)
+	assert.Contains(t, err.Error(), "pass a binary name",
+		"the message should point at the non-interactive form")
+}
+
+// TestRunTUI_DirectoryReadFailure verifies a read failure is reported as itself
+// rather than as an empty directory.
+func TestRunTUI_DirectoryReadFailure(t *testing.T) {
+	withTerminal(t)
+
+	readErr := errors.New("permission denied")
+	mockFSInstance := mockFS.NewMockFS(t)
+	mockFSInstance.On("ListBinaries", "/bin").Return(nil, readErr)
+
+	err := RunTUI("/bin", Config{}, newMockLoggerWithDefaults(t), mockFSInstance,
+		mockRunner.NewMockProgramRunner(t), nil)
+
+	require.ErrorIs(t, err, readErr)
+	require.NotErrorIs(t, err, ErrNoBinariesFound,
+		"an unreadable directory must not be reported as empty")
 }
 
 // TestRun verifies the Run function's behavior under various conditions.
@@ -244,7 +305,7 @@ func TestRun(t *testing.T) {
 			setupFS: func(t *testing.T) *mockFS.MockFS { //nolint:thelper // Anonymous setup function, not a test helper
 				m := mockFS.NewMockFS(t)
 				m.On("DetermineBinDir", false).Return("/bin", nil)
-				m.On("ListBinaries", "/bin").Return([]string{"vhs"})
+				m.On("ListBinaries", "/bin").Return([]string{"vhs"}, nil)
 
 				return m
 			},
@@ -263,7 +324,7 @@ func TestRun(t *testing.T) {
 			setupFS: func(t *testing.T) *mockFS.MockFS { //nolint:thelper // Anonymous setup function, not a test helper
 				m := mockFS.NewMockFS(t)
 				m.On("DetermineBinDir", false).Return("/bin", nil)
-				m.On("ListBinaries", "/bin").Return([]string{})
+				m.On("ListBinaries", "/bin").Return([]string{}, nil)
 
 				return m
 			},

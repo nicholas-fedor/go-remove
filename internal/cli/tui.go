@@ -10,12 +10,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/rs/zerolog"
+	"golang.org/x/term"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -62,6 +64,19 @@ var ErrNoBinariesFound = errors.New("no binaries found in directory")
 
 // ErrHistoryNotInitialized indicates the history manager was not initialized.
 var ErrHistoryNotInitialized = errors.New("history manager not initialized")
+
+// ErrNotATerminal indicates the interactive interface was started without a terminal.
+var ErrNotATerminal = errors.New("no interactive terminal available")
+
+// stdinIsTerminal reports whether standard input is an interactive terminal.
+//
+// term.IsTerminal is used rather than an os.ModeCharDevice check because
+// /dev/null is itself a character device, so a redirected stdin would otherwise
+// be mistaken for a terminal and fail later inside the TUI instead of here. It
+// is a variable so the TUI can be exercised in tests, which have no terminal.
+var stdinIsTerminal = func() bool {
+	return term.IsTerminal(int(os.Stdin.Fd()))
+}
 
 // LogMsg is a Bubble Tea message that carries a log entry to be displayed in the TUI.
 type LogMsg struct {
@@ -161,8 +176,22 @@ func RunTUI(
 	runner ProgramRunner,
 	historyMgr history.Manager,
 ) error {
+	// A TUI needs a terminal. Under a pipe or in CI the failure otherwise
+	// surfaces as a nested bubbletea error with no hint that the non-interactive
+	// form is a plain argument.
+	if !stdinIsTerminal() {
+		return fmt.Errorf(
+			"%w: go-remove needs an interactive terminal, pass a binary name to remove it directly",
+			ErrNotATerminal,
+		)
+	}
+
 	// Fetch available binaries from the specified directory.
-	choices := filesystem.ListBinaries(dir)
+	choices, err := filesystem.ListBinaries(dir)
+	if err != nil {
+		return fmt.Errorf("listing binaries in %s: %w", dir, err)
+	}
+
 	if len(choices) == 0 && !config.RestoreMode {
 		return fmt.Errorf("%w: %s", ErrNoBinariesFound, dir)
 	}
@@ -216,6 +245,25 @@ func RunTUI(
 	}
 
 	return nil
+}
+
+// refreshChoices rescans the binary directory, keeping the current list when the
+// directory cannot be read so a transient read failure does not empty the view.
+//
+// Parameters:
+//   - None.
+func (m *model) refreshChoices() {
+	choices, err := m.fs.ListBinaries(m.dir)
+	if err != nil {
+		m.logger.Warn().
+			Err(err).
+			Str("dir", m.dir).
+			Msg("Could not rescan the binary directory")
+
+		return
+	}
+
+	m.choices = choices
 }
 
 // setupLogCapture configures the logger's capture callback to send messages to the TUI.
@@ -508,7 +556,7 @@ func (m *model) updateHistoryMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "b":
 		// Back to binary mode
 		m.mode = modeBinaries
-		m.choices = m.fs.ListBinaries(m.dir)
+		m.refreshChoices()
 		m.sortChoices()
 		m.updateGrid()
 		m.status = ""
@@ -660,7 +708,7 @@ func (m *model) updateBinaryMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				}
 
 				m.status = "Removed " + name
-				m.choices = m.fs.ListBinaries(m.dir)
+				m.refreshChoices()
 				m.sortChoices()
 
 				// Exit if no binaries remain.
@@ -721,7 +769,7 @@ func (m *model) handleRestore() (tea.Model, tea.Cmd) {
 	} else {
 		m.status = fmt.Sprintf("Restored %s to %s", result.BinaryName, result.RestoredTo)
 		// Refresh the binary list to include the restored binary
-		m.choices = m.fs.ListBinaries(m.dir)
+		m.refreshChoices()
 		m.sortChoices()
 		m.updateGrid()
 		// Refresh history to update trash status
@@ -765,7 +813,7 @@ func (m *model) handleUndo() (tea.Model, tea.Cmd) {
 		m.status = fmt.Sprintf("Restored %s to %s", result.BinaryName, result.RestoredTo)
 		// Refresh history and binaries if in binary mode
 		if m.mode == modeBinaries {
-			m.choices = m.fs.ListBinaries(m.dir)
+			m.refreshChoices()
 			m.sortChoices()
 			m.updateGrid()
 		}

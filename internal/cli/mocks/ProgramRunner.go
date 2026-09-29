@@ -20,10 +20,19 @@ func NewMockProgramRunner(t interface {
 	mock.TestingT
 	Cleanup(func())
 }) *MockProgramRunner {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+
 	mock := &MockProgramRunner{}
 	mock.Mock.Test(t)
 
-	t.Cleanup(func() { mock.AssertExpectations(t) })
+	t.Cleanup(func() {
+		if helper, ok := t.(interface{ Helper() }); ok {
+			helper.Helper()
+		}
+		mock.AssertExpectations(t)
+	})
 
 	return mock
 }
@@ -83,9 +92,9 @@ type MockProgramRunner_RunProgram_Call struct {
 // RunProgram is a helper method to define mock.On call
 //   - m tea.Model
 //   - opts ...tea.ProgramOption
-func (_e *MockProgramRunner_Expecter) RunProgram(m interface{}, opts ...interface{}) *MockProgramRunner_RunProgram_Call {
+func (_e *MockProgramRunner_Expecter) RunProgram(m any, opts ...any) *MockProgramRunner_RunProgram_Call {
 	return &MockProgramRunner_RunProgram_Call{Call: _e.mock.On("RunProgram",
-		append([]interface{}{m}, opts...)...)}
+		append([]any{m}, opts...)...)}
 }
 
 func (_c *MockProgramRunner_RunProgram_Call) Run(run func(m tea.Model, opts ...tea.ProgramOption)) *MockProgramRunner_RunProgram_Call {

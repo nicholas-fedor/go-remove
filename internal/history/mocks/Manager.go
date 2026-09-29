@@ -22,10 +22,19 @@ func NewMockManager(t interface {
 	mock.TestingT
 	Cleanup(func())
 }) *MockManager {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+
 	mock := &MockManager{}
 	mock.Mock.Test(t)
 
-	t.Cleanup(func() { mock.AssertExpectations(t) })
+	t.Cleanup(func() {
+		if helper, ok := t.(interface{ Helper() }); ok {
+			helper.Helper()
+		}
+		mock.AssertExpectations(t)
+	})
 
 	return mock
 }
@@ -69,7 +78,7 @@ type MockManager_ClearEntry_Call struct {
 //   - ctx context.Context
 //   - entryID string
 //   - deleteFromTrash bool
-func (_e *MockManager_Expecter) ClearEntry(ctx interface{}, entryID interface{}, deleteFromTrash interface{}) *MockManager_ClearEntry_Call {
+func (_e *MockManager_Expecter) ClearEntry(ctx any, entryID any, deleteFromTrash any) *MockManager_ClearEntry_Call {
 	return &MockManager_ClearEntry_Call{Call: _e.mock.On("ClearEntry", ctx, entryID, deleteFromTrash)}
 }
 
@@ -131,7 +140,7 @@ type MockManager_ClearHistory_Call struct {
 // ClearHistory is a helper method to define mock.On call
 //   - ctx context.Context
 //   - clearTrash bool
-func (_e *MockManager_Expecter) ClearHistory(ctx interface{}, clearTrash interface{}) *MockManager_ClearHistory_Call {
+func (_e *MockManager_Expecter) ClearHistory(ctx any, clearTrash any) *MockManager_ClearHistory_Call {
 	return &MockManager_ClearHistory_Call{Call: _e.mock.On("ClearHistory", ctx, clearTrash)}
 }
 
@@ -232,7 +241,7 @@ type MockManager_DeletePermanently_Call struct {
 // DeletePermanently is a helper method to define mock.On call
 //   - ctx context.Context
 //   - entryID string
-func (_e *MockManager_Expecter) DeletePermanently(ctx interface{}, entryID interface{}) *MockManager_DeletePermanently_Call {
+func (_e *MockManager_Expecter) DeletePermanently(ctx any, entryID any) *MockManager_DeletePermanently_Call {
 	return &MockManager_DeletePermanently_Call{Call: _e.mock.On("DeletePermanently", ctx, entryID)}
 }
 
@@ -300,7 +309,7 @@ type MockManager_GetHistory_Call struct {
 // GetHistory is a helper method to define mock.On call
 //   - ctx context.Context
 //   - limit int
-func (_e *MockManager_Expecter) GetHistory(ctx interface{}, limit interface{}) *MockManager_GetHistory_Call {
+func (_e *MockManager_Expecter) GetHistory(ctx any, limit any) *MockManager_GetHistory_Call {
 	return &MockManager_GetHistory_Call{Call: _e.mock.On("GetHistory", ctx, limit)}
 }
 
@@ -368,7 +377,7 @@ type MockManager_RecordDeletion_Call struct {
 // RecordDeletion is a helper method to define mock.On call
 //   - ctx context.Context
 //   - binaryPath string
-func (_e *MockManager_Expecter) RecordDeletion(ctx interface{}, binaryPath interface{}) *MockManager_RecordDeletion_Call {
+func (_e *MockManager_Expecter) RecordDeletion(ctx any, binaryPath any) *MockManager_RecordDeletion_Call {
 	return &MockManager_RecordDeletion_Call{Call: _e.mock.On("RecordDeletion", ctx, binaryPath)}
 }
 
@@ -436,7 +445,7 @@ type MockManager_Restore_Call struct {
 // Restore is a helper method to define mock.On call
 //   - ctx context.Context
 //   - entryID string
-func (_e *MockManager_Expecter) Restore(ctx interface{}, entryID interface{}) *MockManager_Restore_Call {
+func (_e *MockManager_Expecter) Restore(ctx any, entryID any) *MockManager_Restore_Call {
 	return &MockManager_Restore_Call{Call: _e.mock.On("Restore", ctx, entryID)}
 }
 
@@ -503,7 +512,7 @@ type MockManager_UndoMostRecent_Call struct {
 
 // UndoMostRecent is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockManager_Expecter) UndoMostRecent(ctx interface{}) *MockManager_UndoMostRecent_Call {
+func (_e *MockManager_Expecter) UndoMostRecent(ctx any) *MockManager_UndoMostRecent_Call {
 	return &MockManager_UndoMostRecent_Call{Call: _e.mock.On("UndoMostRecent", ctx)}
 }
 

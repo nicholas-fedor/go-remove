@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
@@ -39,6 +40,9 @@ var (
 
 	// ErrNoDeletionHistory indicates there is no deletion history to undo.
 	ErrNoDeletionHistory = errors.New("no deletion history found - nothing to undo")
+
+	// ErrEmptyBinaryName indicates the binary name argument was blank.
+	ErrEmptyBinaryName = errors.New("binary name cannot be empty")
 
 	// ErrBinaryNotInTrash indicates the binary is no longer available in trash.
 	ErrBinaryNotInTrash = errors.New("binary is no longer in trash - cannot restore")
@@ -400,12 +404,40 @@ var rootCmd = &cobra.Command{
 	Use:   "go-remove [binary]",
 	Short: "A tool to remove Go binaries",
 	Args:  cobra.MaximumNArgs(1),
+	// Errors are reported once, by Execute. SilenceErrors stops cobra printing a
+	// second copy. SilenceUsage stays off so a mistyped flag or a bad argument
+	// count still shows the valid flags, and RunE switches it on so an error
+	// from the work itself, such as a flag combination, does not.
+	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		verbose, _ := cmd.Flags().GetBool("verbose")
-		goroot, _ := cmd.Flags().GetBool("goroot")
-		logLevel, _ := cmd.Flags().GetString("log-level")
-		undo, _ := cmd.Flags().GetBool("undo")
-		restore, _ := cmd.Flags().GetBool("restore")
+		// From here on, failures are about the operation rather than the
+		// invocation, so the usage block is no longer useful.
+		cmd.SilenceUsage = true
+
+		verbose, err := cmd.Flags().GetBool("verbose")
+		if err != nil {
+			return fmt.Errorf("reading --verbose: %w", err)
+		}
+
+		goroot, err := cmd.Flags().GetBool("goroot")
+		if err != nil {
+			return fmt.Errorf("reading --goroot: %w", err)
+		}
+
+		logLevel, err := cmd.Flags().GetString("log-level")
+		if err != nil {
+			return fmt.Errorf("reading --log-level: %w", err)
+		}
+
+		undo, err := cmd.Flags().GetBool("undo")
+		if err != nil {
+			return fmt.Errorf("reading --undo: %w", err)
+		}
+
+		restore, err := cmd.Flags().GetBool("restore")
+		if err != nil {
+			return fmt.Errorf("reading --restore: %w", err)
+		}
 
 		if undo && restore {
 			return ErrUndoWithRestore
@@ -429,7 +461,14 @@ var rootCmd = &cobra.Command{
 			LogLevel:    logLevel,
 			RestoreMode: restore,
 		}
+
 		if len(args) > 0 {
+			// An empty argument used to pass the empty name through, which
+			// silently opened the TUI instead of reporting the problem.
+			if strings.TrimSpace(args[0]) == "" {
+				return ErrEmptyBinaryName
+			}
+
 			config.Binary = args[0]
 		}
 
@@ -439,6 +478,14 @@ var rootCmd = &cobra.Command{
 
 // init registers flags for the root command.
 func init() {
+	// Guarantee the usage block for a flag parse error even if SilenceUsage is
+	// toggled later by RunE. Argument count errors are covered by leaving
+	// SilenceUsage off, since cobra validates positional arguments before RunE.
+	rootCmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
+		_ = cmd.Usage()
+
+		return err
+	})
 	rootCmd.Flags().BoolP("verbose", "v", false, "Enable verbose output")
 	rootCmd.Flags().BoolP("goroot", "", false, "Target GOROOT/bin instead of GOBIN or GOPATH/bin")
 	rootCmd.Flags().StringP("log-level", "l", "info", "Set log level (debug, info, warn, error)")

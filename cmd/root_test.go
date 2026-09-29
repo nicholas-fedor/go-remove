@@ -65,6 +65,89 @@ func TestRootCommand(t *testing.T) {
 	}
 }
 
+// TestFlagErrorsShowUsage verifies that a flag parse error still prints the
+// valid flags.
+//
+// SilenceUsage suppresses the usage block for every error, so without
+// SetFlagErrorFunc a mistyped flag was reported with no hint of what is valid.
+func TestFlagErrorsShowUsage(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantErr    bool
+		wantUsage  bool
+		wantDetail string
+	}{
+		{
+			name:       "unknown flag",
+			args:       []string{"--bogus"},
+			wantErr:    true,
+			wantUsage:  true,
+			wantDetail: "unknown flag",
+		},
+		{
+			name:       "too many arguments",
+			args:       []string{"one", "two"},
+			wantErr:    true,
+			wantUsage:  true,
+			wantDetail: "accepts at most 1 arg",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			oldStderr := os.Stderr
+
+			r, w, _ := os.Pipe()
+			os.Stderr = w
+
+			defer func() {
+				os.Stderr = oldStderr
+
+				w.Close()
+			}()
+
+			rootCmd.SetOut(os.Stderr)
+			rootCmd.SetErr(os.Stderr)
+			// A previous RunE leaves SilenceUsage set on the shared command, and
+			// an earlier -h leaves the help flag true, which makes cobra short
+			// circuit before validating arguments. Restore what a fresh process
+			// would have.
+			rootCmd.SilenceUsage = false
+			if err := rootCmd.Flags().Set("help", "false"); err != nil {
+				t.Fatalf("resetting the help flag: %v", err)
+			}
+
+			rootCmd.SetArgs(tt.args)
+			err := rootCmd.Execute()
+
+			w.Close()
+
+			var buf bytes.Buffer
+			buf.ReadFrom(r)
+			got := buf.String()
+
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Execute() error = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			if tt.wantErr && !strings.Contains(err.Error(), tt.wantDetail) {
+				t.Errorf("error must explain the failure, got %q", err.Error())
+			}
+
+			// SilenceErrors means cobra does not print the message here; the
+			// top-level Execute does, so only usage is expected on stderr.
+			if !strings.Contains(got, "Usage:") {
+				t.Errorf("output must show usage, got %q", got)
+			}
+
+			if !strings.Contains(got, "--goroot") {
+				t.Errorf("usage must list the valid flags, got %q", got)
+			}
+		})
+	}
+}
+
 // TestGetStoragePath verifies the storage path calculation.
 func TestGetStoragePath(t *testing.T) {
 	// This test verifies that getStoragePath returns a non-empty string and no error.
