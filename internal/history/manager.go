@@ -297,16 +297,27 @@ func (m *HistoryManager) RecordDeletion(
 	// Move binary to trash
 	trashPath, moveErr := m.trasher.MoveToTrash(ctx, binaryPath)
 	if moveErr != nil {
+		moveFailure := fmt.Errorf("moving to trash: %w", moveErr)
+
 		// Nothing was moved, so the record describes a deletion that did not
 		// happen. Drop it rather than leave history claiming otherwise.
-		if delErr := m.storer.DeleteRecord(ctx, record.RecordKey()); delErr != nil {
-			m.logger.Warn().
-				Err(delErr).
-				Str(logFieldPath, binaryPath).
-				Msg("Failed to remove history record for a deletion that did not occur")
+		delErr := m.storer.DeleteRecord(ctx, record.RecordKey())
+		if delErr == nil {
+			return nil, moveFailure
 		}
 
-		return nil, fmt.Errorf("moving to trash: %w", moveErr)
+		m.logger.Warn().
+			Err(delErr).
+			Str(logFieldPath, binaryPath).
+			Msg("Failed to remove history record for a deletion that did not occur")
+
+		// A leftover record is indistinguishable from an interrupted deletion,
+		// so the cleanup failure is reported. Otherwise the caller is told only
+		// about the move and later finds a pending entry it cannot explain.
+		return nil, errors.Join(
+			moveFailure,
+			fmt.Errorf("removing the history record for a deletion that did not occur: %w", delErr),
+		)
 	}
 
 	// Record where the binary went, so the entry becomes restorable.
@@ -592,9 +603,11 @@ func (m *HistoryManager) restoreRecord(
 	if record.Checksum != "" {
 		actual, err := m.extractor.CalculateChecksum(record.TrashPath)
 		if err != nil {
+			// An unreadable copy is not a mismatch, so the underlying cause is
+			// preserved rather than reported as corrupt content. The restore is
+			// still refused, because the copy cannot be verified.
 			return nil, fmt.Errorf(
-				"%w: cannot read the trashed copy at %s: %w",
-				ErrChecksumMismatch,
+				"reading the trashed copy at %s to verify its checksum: %w",
 				record.TrashPath,
 				err,
 			)

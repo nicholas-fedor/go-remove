@@ -319,6 +319,40 @@ func TestHistoryManager_RecordDeletion(t *testing.T) {
 		require.ErrorIs(t, err, ErrRecoveryRequired)
 		assert.Nil(t, entry)
 	})
+	t.Run("move failure reports a failed cleanup", func(t *testing.T) {
+		t.Parallel()
+
+		manager, mockTrasher, mockStorer, mockExtractor := setupManagerTest(t)
+
+		mockExtractor.EXPECT().
+			Extract(ctx, testBinaryPath).
+			Return(buildData, nil)
+
+		mockExtractor.EXPECT().
+			CalculateChecksum(testBinaryPath).
+			Return(testChecksum, nil)
+
+		mockStorer.EXPECT().
+			SaveRecord(ctx, mock.AnythingOfType("*storage.HistoryRecord")).
+			Return(nil)
+
+		mockTrasher.EXPECT().
+			MoveToTrash(ctx, testBinaryPath).
+			Return("", trash.ErrTrashFull)
+
+		// The leftover record would be indistinguishable from an interrupted
+		// deletion, so the cleanup failure has to reach the caller.
+		mockStorer.EXPECT().
+			DeleteRecord(ctx, mock.AnythingOfType("string")).
+			Return(storage.ErrDatabaseClosed)
+
+		entry, err := manager.RecordDeletion(ctx, testBinaryPath)
+
+		require.ErrorIs(t, err, trash.ErrTrashFull)
+		require.ErrorIs(t, err, storage.ErrDatabaseClosed,
+			"a failed cleanup must be reported alongside the move failure")
+		assert.Nil(t, entry)
+	})
 }
 
 func TestHistoryManager_UndoMostRecent(t *testing.T) {
@@ -766,6 +800,51 @@ func TestHistoryManager_PendingAndChecksum(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, result)
 		assert.Equal(t, testBinaryPath, result.RestoredTo)
+	})
+
+	t.Run("unreadable trash copy is not reported as a mismatch", func(t *testing.T) {
+		t.Parallel()
+
+		manager, mockTrasher, mockStorer, mockExtractor := setupManagerTest(t)
+
+		record := storage.HistoryRecord{
+			Timestamp:      now.Unix(),
+			BinaryName:     testBinaryName,
+			OriginalPath:   testBinaryPath,
+			TrashPath:      testTrashPath,
+			Checksum:       testChecksum,
+			TrashAvailable: true,
+		}
+
+		mockStorer.EXPECT().
+			GetRecord(ctx, record.RecordKey()).
+			Return(record, nil)
+
+		mockTrasher.EXPECT().
+			IsInTrash(testTrashPath).
+			Return(true)
+
+		readErr := errors.New("permission denied")
+		mockExtractor.EXPECT().
+			CalculateChecksum(testTrashPath).
+			Return("", readErr)
+
+		result, err := manager.Restore(ctx, record.RecordKey())
+
+		// The underlying cause must survive, and the failure must not be
+		// mislabelled as corrupt content.
+		require.ErrorIs(t, err, readErr)
+		require.NotErrorIs(t, err, ErrChecksumMismatch)
+
+		// The copy cannot be verified, so it stays in trash.
+		mockTrasher.AssertNotCalled(
+			t,
+			"RestoreFromTrash",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		)
+		assert.Nil(t, result)
 	})
 }
 
