@@ -244,16 +244,25 @@ func initHistoryManager(log logger.Logger) (history.Manager, error) {
 //
 // Returns:
 //   - An error if the undo operation fails.
-func runUndo(verbose bool) error {
+func runUndo(verbose bool, logLevel string) error {
 	// Initialize logger
 	log, err := logger.NewLogger()
 	if err != nil {
 		return fmt.Errorf("failed to initialize logger: %w", err)
 	}
 
-	if verbose {
-		log.Level(zerolog.DebugLevel)
+	// Undo honours the same level flags as removal, so --log-level is not
+	// silently ignored on this path.
+	level, err := logger.ParseLogLevel(logLevel)
+	if err != nil {
+		return fmt.Errorf("parsing log level: %w", err)
 	}
+
+	if verbose {
+		level = zerolog.DebugLevel
+	}
+
+	log.Level(level)
 
 	// Initialize history manager
 	manager, err := initHistoryManager(log)
@@ -328,9 +337,20 @@ func runRemove(config cli.Config) error {
 		return fmt.Errorf("initializing logger: %w", err)
 	}
 
-	if config.Verbose {
-		log.Level(logger.ParseLevel(config.LogLevel))
+	// The level applies on its own, so --log-level does something without
+	// also requiring --verbose. An unrecognised name is rejected rather than
+	// silently becoming info, which left a user believing they had enabled
+	// debug output.
+	level, err := logger.ParseLogLevel(config.LogLevel)
+	if err != nil {
+		return fmt.Errorf("parsing log level: %w", err)
 	}
+
+	if config.Verbose {
+		level = zerolog.DebugLevel
+	}
+
+	log.Level(level)
 
 	manager, err := initHistoryManager(log)
 	if err != nil {
@@ -400,7 +420,7 @@ var rootCmd = &cobra.Command{
 		}
 
 		if undo {
-			return runUndo(verbose)
+			return runUndo(verbose, logLevel)
 		}
 
 		config := cli.Config{

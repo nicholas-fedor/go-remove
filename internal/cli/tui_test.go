@@ -17,6 +17,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -170,6 +171,143 @@ func TestRunTUI(t *testing.T) {
 }
 
 // Test_model_Init verifies the Init method's command output.
+// TestLogPolling_AlwaysRuns verifies that log polling starts regardless of
+// --verbose, and that a captured line is retained while the panel is hidden.
+//
+// Polling used to start only in verbose mode while the capture callback was
+// always installed, which filled a channel nobody drained. Every message was
+// therefore discarded and the panel opened empty.
+func TestLogPolling_AlwaysRuns(t *testing.T) {
+	t.Parallel()
+
+	for _, verbose := range []bool{false, true} {
+		t.Run(fmt.Sprintf("verbose=%v", verbose), func(t *testing.T) {
+			t.Parallel()
+
+			m := &model{
+				logs:     make([]string, 0, maxLogLines),
+				logChan:  make(chan LogMsg, maxLogLines),
+				logger:   &tuiMockLogger{},
+				showLogs: verbose,
+				styles:   defaultStyleConfig(),
+				config:   Config{Verbose: verbose, LogLevel: "info"},
+			}
+
+			require.NotNil(t, m.Init(), "log polling must start so entries are retained")
+
+			next, cmd := m.Update(LogMsg{Level: "ERR", Message: "binary is stranded in trash"})
+
+			require.NotNil(t, cmd, "the poll loop must be re-armed after a message")
+
+			updated, ok := next.(*model)
+			require.True(t, ok, "Update must return the model")
+
+			assert.Equal(t, verbose, updated.showLogs, "the panel visibility is unchanged")
+
+			// The point of the fix: the warning survives even when hidden.
+			require.NotEmpty(
+				t,
+				updated.logs,
+				"the message must be retained while the panel is hidden",
+			)
+			assert.Contains(t, updated.logs[len(updated.logs)-1], "stranded")
+		})
+	}
+}
+
+// TestToggleVerboseLogging_StartsNoExtraPollChain verifies that toggling the
+// panel does not spawn a poll chain.
+//
+// The previous implementation returned a fresh poll command on every press, so
+// each press left another permanent loop running.
+func TestToggleVerboseLogging_StartsNoExtraPollChain(t *testing.T) {
+	t.Parallel()
+
+	m := &model{
+		logs:    make([]string, 0, maxLogLines),
+		logChan: make(chan LogMsg, maxLogLines),
+		logger:  &tuiMockLogger{},
+		styles:  defaultStyleConfig(),
+		config:  Config{LogLevel: "warn"},
+		choices: []string{"tool"},
+	}
+	m.updateGrid()
+
+	m.toggleVerboseLogging()
+	assert.True(t, m.showLogs)
+
+	m.toggleVerboseLogging()
+	assert.False(t, m.showLogs)
+}
+
+// TestToggleVerboseLogging_PreservesStartupVerbose verifies that hiding the log
+// panel does not reduce verbosity the user asked for at startup.
+//
+// The toggle used to return to the configured level, so starting with --verbose
+// and then pressing L silently dropped debug output.
+func TestToggleVerboseLogging_PreservesStartupVerbose(t *testing.T) {
+	t.Parallel()
+
+	t.Run("keeps debug when started verbose", func(t *testing.T) {
+		t.Parallel()
+
+		recorder := &levelRecordingLogger{}
+		m := &model{
+			logs:    make([]string, 0, maxLogLines),
+			logChan: make(chan LogMsg, maxLogLines),
+			logger:  recorder,
+			styles:  defaultStyleConfig(),
+			// RunTUI opens the panel when --verbose is given.
+			showLogs: true,
+			config:   Config{Verbose: true, LogLevel: "info"},
+			choices:  []string{"tool"},
+		}
+		m.updateGrid()
+
+		m.toggleVerboseLogging()
+		require.False(t, m.showLogs, "the panel is hidden")
+		assert.Equal(t, zerolog.DebugLevel, recorder.level,
+			"a startup --verbose request is independent of the panel")
+
+		m.toggleVerboseLogging()
+		require.True(t, m.showLogs)
+		assert.Equal(t, zerolog.DebugLevel, recorder.level)
+	})
+
+	t.Run("returns to the configured level otherwise", func(t *testing.T) {
+		t.Parallel()
+
+		recorder := &levelRecordingLogger{}
+		m := &model{
+			logs:    make([]string, 0, maxLogLines),
+			logChan: make(chan LogMsg, maxLogLines),
+			logger:  recorder,
+			styles:  defaultStyleConfig(),
+			config:  Config{Verbose: false, LogLevel: "warn"},
+			choices: []string{"tool"},
+		}
+		m.updateGrid()
+
+		m.toggleVerboseLogging()
+		require.True(t, m.showLogs)
+		assert.Equal(t, zerolog.DebugLevel, recorder.level, "opening the panel raises the level")
+
+		m.toggleVerboseLogging()
+		require.False(t, m.showLogs)
+		assert.Equal(t, zerolog.WarnLevel, recorder.level,
+			"closing the panel returns to the configured level")
+	})
+}
+
+// levelRecordingLogger records the last level applied to it.
+type levelRecordingLogger struct {
+	logger.Logger
+
+	level zerolog.Level
+}
+
+func (l *levelRecordingLogger) Level(level zerolog.Level) { l.level = level }
+
 func Test_model_Init(t *testing.T) {
 	tests := []struct {
 		name string

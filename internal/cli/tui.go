@@ -236,36 +236,27 @@ func (m *model) setupLogCapture(log logger.Logger) {
 	})
 }
 
-// toggleVerboseLogging toggles verbose logging and log panel visibility.
+// toggleVerboseLogging toggles log panel visibility and logging level.
 //
-// It switches the logger between Info and Debug and starts log polling when enabled.
-//
-// Returns:
-//   - Command to poll the log channel, or a no-op command when logs are hidden.
-func (m *model) toggleVerboseLogging() tea.Cmd {
+// Polling already runs for the whole session, so this only changes what is
+// shown and how much detail is emitted. It deliberately does not start a
+// second poll chain, which previously left one running per press.
+func (m *model) toggleVerboseLogging() {
 	m.showLogs = !m.showLogs
 
-	if m.showLogs {
-		// Enable verbose logging by setting level to Debug
+	// Opening the panel raises the level so the extra detail is worth having.
+	// Closing it returns to the configured level, except when the user asked
+	// for verbose at startup: that request is independent of the panel, so
+	// hiding the panel must not quietly reduce verbosity below what was asked.
+	if m.showLogs || m.config.Verbose {
 		m.logger.Level(zerolog.DebugLevel)
 	} else {
-		// Disable verbose logging by setting level to Info
-		m.logger.Level(zerolog.InfoLevel)
+		m.logger.Level(logger.ParseLevel(m.config.LogLevel))
 	}
 
-	// Ensure log capture is set up (lazy initialization for backwards compatibility)
-	if m.logChan == nil {
-		m.logChan = make(chan LogMsg, maxLogLines)
-		m.setupLogCapture(m.logger)
-	}
-
-	// Start polling for logs if we're now in verbose mode
-	if m.showLogs {
-		return m.pollLogChannel()
-	}
-
-	// Return a no-op command instead of nil for consistency
-	return tea.Batch()
+	// The panel changes the space available to the grid, so the reserved height
+	// has to be recalculated.
+	m.updateGrid()
 }
 
 // defaultStyleConfig provides default TUI style settings.
@@ -308,27 +299,20 @@ func (r DefaultRunner) RunProgram(m tea.Model, opts ...tea.ProgramOption) (*tea.
 func (m *model) Init() tea.Cmd {
 	m.sortChoices()
 
-	// Load history if in history mode
+	// Log polling runs for the whole session, not only in verbose mode, so the
+	// log panel holds recent entries whenever the user opens it. Starting it
+	// only under --verbose meant the capture callback filled a channel nobody
+	// drained, so every message was discarded.
+	polling := m.pollLogChannel()
+
 	if m.mode == modeHistory {
-		cmd := m.loadHistory()
-
-		// Start log polling if verbose mode is enabled
-		if m.config.Verbose {
-			return tea.Batch(
-				cmd,
-				m.pollLogChannel(),
-			)
-		}
-
-		return cmd
+		return tea.Batch(
+			m.loadHistory(),
+			polling,
+		)
 	}
 
-	// Start log polling if verbose mode is enabled.
-	if m.config.Verbose {
-		return m.pollLogChannel()
-	}
-
-	return nil
+	return polling
 }
 
 // loadHistory returns a command that loads deletion history.
@@ -567,9 +551,9 @@ func (m *model) updateHistoryMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case "L":
 		// Toggle verbose logging and log panel visibility
-		cmd := m.toggleVerboseLogging()
+		m.toggleVerboseLogging()
 
-		return m, cmd
+		return m, nil
 	}
 
 	return m, nil
@@ -626,9 +610,9 @@ func (m *model) updateBinaryMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case "L":
 		// Toggle verbose logging and log panel visibility.
-		cmd := m.toggleVerboseLogging()
+		m.toggleVerboseLogging()
 
-		return m, cmd
+		return m, nil
 
 	case "r":
 		// Switch to history view
