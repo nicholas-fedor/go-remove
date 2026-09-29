@@ -7,6 +7,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 package logger
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -202,9 +203,17 @@ func NewLogger() (Logger, error) {
 		Logger().
 		Level(zerolog.InfoLevel)
 
+	// Install a capture writer so SetCaptureFunc always has somewhere to write.
+	// Without it the call was a silent no-op, and behaviour then depended on
+	// which constructor the caller happened to pick.
+	capture := &captureWriter{output: output}
+
+	zerologLogger = zerologLogger.Output(capture)
+
 	return &ZerologLogger{
-		logger: zerologLogger,
-		output: output,
+		logger:        zerologLogger,
+		output:        output,
+		captureWriter: capture,
 	}, nil
 }
 
@@ -329,6 +338,38 @@ func (z *ZerologLogger) SetCaptureFunc(captureFunc LogCaptureFunc) {
 	}
 }
 
+// ErrInvalidLogLevel indicates a log level name is not recognised.
+var ErrInvalidLogLevel = errors.New("invalid log level")
+
+// ParseLogLevel parses a log level name, rejecting an unrecognised value.
+//
+// Supported levels are debug, info, warn, and error.
+//
+// Parameters:
+//   - level: Case-insensitive level name.
+//
+// Returns:
+//   - Matching zerolog level.
+//   - An error wrapping ErrInvalidLogLevel for an unrecognised name.
+func ParseLogLevel(level string) (zerolog.Level, error) {
+	switch strings.ToLower(level) {
+	case "debug":
+		return zerolog.DebugLevel, nil
+	case "info":
+		return zerolog.InfoLevel, nil
+	case "warn":
+		return zerolog.WarnLevel, nil
+	case "error":
+		return zerolog.ErrorLevel, nil
+	default:
+		return zerolog.InfoLevel, fmt.Errorf(
+			"%w: %q, expected one of debug, info, warn, error",
+			ErrInvalidLogLevel,
+			level,
+		)
+	}
+}
+
 // ParseLevel parses a string log level into a zerolog.Level.
 //
 // Supported levels are debug, info, warn, and error. Unrecognized values default to info.
@@ -339,16 +380,21 @@ func (z *ZerologLogger) SetCaptureFunc(captureFunc LogCaptureFunc) {
 // Returns:
 //   - Matching zerolog level, or InfoLevel when unrecognized.
 func ParseLevel(level string) zerolog.Level {
-	switch strings.ToLower(level) {
-	case "debug":
-		return zerolog.DebugLevel
-	case "info":
-		return zerolog.InfoLevel
-	case "warn":
-		return zerolog.WarnLevel
-	case "error":
-		return zerolog.ErrorLevel
-	default:
-		return zerolog.InfoLevel
-	}
+	parsed, _ := ParseLogLevel(level)
+
+	return parsed
+}
+
+// ParsedLevel returns the zerolog level the configured name resolves to.
+//
+// It never reports an error, so a configuration that was validated at startup
+// keeps working if a caller reaches it by another route.
+//
+// Parameters:
+//   - level: Case-insensitive level name.
+//
+// Returns:
+//   - Matching zerolog level, or InfoLevel when unrecognized.
+func ParsedLevel(level string) zerolog.Level {
+	return ParseLevel(level)
 }
