@@ -384,17 +384,3 @@ func ParseLevel(level string) zerolog.Level {
 
 	return parsed
 }
-
-// ParsedLevel returns the zerolog level the configured name resolves to.
-//
-// It never reports an error, so a configuration that was validated at startup
-// keeps working if a caller reaches it by another route.
-//
-// Parameters:
-//   - level: Case-insensitive level name.
-//
-// Returns:
-//   - Matching zerolog level, or InfoLevel when unrecognized.
-func ParsedLevel(level string) zerolog.Level {
-	return ParseLevel(level)
-}

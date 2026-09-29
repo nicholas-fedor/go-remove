@@ -244,11 +244,14 @@ func (m *model) setupLogCapture(log logger.Logger) {
 func (m *model) toggleVerboseLogging() {
 	m.showLogs = !m.showLogs
 
-	// Follow the level the user actually asked for rather than assuming info.
-	if m.showLogs {
+	// Opening the panel raises the level so the extra detail is worth having.
+	// Closing it returns to the configured level, except when the user asked
+	// for verbose at startup: that request is independent of the panel, so
+	// hiding the panel must not quietly reduce verbosity below what was asked.
+	if m.showLogs || m.config.Verbose {
 		m.logger.Level(zerolog.DebugLevel)
 	} else {
-		m.logger.Level(logger.ParsedLevel(m.config.LogLevel))
+		m.logger.Level(logger.ParseLevel(m.config.LogLevel))
 	}
 
 	// The panel changes the space available to the grid, so the reserved height

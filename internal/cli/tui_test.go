@@ -240,6 +240,74 @@ func TestToggleVerboseLogging_StartsNoExtraPollChain(t *testing.T) {
 	assert.False(t, m.showLogs)
 }
 
+// TestToggleVerboseLogging_PreservesStartupVerbose verifies that hiding the log
+// panel does not reduce verbosity the user asked for at startup.
+//
+// The toggle used to return to the configured level, so starting with --verbose
+// and then pressing L silently dropped debug output.
+func TestToggleVerboseLogging_PreservesStartupVerbose(t *testing.T) {
+	t.Parallel()
+
+	t.Run("keeps debug when started verbose", func(t *testing.T) {
+		t.Parallel()
+
+		recorder := &levelRecordingLogger{}
+		m := &model{
+			logs:    make([]string, 0, maxLogLines),
+			logChan: make(chan LogMsg, maxLogLines),
+			logger:  recorder,
+			styles:  defaultStyleConfig(),
+			// RunTUI opens the panel when --verbose is given.
+			showLogs: true,
+			config:   Config{Verbose: true, LogLevel: "info"},
+			choices:  []string{"tool"},
+		}
+		m.updateGrid()
+
+		m.toggleVerboseLogging()
+		require.False(t, m.showLogs, "the panel is hidden")
+		assert.Equal(t, zerolog.DebugLevel, recorder.level,
+			"a startup --verbose request is independent of the panel")
+
+		m.toggleVerboseLogging()
+		require.True(t, m.showLogs)
+		assert.Equal(t, zerolog.DebugLevel, recorder.level)
+	})
+
+	t.Run("returns to the configured level otherwise", func(t *testing.T) {
+		t.Parallel()
+
+		recorder := &levelRecordingLogger{}
+		m := &model{
+			logs:    make([]string, 0, maxLogLines),
+			logChan: make(chan LogMsg, maxLogLines),
+			logger:  recorder,
+			styles:  defaultStyleConfig(),
+			config:  Config{Verbose: false, LogLevel: "warn"},
+			choices: []string{"tool"},
+		}
+		m.updateGrid()
+
+		m.toggleVerboseLogging()
+		require.True(t, m.showLogs)
+		assert.Equal(t, zerolog.DebugLevel, recorder.level, "opening the panel raises the level")
+
+		m.toggleVerboseLogging()
+		require.False(t, m.showLogs)
+		assert.Equal(t, zerolog.WarnLevel, recorder.level,
+			"closing the panel returns to the configured level")
+	})
+}
+
+// levelRecordingLogger records the last level applied to it.
+type levelRecordingLogger struct {
+	logger.Logger
+
+	level zerolog.Level
+}
+
+func (l *levelRecordingLogger) Level(level zerolog.Level) { l.level = level }
+
 func Test_model_Init(t *testing.T) {
 	tests := []struct {
 		name string
