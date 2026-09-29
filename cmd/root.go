@@ -490,10 +490,29 @@ func init() {
 //
 // Errors are written to stderr and the process exits with status 1.
 func Execute() {
-	// Execute the command, capturing any errors for reporting and exit handling.
-	if err := rootCmd.Execute(); err != nil {
+	if err := execute(); err != nil {
 		// Report errors to stderr and exit with a non-zero status to signal failure.
 		os.Stderr.WriteString("Error: " + err.Error() + "\n")
 		os.Exit(1)
 	}
+}
+
+// execute runs the root command and returns its error.
+//
+// It is separate from Execute so the exit path stays out of the way of tests.
+//
+// Returns:
+//   - The error reported by the command, if any.
+func execute() error {
+	// RunE turns SilenceUsage on so a failure of the operation does not print
+	// the flag list. It stays set on the command, so it is cleared here to give
+	// each execution the default where a mistyped flag or a bad argument count
+	// still shows the valid flags.
+	rootCmd.SilenceUsage = false
+
+	if err := rootCmd.Execute(); err != nil {
+		return fmt.Errorf("running go-remove: %w", err)
+	}
+
+	return nil
 }

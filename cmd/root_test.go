@@ -10,6 +10,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestRootCommand verifies the behavior of the root command.
@@ -63,6 +66,55 @@ func TestRootCommand(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestExecute_ResetsSilenceUsageEachRun verifies the usage suppression set by
+// RunE does not leak into a later execution.
+//
+// RunE turns SilenceUsage on so a failure of the operation does not print the
+// flag list. That state lives on the shared command, so without a reset a
+// subsequent unknown flag or bad argument count would stop showing usage.
+func TestExecute_ResetsSilenceUsageEachRun(t *testing.T) {
+	oldStderr := os.Stderr
+
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	defer func() {
+		os.Stderr = oldStderr
+
+		w.Close()
+	}()
+
+	rootCmd.SetOut(os.Stderr)
+	rootCmd.SetErr(os.Stderr)
+	rootCmd.InitDefaultHelpFlag()
+
+	// Simulate a previous RunE having suppressed usage.
+	rootCmd.SilenceUsage = true
+
+	if err := rootCmd.Flags().Set("help", "false"); err != nil {
+		t.Fatalf("resetting the help flag: %v", err)
+	}
+
+	rootCmd.SetArgs([]string{"--bogus"})
+
+	err := execute()
+	require.Error(t, err, "an unknown flag must fail")
+
+	assert.False(
+		t,
+		rootCmd.SilenceUsage,
+		"each execution must start from the default, or a later flag error would hide the valid flags",
+	)
+
+	w.Close()
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+
+	assert.Equal(t, 1, strings.Count(buf.String(), "Usage:"),
+		"usage must be printed once for the flag error")
 }
 
 // TestFlagErrorsShowUsage verifies that a flag parse error still prints the
