@@ -103,7 +103,8 @@ func TestHistoryManager_RecordDeletion(t *testing.T) {
 
 		manager, mockTrasher, mockStorer, mockExtractor := setupManagerTest(t)
 
-		// Setup expectations
+		// Setup expectations. The record is written before the binary moves, so
+		// an interrupted deletion still leaves the binary named in history.
 		mockExtractor.EXPECT().
 			Extract(ctx, testBinaryPath).
 			Return(buildData, nil)
@@ -112,12 +113,20 @@ func TestHistoryManager_RecordDeletion(t *testing.T) {
 			CalculateChecksum(testBinaryPath).
 			Return(testChecksum, nil)
 
+		mockStorer.EXPECT().
+			SaveRecord(ctx, mock.MatchedBy(func(r *storage.HistoryRecord) bool {
+				return !r.TrashAvailable && r.TrashPath == ""
+			})).
+			Return(nil)
+
 		mockTrasher.EXPECT().
 			MoveToTrash(ctx, testBinaryPath).
 			Return(testTrashPath, nil)
 
 		mockStorer.EXPECT().
-			SaveRecord(ctx, mock.AnythingOfType("*storage.HistoryRecord")).
+			UpdateRecord(ctx, mock.MatchedBy(func(r *storage.HistoryRecord) bool {
+				return r.TrashAvailable && r.TrashPath == testTrashPath
+			})).
 			Return(nil)
 
 		entry, err := manager.RecordDeletion(ctx, testBinaryPath)
@@ -180,7 +189,7 @@ func TestHistoryManager_RecordDeletion(t *testing.T) {
 	t.Run("move to trash fails", func(t *testing.T) {
 		t.Parallel()
 
-		manager, mockTrasher, _, mockExtractor := setupManagerTest(t)
+		manager, mockTrasher, mockStorer, mockExtractor := setupManagerTest(t)
 
 		mockExtractor.EXPECT().
 			Extract(ctx, testBinaryPath).
@@ -190,9 +199,18 @@ func TestHistoryManager_RecordDeletion(t *testing.T) {
 			CalculateChecksum(testBinaryPath).
 			Return(testChecksum, nil)
 
+		// The record is written first, then discarded because nothing moved.
+		mockStorer.EXPECT().
+			SaveRecord(ctx, mock.AnythingOfType("*storage.HistoryRecord")).
+			Return(nil)
+
 		mockTrasher.EXPECT().
 			MoveToTrash(ctx, testBinaryPath).
 			Return("", trash.ErrTrashFull)
+
+		mockStorer.EXPECT().
+			DeleteRecord(ctx, mock.AnythingOfType("string")).
+			Return(nil)
 
 		entry, err := manager.RecordDeletion(ctx, testBinaryPath)
 
@@ -200,7 +218,7 @@ func TestHistoryManager_RecordDeletion(t *testing.T) {
 		assert.Nil(t, entry)
 	})
 
-	t.Run("save record fails and restores", func(t *testing.T) {
+	t.Run("save record fails before the move", func(t *testing.T) {
 		t.Parallel()
 
 		manager, mockTrasher, mockStorer, mockExtractor := setupManagerTest(t)
@@ -213,21 +231,126 @@ func TestHistoryManager_RecordDeletion(t *testing.T) {
 			CalculateChecksum(testBinaryPath).
 			Return(testChecksum, nil)
 
+		// Nothing has been moved yet, so no restore is attempted.
+		mockStorer.EXPECT().
+			SaveRecord(ctx, mock.AnythingOfType("*storage.HistoryRecord")).
+			Return(storage.ErrDatabaseClosed)
+
+		entry, err := manager.RecordDeletion(ctx, testBinaryPath)
+
+		require.Error(t, err)
+		assert.Nil(t, entry)
+		mockTrasher.AssertNotCalled(t, "MoveToTrash", mock.Anything, mock.Anything)
+	})
+
+	t.Run("trash location update fails and restores", func(t *testing.T) {
+		t.Parallel()
+
+		manager, mockTrasher, mockStorer, mockExtractor := setupManagerTest(t)
+
+		mockExtractor.EXPECT().
+			Extract(ctx, testBinaryPath).
+			Return(buildData, nil)
+
+		mockExtractor.EXPECT().
+			CalculateChecksum(testBinaryPath).
+			Return(testChecksum, nil)
+
+		mockStorer.EXPECT().
+			SaveRecord(ctx, mock.AnythingOfType("*storage.HistoryRecord")).
+			Return(nil)
+
 		mockTrasher.EXPECT().
 			MoveToTrash(ctx, testBinaryPath).
 			Return(testTrashPath, nil)
 
 		mockStorer.EXPECT().
-			SaveRecord(ctx, mock.AnythingOfType("*storage.HistoryRecord")).
+			UpdateRecord(ctx, mock.AnythingOfType("*storage.HistoryRecord")).
 			Return(storage.ErrDatabaseClosed)
 
 		mockTrasher.EXPECT().
 			RestoreFromTrash(ctx, testTrashPath, testBinaryPath).
 			Return(nil)
 
+		// The binary is back in place, so the record must not survive.
+		mockStorer.EXPECT().
+			DeleteRecord(ctx, mock.AnythingOfType("string")).
+			Return(nil)
+
 		entry, err := manager.RecordDeletion(ctx, testBinaryPath)
 
 		require.Error(t, err)
+		assert.Nil(t, entry)
+	})
+
+	t.Run("recovery fails and reports the stranded binary", func(t *testing.T) {
+		t.Parallel()
+
+		manager, mockTrasher, mockStorer, mockExtractor := setupManagerTest(t)
+
+		mockExtractor.EXPECT().
+			Extract(ctx, testBinaryPath).
+			Return(buildData, nil)
+
+		mockExtractor.EXPECT().
+			CalculateChecksum(testBinaryPath).
+			Return(testChecksum, nil)
+
+		mockStorer.EXPECT().
+			SaveRecord(ctx, mock.AnythingOfType("*storage.HistoryRecord")).
+			Return(nil)
+
+		mockTrasher.EXPECT().
+			MoveToTrash(ctx, testBinaryPath).
+			Return(testTrashPath, nil)
+
+		mockStorer.EXPECT().
+			UpdateRecord(ctx, mock.AnythingOfType("*storage.HistoryRecord")).
+			Return(storage.ErrDatabaseClosed)
+
+		mockTrasher.EXPECT().
+			RestoreFromTrash(ctx, testTrashPath, testBinaryPath).
+			Return(trash.ErrRestoreCollision)
+
+		entry, err := manager.RecordDeletion(ctx, testBinaryPath)
+
+		// The caller must be able to tell that a binary is stranded with no
+		// usable record, rather than seeing a generic failure.
+		require.ErrorIs(t, err, ErrRecoveryRequired)
+		assert.Nil(t, entry)
+	})
+	t.Run("move failure reports a failed cleanup", func(t *testing.T) {
+		t.Parallel()
+
+		manager, mockTrasher, mockStorer, mockExtractor := setupManagerTest(t)
+
+		mockExtractor.EXPECT().
+			Extract(ctx, testBinaryPath).
+			Return(buildData, nil)
+
+		mockExtractor.EXPECT().
+			CalculateChecksum(testBinaryPath).
+			Return(testChecksum, nil)
+
+		mockStorer.EXPECT().
+			SaveRecord(ctx, mock.AnythingOfType("*storage.HistoryRecord")).
+			Return(nil)
+
+		mockTrasher.EXPECT().
+			MoveToTrash(ctx, testBinaryPath).
+			Return("", trash.ErrTrashFull)
+
+		// The leftover record would be indistinguishable from an interrupted
+		// deletion, so the cleanup failure has to reach the caller.
+		mockStorer.EXPECT().
+			DeleteRecord(ctx, mock.AnythingOfType("string")).
+			Return(storage.ErrDatabaseClosed)
+
+		entry, err := manager.RecordDeletion(ctx, testBinaryPath)
+
+		require.ErrorIs(t, err, trash.ErrTrashFull)
+		require.ErrorIs(t, err, storage.ErrDatabaseClosed,
+			"a failed cleanup must be reported alongside the move failure")
 		assert.Nil(t, entry)
 	})
 }
@@ -529,6 +652,199 @@ func TestHistoryManager_UndoMostRecent(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, result)
 		assert.Equal(t, testBinaryName, result.BinaryName)
+	})
+}
+
+func TestHistoryManager_PendingAndChecksum(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	now := time.Now()
+
+	t.Run("interrupted deletion is not reported as already restored", func(t *testing.T) {
+		t.Parallel()
+
+		manager, _, _, _ := setupManagerTest(t)
+
+		// A record persisted before its binary moved, and never updated.
+		pending := storage.HistoryRecord{
+			Timestamp:      now.Unix(),
+			BinaryName:     testBinaryName,
+			OriginalPath:   testBinaryPath,
+			TrashPath:      "",
+			TrashAvailable: false,
+		}
+
+		result, err := manager.restoreRecord(ctx, &pending)
+
+		// Nothing was ever restored, so this must not claim otherwise.
+		require.ErrorIs(t, err, ErrRecoveryRequired)
+		require.NotErrorIs(t, err, ErrAlreadyRestored)
+		assert.Nil(t, result)
+	})
+
+	t.Run("pending deletion is flagged in the listing", func(t *testing.T) {
+		t.Parallel()
+
+		manager, _, mockStorer, _ := setupManagerTest(t)
+
+		pending := storage.HistoryRecord{
+			Timestamp:      now.Unix(),
+			BinaryName:     testBinaryName,
+			OriginalPath:   testBinaryPath,
+			TrashPath:      "",
+			TrashAvailable: false,
+		}
+		restored := storage.HistoryRecord{
+			Timestamp:      now.Unix() - 10,
+			BinaryName:     "restored",
+			OriginalPath:   "/usr/local/bin/restored",
+			TrashPath:      "/trash/files/restored_x",
+			TrashAvailable: false,
+		}
+
+		mockStorer.EXPECT().
+			ListRecords(ctx, storage.ListOptions{Limit: 10}).
+			Return([]storage.HistoryRecord{pending, restored}, nil)
+
+		entries, err := manager.GetHistory(ctx, 10)
+
+		require.NoError(t, err)
+		require.Len(t, entries, 2)
+
+		// The interrupted deletion is distinguishable from a real restore.
+		assert.True(t, entries[0].Pending, "an interrupted deletion must be flagged")
+		assert.False(t, entries[1].Pending, "a completed restore is not pending")
+	})
+
+	t.Run("checksum mismatch refuses to restore", func(t *testing.T) {
+		t.Parallel()
+
+		manager, mockTrasher, mockStorer, mockExtractor := setupManagerTest(t)
+
+		record := storage.HistoryRecord{
+			Timestamp:      now.Unix(),
+			BinaryName:     testBinaryName,
+			OriginalPath:   testBinaryPath,
+			TrashPath:      testTrashPath,
+			Checksum:       testChecksum,
+			TrashAvailable: true,
+		}
+
+		mockStorer.EXPECT().
+			GetRecord(ctx, record.RecordKey()).
+			Return(record, nil)
+
+		mockTrasher.EXPECT().
+			IsInTrash(testTrashPath).
+			Return(true)
+
+		// The trash copy no longer matches what was recorded at deletion.
+		mockExtractor.EXPECT().
+			CalculateChecksum(testTrashPath).
+			Return("0000", nil)
+
+		result, err := manager.Restore(ctx, record.RecordKey())
+
+		require.ErrorIs(t, err, ErrChecksumMismatch)
+		assert.Nil(t, result)
+
+		// The copy must be left in trash rather than restored as damaged bytes,
+		// and the record must be left claiming it is still recoverable.
+		mockTrasher.AssertNotCalled(
+			t,
+			"RestoreFromTrash",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		)
+		mockStorer.AssertNotCalled(t, "UpdateRecord", mock.Anything, mock.Anything)
+	})
+
+	t.Run("matching checksum restores", func(t *testing.T) {
+		t.Parallel()
+
+		manager, mockTrasher, mockStorer, mockExtractor := setupManagerTest(t)
+
+		record := storage.HistoryRecord{
+			Timestamp:      now.Unix(),
+			BinaryName:     testBinaryName,
+			OriginalPath:   testBinaryPath,
+			TrashPath:      testTrashPath,
+			Checksum:       testChecksum,
+			TrashAvailable: true,
+		}
+
+		mockStorer.EXPECT().
+			GetRecord(ctx, record.RecordKey()).
+			Return(record, nil)
+
+		mockTrasher.EXPECT().
+			IsInTrash(testTrashPath).
+			Return(true)
+
+		mockExtractor.EXPECT().
+			CalculateChecksum(testTrashPath).
+			Return(testChecksum, nil)
+
+		mockTrasher.EXPECT().
+			RestoreFromTrash(ctx, testTrashPath, testBinaryPath).
+			Return(nil)
+
+		mockStorer.EXPECT().
+			UpdateRecord(ctx, mock.AnythingOfType("*storage.HistoryRecord")).
+			Return(nil)
+
+		result, err := manager.Restore(ctx, record.RecordKey())
+
+		require.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, testBinaryPath, result.RestoredTo)
+	})
+
+	t.Run("unreadable trash copy is not reported as a mismatch", func(t *testing.T) {
+		t.Parallel()
+
+		manager, mockTrasher, mockStorer, mockExtractor := setupManagerTest(t)
+
+		record := storage.HistoryRecord{
+			Timestamp:      now.Unix(),
+			BinaryName:     testBinaryName,
+			OriginalPath:   testBinaryPath,
+			TrashPath:      testTrashPath,
+			Checksum:       testChecksum,
+			TrashAvailable: true,
+		}
+
+		mockStorer.EXPECT().
+			GetRecord(ctx, record.RecordKey()).
+			Return(record, nil)
+
+		mockTrasher.EXPECT().
+			IsInTrash(testTrashPath).
+			Return(true)
+
+		readErr := errors.New("permission denied")
+		mockExtractor.EXPECT().
+			CalculateChecksum(testTrashPath).
+			Return("", readErr)
+
+		result, err := manager.Restore(ctx, record.RecordKey())
+
+		// The underlying cause must survive, and the failure must not be
+		// mislabelled as corrupt content.
+		require.ErrorIs(t, err, readErr)
+		require.NotErrorIs(t, err, ErrChecksumMismatch)
+
+		// The copy cannot be verified, so it stays in trash.
+		mockTrasher.AssertNotCalled(
+			t,
+			"RestoreFromTrash",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		)
+		assert.Nil(t, result)
 	})
 }
 
