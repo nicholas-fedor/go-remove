@@ -11,9 +11,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
@@ -251,7 +253,7 @@ func initHistoryManager(log logger.Logger) (history.Manager, error) {
 //
 // Returns:
 //   - An error if the undo operation fails.
-func runUndo(verbose bool, logLevel string) error {
+func runUndo(ctx context.Context, verbose bool, logLevel string) error {
 	// Initialize logger
 	log, err := logger.NewLogger()
 	if err != nil {
@@ -282,9 +284,6 @@ func runUndo(verbose bool, logLevel string) error {
 			log.Warn().Err(closeErr).Msg("Failed to close history manager")
 		}
 	}()
-
-	// Execute undo
-	ctx := context.Background()
 
 	result, err := manager.UndoMostRecent(ctx)
 	if err != nil {
@@ -328,7 +327,7 @@ func runUndo(verbose bool, logLevel string) error {
 //
 // Returns:
 //   - An error if initialization or execution fails.
-func runRemove(config cli.Config) error {
+func runRemove(ctx context.Context, config cli.Config) error {
 	var (
 		log logger.Logger
 		err error
@@ -372,11 +371,13 @@ func runRemove(config cli.Config) error {
 
 	filesystem := fs.NewRealFS()
 	if config.Binary != "" {
-		if err := cli.Run(cli.Dependencies{
-			FS:             filesystem,
-			Logger:         log,
-			HistoryManager: manager,
-		}, config); err != nil {
+		if err := cli.Run(
+			ctx,
+			cli.Dependencies{
+				FS:             filesystem,
+				Logger:         log,
+				HistoryManager: manager,
+			}, config); err != nil {
 			return fmt.Errorf("running CLI: %w", err)
 		}
 
@@ -389,6 +390,7 @@ func runRemove(config cli.Config) error {
 	}
 
 	if err := cli.RunTUI(
+		ctx,
 		binDir,
 		config,
 		log,
@@ -417,6 +419,10 @@ var rootCmd = &cobra.Command{
 		// From here on, failures are about the operation rather than the
 		// invocation, so the usage block is no longer useful.
 		cmd.SilenceUsage = true
+
+		// The context cobra was given carries the signal handling installed by
+		// Execute, so an interrupt can reach the work in progress.
+		ctx := cmd.Context()
 
 		verbose, err := cmd.Flags().GetBool("verbose")
 		if err != nil {
@@ -456,7 +462,7 @@ var rootCmd = &cobra.Command{
 		}
 
 		if undo {
-			return runUndo(verbose, logLevel)
+			return runUndo(ctx, verbose, logLevel)
 		}
 
 		config := cli.Config{
@@ -476,7 +482,7 @@ var rootCmd = &cobra.Command{
 			config.Binary = args[0]
 		}
 
-		return runRemove(config)
+		return runRemove(ctx, config)
 	},
 }
 
@@ -489,11 +495,48 @@ func init() {
 	rootCmd.Flags().BoolP("restore", "r", false, "Open history view for restoration")
 }
 
+// notifyInterrupt installs signal handling where the first interrupt cancels the
+// returned context and a second one terminates the process.
+//
+// signal.NotifyContext leaves its handler registered after the first signal and
+// nothing reads it thereafter, so a later signal is swallowed rather than
+// reaching the default behaviour. Restoring the default once the context closes
+// restores the usual convention, and also bounds the cancellation-free recovery
+// of a half-finished deletion.
+//
+// Returns:
+//   - A context cancelled by the first interrupt or terminate signal.
+//   - A function that releases the handler. It is safe to call more than once.
+func notifyInterrupt() (context.Context, context.CancelFunc) {
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
+
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+
+	return ctx, stop
+}
+
 // Execute runs the root command.
 //
+// A cancellable context is installed for the interrupt and terminate signals, so
+// a long move or copy can be stopped rather than killed part way through.
 // Errors are written to stderr and the process exits with status 1.
 func Execute() {
-	if err := execute(); err != nil {
+	ctx, stop := notifyInterrupt()
+
+	err := execute(ctx)
+
+	// Released explicitly rather than deferred, so the handler is restored
+	// before os.Exit skips any deferred call.
+	stop()
+
+	if err != nil {
 		// Report errors to stderr and exit with a non-zero status to signal failure.
 		os.Stderr.WriteString("Error: " + err.Error() + "\n")
 		os.Exit(1)
@@ -504,16 +547,19 @@ func Execute() {
 //
 // It is separate from Execute so the exit path stays out of the way of tests.
 //
+// Parameters:
+//   - ctx: Context governing the whole invocation.
+//
 // Returns:
 //   - The error reported by the command, if any.
-func execute() error {
+func execute(ctx context.Context) error {
 	// RunE turns SilenceUsage on so a failure of the operation does not print
 	// the flag list. It stays set on the command, so it is cleared here to give
 	// each execution the default where a mistyped flag or a bad argument count
 	// still shows the valid flags.
 	rootCmd.SilenceUsage = false
 
-	if err := rootCmd.Execute(); err != nil {
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		return fmt.Errorf("running go-remove: %w", err)
 	}
 

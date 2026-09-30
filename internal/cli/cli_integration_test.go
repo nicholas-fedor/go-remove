@@ -169,7 +169,7 @@ func (s *CLIIntegrationTestSuite) TestRunDirectRemovalSuccess() {
 		Goroot:  false,
 	}
 
-	err := cli.Run(deps, config)
+	err := cli.Run(s.T().Context(), deps, config)
 
 	// Verify
 	s.Require().NoError(err)
@@ -227,7 +227,7 @@ func (s *CLIIntegrationTestSuite) TestRunDirectRemovalWithHistory() {
 		Goroot:  false,
 	}
 
-	err := cli.Run(deps, config)
+	err := cli.Run(s.T().Context(), deps, config)
 
 	// Verify
 	s.Require().NoError(err)
@@ -272,7 +272,7 @@ func (s *CLIIntegrationTestSuite) TestRunDirectRemovalVerboseMode() {
 		Goroot:  false,
 	}
 
-	err := cli.Run(deps, config)
+	err := cli.Run(s.T().Context(), deps, config)
 
 	// Verify
 	s.Require().NoError(err)
@@ -319,7 +319,7 @@ func (s *CLIIntegrationTestSuite) TestRunDirectRemovalWithGoroot() {
 		Goroot:  true,
 	}
 
-	err := cli.Run(deps, config)
+	err := cli.Run(s.T().Context(), deps, config)
 
 	// Verify
 	s.Require().NoError(err)
@@ -355,7 +355,7 @@ func (s *CLIIntegrationTestSuite) TestRunBinDirError() {
 		Goroot:  false,
 	}
 
-	err := cli.Run(deps, config)
+	err := cli.Run(s.T().Context(), deps, config)
 
 	// Verify
 	s.Require().Error(err)
@@ -398,7 +398,7 @@ func (s *CLIIntegrationTestSuite) TestRunRemoveBinaryError() {
 		Goroot:  false,
 	}
 
-	err := cli.Run(deps, config)
+	err := cli.Run(s.T().Context(), deps, config)
 
 	// Verify
 	s.Require().Error(err)
@@ -444,7 +444,7 @@ func (s *CLIIntegrationTestSuite) TestRunHistoryRecordError() {
 		Goroot:  false,
 	}
 
-	err := cli.Run(deps, config)
+	err := cli.Run(s.T().Context(), deps, config)
 
 	// Verify
 	s.Require().Error(err)
@@ -546,7 +546,7 @@ func (s *CLIIntegrationTestSuite) TestRunConfigPropagation() {
 				Logger: loggerMock,
 			}
 
-			err := cli.Run(deps, tt.config)
+			err := cli.Run(s.T().Context(), deps, tt.config)
 
 			// Verify
 			s.Require().NoError(err)
@@ -609,7 +609,7 @@ func (s *CLIIntegrationTestSuite) TestRunDependenciesIntegration() {
 		Goroot:  false,
 	}
 
-	err := cli.Run(deps, config)
+	err := cli.Run(s.T().Context(), deps, config)
 
 	// Verify
 	s.Require().NoError(err)
@@ -653,7 +653,7 @@ func (s *CLIIntegrationTestSuite) TestRunDirectRemovalWithoutHistoryManager() {
 		Goroot:  false,
 	}
 
-	err := cli.Run(deps, config)
+	err := cli.Run(s.T().Context(), deps, config)
 
 	// Verify
 	s.Require().NoError(err)
@@ -695,7 +695,7 @@ func (s *CLIIntegrationTestSuite) TestRunBinaryNotFoundError() {
 		Goroot:  false,
 	}
 
-	err := cli.Run(deps, config)
+	err := cli.Run(s.T().Context(), deps, config)
 
 	// Verify
 	s.Require().Error(err)
@@ -856,7 +856,7 @@ func TestErrorWrapping(t *testing.T) {
 		Goroot:  false,
 	}
 
-	returnedErr := cli.Run(deps, config)
+	returnedErr := cli.Run(t.Context(), deps, config)
 
 	// Verify error chain - the returned error should wrap the original
 	require.Error(t, returnedErr)
@@ -902,7 +902,7 @@ func (s *CLIIntegrationTestSuite) TestMultipleBinaryRemovals() {
 			Goroot:  false,
 		}
 
-		err := cli.Run(deps, config)
+		err := cli.Run(s.T().Context(), deps, config)
 
 		// Verify
 		s.Require().NoError(err)

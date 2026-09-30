@@ -6,6 +6,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 package history
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -209,7 +210,7 @@ func TestHistoryManager_RecordDeletion(t *testing.T) {
 			Return("", trash.ErrTrashFull)
 
 		mockStorer.EXPECT().
-			DeleteRecord(ctx, mock.AnythingOfType("string")).
+			DeleteRecord(mock.Anything, mock.AnythingOfType("string")).
 			Return(nil)
 
 		entry, err := manager.RecordDeletion(ctx, testBinaryPath)
@@ -269,12 +270,13 @@ func TestHistoryManager_RecordDeletion(t *testing.T) {
 			Return(storage.ErrDatabaseClosed)
 
 		mockTrasher.EXPECT().
-			RestoreFromTrash(ctx, testTrashPath, testBinaryPath).
+			RestoreFromTrash(mock.Anything, testTrashPath, testBinaryPath).
 			Return(nil)
 
-		// The binary is back in place, so the record must not survive.
+		// The binary is back in place, so the record must not survive. The
+		// recovery runs on a derived context, so it is not the caller's.
 		mockStorer.EXPECT().
-			DeleteRecord(ctx, mock.AnythingOfType("string")).
+			DeleteRecord(mock.Anything, mock.AnythingOfType("string")).
 			Return(nil)
 
 		entry, err := manager.RecordDeletion(ctx, testBinaryPath)
@@ -309,7 +311,7 @@ func TestHistoryManager_RecordDeletion(t *testing.T) {
 			Return(storage.ErrDatabaseClosed)
 
 		mockTrasher.EXPECT().
-			RestoreFromTrash(ctx, testTrashPath, testBinaryPath).
+			RestoreFromTrash(mock.Anything, testTrashPath, testBinaryPath).
 			Return(trash.ErrRestoreCollision)
 
 		entry, err := manager.RecordDeletion(ctx, testBinaryPath)
@@ -319,6 +321,67 @@ func TestHistoryManager_RecordDeletion(t *testing.T) {
 		require.ErrorIs(t, err, ErrRecoveryRequired)
 		assert.Nil(t, entry)
 	})
+
+	t.Run("recovery still runs after an interrupt", func(t *testing.T) {
+		t.Parallel()
+
+		manager, mockTrasher, mockStorer, mockExtractor := setupManagerTest(t)
+
+		// An interrupt landing between the move and the record update leaves the
+		// binary in trash, so the recovery must not inherit the cancellation that
+		// caused the failure, or the binary would be stranded by the very
+		// keystroke that should have stopped the work.
+		interrupted, cancel := context.WithCancel(ctx)
+		cancel()
+
+		mockExtractor.EXPECT().
+			Extract(mock.Anything, testBinaryPath).
+			Return(buildData, nil)
+
+		mockExtractor.EXPECT().
+			CalculateChecksum(testBinaryPath).
+			Return(testChecksum, nil)
+
+		mockStorer.EXPECT().
+			SaveRecord(mock.Anything, mock.AnythingOfType("*storage.HistoryRecord")).
+			Return(nil)
+
+		mockTrasher.EXPECT().
+			MoveToTrash(mock.Anything, testBinaryPath).
+			Return(testTrashPath, nil)
+
+		mockStorer.EXPECT().
+			UpdateRecord(mock.Anything, mock.AnythingOfType("*storage.HistoryRecord")).
+			Return(storage.ErrDatabaseClosed)
+
+		// A still-cancelled context would make this return immediately. The
+		// state is captured during the call, because the recovery context is
+		// cancelled once RecordDeletion returns.
+		var recoveryErr error
+
+		mockTrasher.EXPECT().
+			RestoreFromTrash(mock.Anything, testTrashPath, testBinaryPath).
+			//nolint:contextcheck // The point of the callback is to inspect the
+			// context the code under test chose, not to propagate one.
+			Run(func(ctx context.Context, _, _ string) {
+				recoveryErr = ctx.Err()
+			}).
+			Return(nil)
+
+		mockStorer.EXPECT().
+			DeleteRecord(mock.Anything, mock.AnythingOfType("string")).
+			Return(nil)
+
+		entry, err := manager.RecordDeletion(interrupted, testBinaryPath)
+
+		require.Error(t, err)
+		assert.Nil(t, entry)
+
+		require.NoError(t, recoveryErr,
+			"recovery must not inherit the cancellation that caused the failure")
+		mockTrasher.AssertNumberOfCalls(t, "RestoreFromTrash", 1)
+	})
+
 	t.Run("move failure reports a failed cleanup", func(t *testing.T) {
 		t.Parallel()
 
@@ -343,7 +406,7 @@ func TestHistoryManager_RecordDeletion(t *testing.T) {
 		// The leftover record would be indistinguishable from an interrupted
 		// deletion, so the cleanup failure has to reach the caller.
 		mockStorer.EXPECT().
-			DeleteRecord(ctx, mock.AnythingOfType("string")).
+			DeleteRecord(mock.Anything, mock.AnythingOfType("string")).
 			Return(storage.ErrDatabaseClosed)
 
 		entry, err := manager.RecordDeletion(ctx, testBinaryPath)
@@ -352,6 +415,53 @@ func TestHistoryManager_RecordDeletion(t *testing.T) {
 		require.ErrorIs(t, err, storage.ErrDatabaseClosed,
 			"a failed cleanup must be reported alongside the move failure")
 		assert.Nil(t, entry)
+	})
+
+	t.Run("cleanup completes after an interrupt", func(t *testing.T) {
+		t.Parallel()
+
+		manager, mockTrasher, mockStorer, mockExtractor := setupManagerTest(t)
+
+		// An interrupt is what makes the move fail, and the record left behind
+		// by that failure is indistinguishable from an interrupted deletion, so
+		// removing it must not inherit the same cancellation.
+		interrupted, cancel := context.WithCancel(ctx)
+		cancel()
+
+		mockExtractor.EXPECT().
+			Extract(mock.Anything, testBinaryPath).
+			Return(buildData, nil)
+
+		mockExtractor.EXPECT().
+			CalculateChecksum(testBinaryPath).
+			Return(testChecksum, nil)
+
+		mockStorer.EXPECT().
+			SaveRecord(mock.Anything, mock.AnythingOfType("*storage.HistoryRecord")).
+			Return(nil)
+
+		mockTrasher.EXPECT().
+			MoveToTrash(mock.Anything, testBinaryPath).
+			Return("", trash.ErrTrashFull)
+
+		var cleanupErr error
+
+		mockStorer.EXPECT().
+			DeleteRecord(mock.Anything, mock.AnythingOfType("string")).
+			//nolint:contextcheck // The callback inspects the context the code
+			// under test chose rather than propagating one.
+			Run(func(cleanupCtx context.Context, _ string) {
+				cleanupErr = cleanupCtx.Err()
+			}).
+			Return(nil)
+
+		_, err := manager.RecordDeletion(interrupted, testBinaryPath)
+
+		// Only the move is reported, because the cleanup succeeded.
+		require.ErrorIs(t, err, trash.ErrTrashFull)
+		require.NotErrorIs(t, err, storage.ErrDatabaseClosed)
+		require.NoError(t, cleanupErr,
+			"the cleanup must not inherit the cancellation that caused the failure")
 	})
 }
 
@@ -465,7 +575,7 @@ func TestHistoryManager_UndoMostRecent(t *testing.T) {
 
 		// The stale flag must be corrected in storage.
 		mockStorer.EXPECT().
-			UpdateRecord(ctx, mock.MatchedBy(func(r *storage.HistoryRecord) bool {
+			UpdateRecord(mock.Anything, mock.MatchedBy(func(r *storage.HistoryRecord) bool {
 				return !r.TrashAvailable
 			})).
 			Return(nil)
@@ -512,7 +622,7 @@ func TestHistoryManager_UndoMostRecent(t *testing.T) {
 			Once()
 
 		mockStorer.EXPECT().
-			UpdateRecord(ctx, mock.AnythingOfType("*storage.HistoryRecord")).
+			UpdateRecord(mock.Anything, mock.AnythingOfType("*storage.HistoryRecord")).
 			Return(nil)
 
 		mockTrasher.EXPECT().

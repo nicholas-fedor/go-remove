@@ -55,6 +55,27 @@ var (
 	ErrChecksumMismatch = errors.New("trash copy does not match the recorded checksum")
 )
 
+// recoveryTimeout bounds the attempt to undo a half-finished deletion, so a
+// stuck restore cannot leave the process hanging after an interrupt.
+const recoveryTimeout = 30 * time.Second
+
+// detachedContext returns a context for a write that must complete even though
+// the caller's context is already cancelled.
+//
+// These writes exist to put the store back into a consistent state, so
+// inheriting the cancellation that caused the problem would leave it worse:
+// a record left behind is indistinguishable from an interrupted deletion.
+//
+// Parameters:
+//   - ctx: The caller's context, used only for its values.
+//
+// Returns:
+//   - A bounded context detached from cancellation.
+//   - A function that releases it, which must be called when the write ends.
+func detachedContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), recoveryTimeout)
+}
+
 // Log field keys used across history operations.
 const (
 	logFieldBinary  = "binary"
@@ -300,8 +321,13 @@ func (m *HistoryManager) RecordDeletion(
 		moveFailure := fmt.Errorf("moving to trash: %w", moveErr)
 
 		// Nothing was moved, so the record describes a deletion that did not
-		// happen. Drop it rather than leave history claiming otherwise.
-		delErr := m.storer.DeleteRecord(ctx, record.RecordKey())
+		// happen. Drop it rather than leave history claiming otherwise. The
+		// write is detached because the move may have failed precisely because
+		// the context was cancelled.
+		cleanupCtx, cancelCleanup := detachedContext(ctx)
+		defer cancelCleanup()
+
+		delErr := m.storer.DeleteRecord(cleanupCtx, record.RecordKey())
 		if delErr == nil {
 			return nil, moveFailure
 		}
@@ -331,11 +357,22 @@ func (m *HistoryManager) RecordDeletion(
 			Str(logFieldTrash, trashPath).
 			Msg("Failed to record trash location, attempting to restore from trash")
 
-		restoreErr := m.trasher.RestoreFromTrash(ctx, trashPath, binaryPath)
+		// Recovery must not inherit the cancellation that caused the failure, or
+		// the binary would be left in trash purely because the user interrupted
+		// us. It is bounded so a stuck restore cannot hang forever, and a second
+		// interrupt terminates the process outright, since Execute restores the
+		// default signal handler once the first one cancels the context.
+		recoverCtx, cancelRecover := context.WithTimeout(
+			context.WithoutCancel(ctx),
+			recoveryTimeout,
+		)
+		defer cancelRecover()
+
+		restoreErr := m.trasher.RestoreFromTrash(recoverCtx, trashPath, binaryPath)
 		if restoreErr == nil {
 			// The binary is back where it started, so the record no longer
 			// describes reality and should not remain in the history.
-			if delErr := m.storer.DeleteRecord(ctx, record.RecordKey()); delErr != nil {
+			if delErr := m.storer.DeleteRecord(recoverCtx, record.RecordKey()); delErr != nil {
 				m.logger.Warn().
 					Err(delErr).
 					Str(logFieldPath, binaryPath).
@@ -474,7 +511,12 @@ func (m *HistoryManager) reconcileTrashState(
 
 	record.TrashAvailable = false
 
-	if err := m.storer.UpdateRecord(ctx, record); err != nil {
+	// Detached for the same reason as the cleanup above: this correction exists
+	// because the caller asked to stop, so it must not inherit that cancellation.
+	updateCtx, cancelUpdate := detachedContext(ctx)
+	defer cancelUpdate()
+
+	if err := m.storer.UpdateRecord(updateCtx, record); err != nil {
 		m.logger.Warn().
 			Err(err).
 			Str(logFieldBinary, record.BinaryName).
