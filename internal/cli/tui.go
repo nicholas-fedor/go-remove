@@ -45,6 +45,20 @@ const (
 	dateTimeFormat           = "2006-01-02 15:04" // Format for displaying timestamps
 	separatorAdjustment      = 2                  // Extra width for column separator
 	historyTableHeaderLines  = 2                  // Number of lines for history table header (header + separator)
+
+	// History table column sizing.
+	historyDateHeading   = "Date/Time"
+	historyTrashHeading  = "In Trash"
+	historyDateWidth     = 16 // Widest date the table shows before yielding space
+	historyMinNameWidth  = 8  // Narrowest the name column may become before it is useless
+	historyColumnDivider = 1  // Spaces between two columns
+	historyEllipsisWidth = 3  // Cells the trailing ellipsis occupies after truncation
+
+	// historyCursorPrefix is the gutter every row carries, selected or not.
+	historyCursorPrefix = "  "
+
+	// historyTitleLines covers the view title and the blank line beneath it.
+	historyTitleLines = 2
 )
 
 // Mode constants for TUI state.
@@ -1348,8 +1362,8 @@ func (m *model) updateGrid() {
 	// Determine the maximum length of binary names for column sizing.
 	maxNameLen := 0
 	for _, choice := range m.choices {
-		if len(choice) > maxNameLen {
-			maxNameLen = len(choice)
+		if displayWidth(choice) > maxNameLen {
+			maxNameLen = displayWidth(choice)
 		}
 	}
 
@@ -1429,6 +1443,51 @@ func (m *model) View() tea.View {
 	return m.viewBinaries()
 }
 
+// displayWidth returns the number of terminal cells a string occupies.
+//
+// Rune count is not sufficient: a CJK character occupies two cells, so a grid
+// sized on runes overflows the terminal and its padding comes out short.
+func displayWidth(s string) int {
+	return lipgloss.Width(s)
+}
+
+// truncateToWidth shortens s to at most width cells, ending on a rune boundary.
+//
+// Slicing at a byte index would split a multi-byte rune in half and render
+// invalid UTF-8 as mojibake.
+func truncateToWidth(s string, width int) string {
+	if displayWidth(s) <= width {
+		return s
+	}
+
+	var (
+		builder strings.Builder
+		used    int
+	)
+
+	for _, char := range s {
+		cellWidth := lipgloss.Width(string(char))
+		if used+cellWidth > width {
+			break
+		}
+
+		builder.WriteRune(char)
+
+		used += cellWidth
+	}
+
+	return builder.String()
+}
+
+// padToWidth appends spaces so s occupies exactly width terminal cells.
+//
+// fmt's %-*s pads by rune count, which is too few for a wide rune and leaves
+// the column overflowing. A styled string measures by its printable text, so
+// this also works on a rendered value.
+func padToWidth(s string, width int) string {
+	return s + strings.Repeat(" ", max(width-displayWidth(s), 0))
+}
+
 // viewBinaries renders the binary selection view.
 //
 // Returns:
@@ -1451,8 +1510,8 @@ func (m *model) viewBinaries() tea.View {
 	// Calculate column width based on the longest binary name.
 	var maxNameLen int
 	for _, choice := range m.choices {
-		if len(choice) > maxNameLen {
-			maxNameLen = len(choice)
+		if displayWidth(choice) > maxNameLen {
+			maxNameLen = displayWidth(choice)
 		}
 	}
 
@@ -1474,7 +1533,7 @@ func (m *model) viewBinaries() tea.View {
 			}
 
 			item := m.choices[idx]
-			visibleLen := visibleLenPrefix + len([]rune(item))
+			visibleLen := visibleLenPrefix + displayWidth(item)
 			padding := max(colWidth-visibleLen, 0)
 			cell := prefix + item + strings.Repeat(" ", padding)
 			grid.WriteString(cell)
@@ -1583,19 +1642,48 @@ func (m *model) viewHistory() tea.View {
 	case len(m.historyEntries) == 0:
 		s.WriteString("No deletion history found.\n")
 	default:
-		// Calculate column widths
-		dateWidth := 16
-		nameWidth := 20
-		trashWidth := 12
+		// Size the columns from the terminal rather than a fixed 50 columns,
+		// which wrapped on a narrow window.
+		//
+		// The frame pads its content by leftPadding and every row carries a
+		// cursor prefix, so both come off the top before the columns are
+		// allocated. The trash column is dropped first because it is the least
+		// informative, and neither remaining column is forced wider than the
+		// space available, so a narrow window truncates rather than wrapping.
+		content := max(m.width-leftPadding, 1)
+		free := max(content-displayWidth(historyCursorPrefix)-historyColumnDivider, 1)
+
+		trashWidth := len(historyTrashHeading)
+		dateWidth := min(historyDateWidth, max(free-historyMinNameWidth, 1))
+		nameWithoutTrash := max(free-dateWidth-historyColumnDivider, 1)
+		nameWithTrash := max(
+			free-dateWidth-2*historyColumnDivider-trashWidth,
+			historyMinNameWidth,
+		)
+
+		showTrash := nameWithTrash >= historyMinNameWidth
+		nameWidth := nameWithoutTrash
+
+		if showTrash {
+			nameWidth = nameWithTrash
+		}
 
 		// Table header
-		header := fmt.Sprintf("%-*s %-*s %-*s",
-			dateWidth, "Date/Time",
-			nameWidth, "Binary",
-			trashWidth, "In Trash")
+		header := padToWidth(historyDateHeading, dateWidth) +
+			strings.Repeat(" ", historyColumnDivider) +
+			padToWidth("Binary", nameWidth)
+
+		if showTrash {
+			header += strings.Repeat(" ", historyColumnDivider) +
+				padToWidth(historyTrashHeading, trashWidth)
+		}
+
 		s.WriteString(headerStyle.Render(header))
 		s.WriteString("\n")
-		s.WriteString(strings.Repeat("─", dateWidth+nameWidth+trashWidth+separatorAdjustment))
+		s.WriteString(strings.Repeat("─", min(
+			dateWidth+nameWidth+separatorAdjustment,
+			content,
+		)))
 		s.WriteString("\n")
 
 		// Calculate available height for history entries
@@ -1644,7 +1732,7 @@ func (m *model) viewHistory() tea.View {
 
 			entry := m.historyEntries[entryIdx]
 
-			prefix := "  "
+			prefix := historyCursorPrefix
 			if entryIdx == m.historyCursor {
 				prefix = cursorStyle.Render(m.styles.Cursor)
 			}
@@ -1652,8 +1740,8 @@ func (m *model) viewHistory() tea.View {
 			dateStr := entry.Timestamp.Format(dateTimeFormat)
 
 			nameStr := entry.BinaryName
-			if len(nameStr) > nameWidth {
-				nameStr = nameStr[:nameWidth-3] + "..."
+			if displayWidth(nameStr) > nameWidth {
+				nameStr = truncateToWidth(nameStr, nameWidth-historyEllipsisWidth) + "..."
 			}
 
 			var trashStr string
@@ -1663,10 +1751,15 @@ func (m *model) viewHistory() tea.View {
 				trashStr = trashNoStyle.Render("No")
 			}
 
-			row := fmt.Sprintf("%-*s %-*s %s",
-				dateWidth, dateStr,
-				nameWidth, nameStr,
-				trashStr)
+			row := padToWidth(dateStr, dateWidth) +
+				strings.Repeat(" ", historyColumnDivider) +
+				padToWidth(nameStr, nameWidth)
+
+			if showTrash {
+				row += strings.Repeat(" ", historyColumnDivider) +
+					padToWidth(trashStr, trashWidth)
+			}
+
 			s.WriteString(prefix + row)
 			s.WriteString("\n")
 		}

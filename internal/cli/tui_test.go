@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
@@ -846,6 +847,176 @@ func TestCtrlC_KeepsInterruptedStatus(t *testing.T) {
 	// The work is not context aware, so it still ran and the list was refreshed
 	// from the store rather than left stale.
 	fsMock.AssertExpectations(t)
+}
+
+// TestViewHistory_AlignsColumnsWithCJKNames verifies every row lines up when a
+// name contains wide runes.
+//
+// fmt's %-*s pads by rune count, so a CJK name is three cells too wide and the
+// column drifts, wrapping the row on a terminal that had room for it.
+func TestViewHistory_AlignsColumnsWithCJKNames(t *testing.T) {
+	t.Parallel()
+
+	entries := []*history.HistoryEntry{
+		{ID: "1", Timestamp: time.Now(), BinaryName: "tool", InTrash: true},
+		{ID: "2", Timestamp: time.Now(), BinaryName: "日本語のツール", InTrash: false},
+		{ID: "3", Timestamp: time.Now(), BinaryName: "héllo-wörld", InTrash: true},
+	}
+
+	m := &model{
+		historyEntries: entries,
+		historyCursor:  0,
+		mode:           modeHistory,
+		width:          80,
+		height:         24,
+		styles:         defaultStyleConfig(),
+	}
+
+	lines := strings.Split(stripANSI(m.View().Content), "\n")
+
+	// The rows follow the title, a blank line, the column heading and the rule.
+	firstRow := historyTitleLines + historyTableHeaderLines
+
+	// Each row ends with its trash value. A name column sized by runes rather
+	// than cells shifts that column, so compare the cell offset of the value
+	// rather than its byte index, which differs for a wide name anyway.
+	offsets := make([]int, 0, 3)
+
+	for i := range 3 {
+		row := lines[firstRow+i]
+		require.NotEmpty(t, row)
+
+		cell := stripANSI(row)
+
+		at := strings.LastIndex(cell, "Yes")
+		if at < 0 {
+			at = strings.LastIndex(cell, "No")
+		}
+
+		require.Positivef(t, at, "row %d has no trash column: %q", i, cell)
+
+		offsets = append(offsets, displayWidth(cell[:at]))
+	}
+
+	for i := 1; i < len(offsets); i++ {
+		assert.Equal(t, offsets[0], offsets[i],
+			"row %d has its trash column shifted by the name before it", i)
+	}
+}
+
+// TestTruncateToWidth verifies truncation ends on a rune boundary.
+//
+// Slicing at a byte index splits a multi-byte rune and renders invalid UTF-8.
+func TestTruncateToWidth(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input string
+		width int
+		want  string
+	}{
+		{name: "fits", input: "tool", width: 10, want: "tool"},
+		{name: "ascii truncation", input: "a-very-long-tool-name", width: 8, want: "a-very-l"},
+		{name: "multibyte whole runes", input: "héllo", width: 4, want: "héll"},
+		{name: "multibyte never splits", input: "日本語のツール", width: 5, want: "日本"},
+		{name: "cjk is two cells per rune", input: "日本語", width: 3, want: "日"},
+		{name: "zero width", input: "tool", width: 0, want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := truncateToWidth(tt.input, tt.width)
+
+			assert.Equal(t, tt.want, got)
+			assert.True(t, utf8.ValidString(got),
+				"truncation must not leave invalid UTF-8")
+			assert.LessOrEqual(t, displayWidth(got), tt.width,
+				"the result must fit the width")
+		})
+	}
+}
+
+// TestDisplayWidth_IgnoresRuneCount verifies a wide rune counts as two cells, so
+// a grid sized on runes would overflow.
+func TestDisplayWidth_IgnoresRuneCount(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, 4, displayWidth("tool"))
+	assert.Equal(t, 5, displayWidth("héllo"), "accents stay single width")
+	assert.Equal(t, 6, displayWidth("日本語"), "CJK runes are two cells each")
+}
+
+// TestViewHistory_FitsNarrowTerminal verifies the table is sized to the window
+// instead of a fixed 50 columns that wrapped on a narrow terminal.
+func TestViewHistory_FitsNarrowTerminal(t *testing.T) {
+	t.Parallel()
+
+	entry := &history.HistoryEntry{
+		ID:         "1",
+		Timestamp:  time.Now(),
+		BinaryName: "a-fairly-long-binary-name",
+		InTrash:    true,
+	}
+
+	for _, width := range []int{30, 40, 80, 160} {
+		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {
+			t.Parallel()
+
+			m := &model{
+				historyEntries: []*history.HistoryEntry{entry},
+				historyCursor:  0,
+				mode:           modeHistory,
+				width:          width,
+				height:         24,
+				styles:         defaultStyleConfig(),
+			}
+
+			rendered := stripANSI(m.View().Content)
+
+			for _, line := range strings.Split(rendered, "\n") {
+				assert.LessOrEqual(t, displayWidth(line), width,
+					"no line may exceed the terminal width, got %d for %q",
+					displayWidth(line), line)
+			}
+		})
+	}
+}
+
+// TestViewBinaries_FitsNarrowTerminal verifies the grid shrinks to the window
+// rather than overflowing it.
+func TestViewBinaries_FitsNarrowTerminal(t *testing.T) {
+	t.Parallel()
+
+	for _, width := range []int{30, 40, 80, 160} {
+		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {
+			t.Parallel()
+
+			m := &model{
+				choices:       []string{"a-fairly-long-binary-name", "short", "日本語のツール"},
+				dir:           "/bin",
+				cols:          1,
+				rows:          3,
+				cursorX:       0,
+				cursorY:       0,
+				width:         width,
+				height:        24,
+				sortAscending: true,
+				styles:        defaultStyleConfig(),
+			}
+			m.updateGrid()
+
+			rendered := stripANSI(m.View().Content)
+
+			for _, line := range strings.Split(rendered, "\n") {
+				assert.LessOrEqual(t, displayWidth(line), width,
+					"no line may exceed the terminal width, got %d for %q",
+					displayWidth(line), line)
+			}
+		})
+	}
 }
 
 // TestView_FillsTerminalHeight verifies each view fills the terminal exactly,
