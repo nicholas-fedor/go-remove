@@ -237,9 +237,14 @@ func RunTUI(
 	m.logChan = make(chan LogMsg, maxLogLines)
 	m.setupLogCapture(log)
 
-	// Start the TUI program, giving it the caller's context so an interrupt
-	// reaches the work started from the model.
-	program, err := runner.RunProgram(m, tea.WithContext(ctx))
+	// Start the TUI program with the caller's context. Bubbletea's own signal
+	// handling is disabled so an interrupt reaches the context installed by
+	// Execute rather than racing it, leaving a single interruption path.
+	program, err := runner.RunProgram(
+		m,
+		tea.WithContext(ctx),
+		tea.WithoutSignalHandler(),
+	)
 	if err != nil {
 		return fmt.Errorf("failed to start TUI program: %w", err)
 	}
@@ -254,6 +259,13 @@ func RunTUI(
 	if err != nil {
 		// An interrupt is the user asking to quit, so it is not a failure.
 		if errors.Is(err, tea.ErrInterrupted) {
+			return nil
+		}
+
+		// A cancelled context makes Bubbletea kill the program, which is still
+		// the user's interrupt rather than a real failure. Anything else keeps
+		// its own identity, so an unexpected kill is still reported.
+		if errors.Is(err, tea.ErrProgramKilled) && errors.Is(ctx.Err(), context.Canceled) {
 			return nil
 		}
 
