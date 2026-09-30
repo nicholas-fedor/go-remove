@@ -998,7 +998,10 @@ func TestViewHistory_FitsNarrowTerminal(t *testing.T) {
 		InTrash:    true,
 	}
 
-	for _, width := range []int{20, 24, 28, 30, 41, 42, 80, 160} {
+	// Nine columns is the narrowest the table can render: a row carries the cursor
+	// gutter, the date, a divider and the name, and the frame pads both sides.
+	// Below that the row has no room to fit at all.
+	for _, width := range []int{9, 10, 11, 12, 20, 24, 28, 30, 41, 42, 80, 160} {
 		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {
 			t.Parallel()
 
@@ -1022,21 +1025,23 @@ func TestViewHistory_FitsNarrowTerminal(t *testing.T) {
 
 			// A row wider than the frame wraps onto a second line, and every
 			// wrapped line is still within the width, so the check above misses
-			// it. The entry row is the one carrying the cursor glyph, and the
-			// name has to be finished on that same line: either whole, or
-			// shortened behind an ellipsis. A row that keeps only the leading
-			// characters and spills the tail below has wrapped.
-			row := cursorRow(t, lines)
-			shortened := strings.Contains(row, entry.BinaryName) ||
-				strings.Contains(row, "...")
+			// it. The entry row is the one carrying the cursor glyph, and
+			// whatever follows it is blank padding, so any content on the next
+			// line is the tail of a row that spilled past the frame.
+			index := cursorRowIndex(t, lines)
+			row := lines[index]
 
-			assert.True(t, shortened,
-				"the name must finish on the row at width %d, got %q", width, row)
+			if index+1 < len(lines) {
+				assert.Empty(t, strings.TrimSpace(lines[index+1]),
+					"the selected row spilled onto the next line at width %d, got %q after %q",
+					width, lines[index+1], row)
+			}
 		})
 	}
 }
 
-// cursorRow returns the rendered table row for the selected entry.
+// cursorRowIndex returns the index of the rendered table row for the selected
+// entry.
 //
 // The selected row is the one prefixed with the cursor glyph, which
 // defaultStyleConfig renders as a right-pointing triangle.
@@ -1046,21 +1051,21 @@ func TestViewHistory_FitsNarrowTerminal(t *testing.T) {
 //   - lines: rendered output split into lines.
 //
 // Returns:
-//   - The cursor row.
-func cursorRow(t *testing.T, lines []string) string {
+//   - Index of the cursor row.
+func cursorRowIndex(t *testing.T, lines []string) int {
 	t.Helper()
 
 	cursor := defaultStyleConfig().Cursor
 
-	for _, line := range lines {
+	for index, line := range lines {
 		if strings.Contains(line, cursor) {
-			return line
+			return index
 		}
 	}
 
 	t.Fatalf("no cursor row in %q", lines)
 
-	return ""
+	return 0
 }
 
 // TestViewHistory_DropsTrashColumnWhenItCannotFit verifies the trash column is

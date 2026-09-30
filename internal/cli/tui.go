@@ -50,10 +50,10 @@ const (
 	// History table column sizing.
 	historyDateHeading   = "Date/Time"
 	historyTrashHeading  = "In Trash"
-	historyDateWidth     = 16 // Widest date the table shows before yielding space
-	historyMinNameWidth  = 8  // Narrowest the name column may become before it is useless
-	historyColumnDivider = 1  // Spaces between two columns
-	historyEllipsisWidth = 3  // Cells the trailing ellipsis occupies after truncation
+	historyDateWidth     = 16    // Widest date the table shows before yielding space
+	historyMinNameWidth  = 8     // Narrowest the name column may become before it is useless
+	historyColumnDivider = 1     // Spaces between two columns
+	historyEllipsis      = "..." // Trailing ellipsis on a name shortened to fit its column
 
 	// historyCursorPrefix is the gutter every row carries, selected or not.
 	historyCursorPrefix = "  "
@@ -1758,7 +1758,15 @@ func (m *model) viewHistory() tea.View {
 
 			nameStr := entry.BinaryName
 			if displayWidth(nameStr) > nameWidth {
-				nameStr = truncateToWidth(nameStr, nameWidth-historyEllipsisWidth) + "..."
+				// The ellipsis occupies cells of its own, so the name is
+				// shortened into what the column has left once they are paid
+				// for. A column narrower than the ellipsis leaves no budget at
+				// all, which would put the ellipsis past the column edge, so the
+				// result is capped to the column afterwards.
+				budget := max(nameWidth-displayWidth(historyEllipsis), 0)
+
+				nameStr = truncateToWidth(nameStr, budget) + historyEllipsis
+				nameStr = truncateToWidth(nameStr, nameWidth)
 			}
 
 			var trashStr string
