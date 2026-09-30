@@ -800,6 +800,54 @@ func withoutBlankLines(s string) string {
 	return strings.Join(kept, "\n")
 }
 
+// TestCtrlC_KeepsInterruptedStatus verifies the status an interrupt showed is
+// not replaced when the operation it stopped later reports success.
+//
+// The work is not necessarily context aware, so it can run to completion after
+// the user has been told they stopped it.
+func TestCtrlC_KeepsInterruptedStatus(t *testing.T) {
+	t.Parallel()
+
+	fsMock := mockFS.NewMockFS(t)
+	fsMock.On("AdjustBinaryPath", "/bin", "vhs").Return("/bin/vhs")
+	fsMock.On("RemoveBinary", "/bin/vhs", "vhs", false, mock.Anything).Return(nil)
+	fsMock.On("ListBinaries", "/bin").Return([]string{"vhs"}, nil).Maybe()
+
+	m := &model{
+		choices:       []string{"vhs"},
+		dir:           "/bin",
+		cols:          1,
+		rows:          1,
+		fs:            fsMock,
+		logger:        &tuiMockLogger{},
+		logs:          make([]string, 0, maxLogLines),
+		logChan:       make(chan LogMsg, maxLogLines),
+		width:         80,
+		height:        24,
+		sortAscending: true,
+		styles:        defaultStyleConfig(),
+	}
+
+	// Start a removal, then interrupt it the way the key handler does.
+	started, opCmd := m.Update(keyPressString(keyEnter))
+	interrupting, _ := started.Update(keyPressString(keyCtrlC))
+
+	interrupted, ok := interrupting.(*model)
+	require.True(t, ok)
+	require.Equal(t, "Interrupted", interrupted.status)
+	require.NotEmpty(t, opCmd, "the removal must still be in flight")
+
+	// The work finishes without observing the cancellation.
+	final := drainOperation(t, interrupted, opCmd)
+
+	assert.Equal(t, "Interrupted", final.status,
+		"a stopped operation must not then report that it completed")
+
+	// The work is not context aware, so it still ran and the list was refreshed
+	// from the store rather than left stale.
+	fsMock.AssertExpectations(t)
+}
+
 // TestView_FillsTerminalHeight verifies each view fills the terminal exactly,
 // with the footer on the last line.
 //
@@ -840,7 +888,7 @@ func TestView_FillsTerminalHeight(t *testing.T) {
 	for name, build := range models {
 		for _, height := range heights {
 			for _, width := range widths {
-				t.Run(name, func(t *testing.T) {
+				t.Run(fmt.Sprintf("%s/h=%d/w=%d", name, height, width), func(t *testing.T) {
 					t.Parallel()
 
 					m := build()

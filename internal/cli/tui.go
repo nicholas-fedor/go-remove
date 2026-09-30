@@ -136,6 +136,10 @@ type model struct {
 	// when the model is idle.
 	busy string
 
+	// interrupted records that the running operation was stopped by the user, so
+	// its result cannot claim the work finished.
+	interrupted bool
+
 	// cancelOp stops the operation in flight, and opDone is closed when it has
 	// finished. Shutdown waits on opDone so the history manager is never closed
 	// under a recovery that is still running.
@@ -619,6 +623,9 @@ func (m *model) cancelInFlight() {
 	}
 
 	m.busy = ""
+	// The work may not observe the cancellation at all, so remember that the
+	// user stopped it rather than trusting the result it eventually reports.
+	m.interrupted = true
 }
 
 // waitForOperation blocks until the running operation has finished.
@@ -694,12 +701,20 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cancelOp = nil
 		m.updateGrid()
 
+		// An interrupted operation still applies its side effects, because the
+		// work may not have observed the cancellation, but it must not then
+		// report success the user has already been told they stopped.
+		interrupted := m.interrupted
+		m.interrupted = false
+
 		if msg.err != nil {
-			if msg.errStatus != nil {
-				m.status = msg.errStatus(msg.err)
-			} else {
-				// The error is already wrapped with the operation.
-				m.status = "Error " + msg.err.Error()
+			if !interrupted {
+				if msg.errStatus != nil {
+					m.status = msg.errStatus(msg.err)
+				} else {
+					// The error is already wrapped with the operation.
+					m.status = "Error " + msg.err.Error()
+				}
 			}
 
 			if m.historyManager == nil {
@@ -712,14 +727,23 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// The operation may report a more specific outcome than the generic
-		// form, so its own status wins when it sets one.
-		m.status = msg.okStatus
+		// form, so its own status wins when it sets one. An interrupted
+		// operation keeps the status the interrupt already showed, even though
+		// the refresh below reports the work as done.
+		preserved := m.status
+
+		if !interrupted {
+			m.status = msg.okStatus
+		}
 
 		if msg.refresh != nil {
 			msg.refresh(m)
 		}
 
-		if m.status == "" {
+		switch {
+		case interrupted:
+			m.status = preserved
+		case m.status == "":
 			m.status = "Done " + msg.operation
 		}
 
