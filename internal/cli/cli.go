@@ -36,12 +36,13 @@ type Dependencies struct {
 // Run executes the CLI logic with the provided dependencies and configuration.
 //
 // Parameters:
+//   - ctx: Context governing the operation, carrying any interrupt.
 //   - deps: Filesystem, logger, and optional history manager.
 //   - config: CLI configuration for the requested operation.
 //
 // Returns:
 //   - An error if directory resolution, deletion, or TUI execution fails.
-func Run(deps Dependencies, config Config) error {
+func Run(ctx context.Context, deps Dependencies, config Config) error {
 	log := deps.Logger
 	defer func() { _ = log.Sync() }()
 
@@ -52,6 +53,7 @@ func Run(deps Dependencies, config Config) error {
 
 	if config.Binary == "" {
 		if err := RunTUI(
+			ctx,
 			binDir,
 			config,
 			log,
@@ -68,10 +70,7 @@ func Run(deps Dependencies, config Config) error {
 	binaryPath := deps.FS.AdjustBinaryPath(binDir, config.Binary)
 
 	if deps.HistoryManager != nil {
-		if _, err := deps.HistoryManager.RecordDeletion(
-			context.Background(),
-			binaryPath,
-		); err != nil {
+		if _, err := deps.HistoryManager.RecordDeletion(ctx, binaryPath); err != nil {
 			return fmt.Errorf("recording deletion: %w", err)
 		}
 	} else if err := deps.FS.RemoveBinary(binaryPath, config.Binary, config.Verbose, log); err != nil {

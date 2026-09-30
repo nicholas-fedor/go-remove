@@ -118,7 +118,15 @@ type styleConfig struct {
 }
 
 // model encapsulates the state of the TUI.
+//
+// context has to travel on the model for the handlers to reach the work they
+// start.
+//
+//nolint:containedctx // Bubble Tea's Update receives no context, so the run's
 type model struct {
+	// ctx governs the work the model starts, so an interrupt reaches it.
+	ctx context.Context
+
 	// Mode and view state
 	mode         string // Current mode: "binaries" or "history"
 	confirmation string // Pending confirmation for destructive operations
@@ -169,6 +177,7 @@ var _ ProgramRunner = DefaultRunner{}
 // Returns:
 //   - An error if no binaries are found or the program fails to run.
 func RunTUI(
+	ctx context.Context,
 	dir string,
 	config Config,
 	log logger.Logger,
@@ -199,6 +208,7 @@ func RunTUI(
 	// Initialize the model with default styles.
 	// Enable log visibility by default when verbose mode is active.
 	m := &model{
+		ctx:            ctx,
 		choices:        choices,
 		dir:            dir,
 		config:         config,
@@ -227,8 +237,9 @@ func RunTUI(
 	m.logChan = make(chan LogMsg, maxLogLines)
 	m.setupLogCapture(log)
 
-	// Start the TUI program.
-	program, err := runner.RunProgram(m)
+	// Start the TUI program, giving it the caller's context so an interrupt
+	// reaches the work started from the model.
+	program, err := runner.RunProgram(m, tea.WithContext(ctx))
 	if err != nil {
 		return fmt.Errorf("failed to start TUI program: %w", err)
 	}
@@ -241,10 +252,31 @@ func RunTUI(
 	// Run the program and capture any runtime errors.
 	_, err = program.Run()
 	if err != nil {
+		// An interrupt is the user asking to quit, so it is not a failure.
+		if errors.Is(err, tea.ErrInterrupted) {
+			return nil
+		}
+
 		return fmt.Errorf("failed to run TUI program: %w", err)
 	}
 
 	return nil
+}
+
+// context returns the context governing the model, falling back to a background
+// context when the model was built without one.
+//
+// Parameters:
+//   - None.
+//
+// Returns:
+//   - A context that is never nil.
+func (m *model) context() context.Context {
+	if m.ctx != nil {
+		return m.ctx
+	}
+
+	return context.Background()
 }
 
 // refreshChoices rescans the binary directory, keeping the current list when the
@@ -378,7 +410,7 @@ func (m *model) loadHistory() tea.Cmd {
 			return HistoryMsg{Entries: nil, Error: ErrHistoryNotInitialized}
 		}
 
-		ctx := context.Background()
+		ctx := m.context()
 		entries, err := m.historyManager.GetHistory(ctx, maxHistoryEntries)
 
 		return HistoryMsg{Entries: entries, Error: err}
@@ -508,7 +540,7 @@ func (m *model) handleConfirmation(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 //   - Updated model.
 //   - Follow-up command, if any.
 func (m *model) executeConfirmation() (tea.Model, tea.Cmd) {
-	ctx := context.Background()
+	ctx := m.context()
 
 	switch m.confirmation {
 	case confirmClearAll:
@@ -694,7 +726,7 @@ func (m *model) updateBinaryMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 				// Use history manager if available (it handles trash + history)
 				if m.historyManager != nil {
-					ctx := context.Background()
+					ctx := m.context()
 					if _, err := m.historyManager.RecordDeletion(ctx, binaryPath); err != nil {
 						m.status = fmt.Sprintf("Error recording %s: %v", name, err)
 
@@ -765,7 +797,7 @@ func (m *model) handleRestore() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	ctx := context.Background()
+	ctx := m.context()
 
 	result, err := m.historyManager.Restore(ctx, entry.ID)
 	if err != nil {
@@ -806,7 +838,7 @@ func (m *model) handleUndo() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	ctx := context.Background()
+	ctx := m.context()
 
 	result, err := m.historyManager.UndoMostRecent(ctx)
 	if err != nil {
@@ -857,7 +889,7 @@ func (m *model) handleClearEntry(deleteFromTrash bool) (tea.Model, tea.Cmd) {
 	}
 
 	entry := m.historyEntries[m.historyCursor]
-	ctx := context.Background()
+	ctx := m.context()
 
 	if err := m.historyManager.ClearEntry(ctx, entry.ID, deleteFromTrash); err != nil {
 		m.status = fmt.Sprintf("Error clearing entry: %v", err)

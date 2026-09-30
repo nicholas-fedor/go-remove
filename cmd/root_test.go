@@ -7,6 +7,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -114,7 +115,7 @@ func runCommand(t *testing.T, args []string) (string, error) {
 
 	rootCmd.SetArgs(args)
 
-	err := execute()
+	err := execute(t.Context())
 
 	w.Close()
 
@@ -122,6 +123,25 @@ func runCommand(t *testing.T, args []string) (string, error) {
 	buf.ReadFrom(r)
 
 	return buf.String(), err
+}
+
+// TestNotifyInterrupt_ReleaseIsSafeToRepeat verifies the signal handler can be
+// released both from the watcher goroutine and from the caller.
+//
+// Releasing cancels the context, which wakes the watcher, which releases again,
+// and Execute releases a third time. Two concurrent releases touching the same
+// signal registration would race or panic, so this is run under the race
+// detector. A second real signal is not delivered here because the default
+// behaviour restored after the first one would terminate this process.
+func TestNotifyInterrupt_ReleaseIsSafeToRepeat(t *testing.T) {
+	ctx, release := notifyInterrupt()
+
+	require.NoError(t, ctx.Err())
+
+	release()
+	release()
+
+	require.ErrorIs(t, ctx.Err(), context.Canceled)
 }
 
 // TestRunE_FlagValidation verifies the argument combinations that are rejected
@@ -241,7 +261,7 @@ func TestExecute_ResetsSilenceUsageEachRun(t *testing.T) {
 
 	rootCmd.SetArgs([]string{"--bogus"})
 
-	err := execute()
+	err := execute(t.Context())
 	require.Error(t, err, "an unknown flag must fail")
 
 	assert.False(

@@ -55,6 +55,10 @@ var (
 	ErrChecksumMismatch = errors.New("trash copy does not match the recorded checksum")
 )
 
+// recoveryTimeout bounds the attempt to undo a half-finished deletion, so a
+// stuck restore cannot leave the process hanging after an interrupt.
+const recoveryTimeout = 30 * time.Second
+
 // Log field keys used across history operations.
 const (
 	logFieldBinary  = "binary"
@@ -331,11 +335,22 @@ func (m *HistoryManager) RecordDeletion(
 			Str(logFieldTrash, trashPath).
 			Msg("Failed to record trash location, attempting to restore from trash")
 
-		restoreErr := m.trasher.RestoreFromTrash(ctx, trashPath, binaryPath)
+		// Recovery must not inherit the cancellation that caused the failure, or
+		// the binary would be left in trash purely because the user interrupted
+		// us. It is bounded so a stuck restore cannot hang forever, and a second
+		// interrupt terminates the process outright, since Execute restores the
+		// default signal handler once the first one cancels the context.
+		recoverCtx, cancelRecover := context.WithTimeout(
+			context.WithoutCancel(ctx),
+			recoveryTimeout,
+		)
+		defer cancelRecover()
+
+		restoreErr := m.trasher.RestoreFromTrash(recoverCtx, trashPath, binaryPath)
 		if restoreErr == nil {
 			// The binary is back where it started, so the record no longer
 			// describes reality and should not remain in the history.
-			if delErr := m.storer.DeleteRecord(ctx, record.RecordKey()); delErr != nil {
+			if delErr := m.storer.DeleteRecord(recoverCtx, record.RecordKey()); delErr != nil {
 				m.logger.Warn().
 					Err(delErr).
 					Str(logFieldPath, binaryPath).

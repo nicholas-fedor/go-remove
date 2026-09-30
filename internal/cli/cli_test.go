@@ -7,6 +7,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -125,7 +126,12 @@ func makeDeps(
 
 // executeRun wraps the local run logic and returns the error.
 // It mirrors the behavior of the Run function but accepts a custom runner for testing.
-func executeRun(deps Dependencies, config Config, runner ProgramRunner) error {
+func executeRun(
+	ctx context.Context,
+	deps Dependencies,
+	config Config,
+	runner ProgramRunner,
+) error {
 	log := deps.Logger
 
 	binDir, err := deps.FS.DetermineBinDir(config.Goroot)
@@ -136,7 +142,7 @@ func executeRun(deps Dependencies, config Config, runner ProgramRunner) error {
 	}
 
 	if config.Binary == "" {
-		err = RunTUI(binDir, config, log, deps.FS, runner, nil)
+		err = RunTUI(ctx, binDir, config, log, deps.FS, runner, nil)
 	} else {
 		binaryPath := deps.FS.AdjustBinaryPath(binDir, config.Binary)
 
@@ -190,7 +196,7 @@ func runTestCase(t *testing.T, tt *testCase) {
 	})
 
 	// Execute the run function and capture any errors.
-	err := executeRun(deps, tt.config, runner)
+	err := executeRun(t.Context(), deps, tt.config, runner)
 
 	// Capture stdout output after execution.
 	gotOutput := getOutput()
@@ -241,7 +247,7 @@ func TestRunTUI_NoTerminal(t *testing.T) {
 	mockFSInstance := mockFS.NewMockFS(t)
 	mockFSInstance.On("ListBinaries", "/bin").Return([]string{"vhs"}, nil).Maybe()
 
-	err := RunTUI("/bin", Config{}, newMockLoggerWithDefaults(t), mockFSInstance,
+	err := RunTUI(t.Context(), "/bin", Config{}, newMockLoggerWithDefaults(t), mockFSInstance,
 		mockRunner.NewMockProgramRunner(t), nil)
 
 	require.ErrorIs(t, err, ErrNotATerminal)
@@ -258,7 +264,7 @@ func TestRunTUI_DirectoryReadFailure(t *testing.T) {
 	mockFSInstance := mockFS.NewMockFS(t)
 	mockFSInstance.On("ListBinaries", "/bin").Return(nil, readErr)
 
-	err := RunTUI("/bin", Config{}, newMockLoggerWithDefaults(t), mockFSInstance,
+	err := RunTUI(t.Context(), "/bin", Config{}, newMockLoggerWithDefaults(t), mockFSInstance,
 		mockRunner.NewMockProgramRunner(t), nil)
 
 	require.ErrorIs(t, err, readErr)
@@ -462,7 +468,7 @@ func TestRun_WithLoggerSync(t *testing.T) {
 			}
 
 			// Execute the Run function and capture any errors.
-			err := Run(deps, tt.config)
+			err := Run(t.Context(), deps, tt.config)
 
 			// Capture stdout output after execution.
 			gotOutput := getOutput()
@@ -513,7 +519,7 @@ func TestRun_VerboseMode(t *testing.T) {
 	getOutput := captureStdout(t)
 
 	// Execute the Run function and capture any errors.
-	err := Run(deps, config)
+	err := Run(t.Context(), deps, config)
 
 	// Restore stdout and get captured output.
 	gotOutput := getOutput()
