@@ -89,6 +89,10 @@ type LogMsg struct {
 type HistoryMsg struct {
 	Entries []*history.HistoryEntry
 	Error   error
+
+	// quiet marks a background refresh, such as the one after an operation, which
+	// must not replace the status the operation reported.
+	quiet bool
 }
 
 // ProgramRunner defines an interface for running Bubbletea programs.
@@ -433,16 +437,27 @@ func (m *model) Init() tea.Cmd {
 // Returns:
 //   - Command that produces a HistoryMsg.
 func (m *model) loadHistory() tea.Cmd {
+	return m.loadHistoryReporting(false)
+}
+
+// loadHistoryReporting loads the history, optionally as a background refresh.
+//
+// Parameters:
+//   - quiet: When true the result leaves the status line alone.
+//
+// Returns:
+//   - Command that produces a HistoryMsg.
+func (m *model) loadHistoryReporting(quiet bool) tea.Cmd {
 	return func() tea.Msg {
 		// Check if history manager is available
 		if m.historyManager == nil {
-			return HistoryMsg{Entries: nil, Error: ErrHistoryNotInitialized}
+			return HistoryMsg{Entries: nil, Error: ErrHistoryNotInitialized, quiet: quiet}
 		}
 
 		ctx := m.context()
 		entries, err := m.historyManager.GetHistory(ctx, maxHistoryEntries)
 
-		return HistoryMsg{Entries: entries, Error: err}
+		return HistoryMsg{Entries: entries, Error: err, quiet: quiet}
 	}
 }
 
@@ -687,7 +702,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.status = "Error " + msg.err.Error()
 			}
 
-			reload := m.loadHistory()
+			if m.historyManager == nil {
+				return m, nil
+			}
+
+			reload := m.loadHistoryReporting(true)
 
 			return m, reload
 		}
@@ -706,7 +725,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.updateGrid()
 
-		reload := m.loadHistory()
+		if m.historyManager == nil {
+			return m, nil
+		}
+
+		reload := m.loadHistoryReporting(true)
 
 		return m, reload
 
@@ -724,6 +747,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case HistoryMsg:
 		// Handle history loading result
 		m.historyLoading = false
+
+		if msg.quiet {
+			// A background refresh keeps whatever the operation reported.
+			if msg.Error == nil {
+				m.historyEntries = msg.Entries
+				m.clampHistoryCursor()
+			}
+
+			return m, nil
+		}
+
 		if msg.Error != nil {
 			m.status = fmt.Sprintf("Error loading history: %v", msg.Error)
 		} else {
@@ -861,7 +895,7 @@ func (m *model) executeConfirmation() (tea.Model, tea.Cmd) {
 				return nil
 			},
 			nil,
-			func(err error) string { return fmt.Sprintf("Error deleting permanently: %v", err) },
+			nil,
 			func() string { return "Permanently deleted " + name },
 		)
 
@@ -1466,24 +1500,23 @@ func (m *model) viewBinaries() tea.View {
 	footerText := "↑/k: up  ↓/j: down  ←/h: left  →/l: right  Enter: remove  s: sort  r: history  u: undo  L: logs  q: quit"
 	footer := footerStyle.Render(footerText)
 
-	// Pad between the content and the footer from what was actually rendered,
-	// rather than from a hand-counted total. The count drifts as soon as the
-	// layout does, which is what left the footer short of the bottom of the
-	// terminal. The padding goes inside the body so the renderer still pads
-	// every line to the terminal width.
-	body := s.String()
+	// Pad between the content and the footer from what actually renders, rather
+	// than from a hand-counted total that drifts as soon as the layout does.
+	// The measurement uses the same style as the render, because left padding
+	// and the width can change how many lines the result occupies, and the
+	// padding goes inside the body so every line keeps its width.
+	frame := lipgloss.NewStyle().
+		PaddingLeft(leftPadding).
+		Width(m.width - leftPadding)
 
-	if pad := max(
-		m.height-lipgloss.Height(body)-lipgloss.Height(footer),
-		0,
-	); pad > 0 {
+	body := s.String()
+	pad := max(m.height-lipgloss.Height(frame.Render(body+footer)), 0)
+
+	if pad > 0 {
 		body += strings.Repeat("\n", pad)
 	}
 
-	content := lipgloss.NewStyle().
-		PaddingLeft(leftPadding).
-		Width(m.width - leftPadding).
-		Render(body + footer)
+	content := frame.Render(body + footer)
 
 	view := tea.NewView(content)
 	view.AltScreen = true
@@ -1677,24 +1710,23 @@ func (m *model) viewHistory() tea.View {
 
 	footer := footerStyle.Render(footerText)
 
-	// Pad between the content and the footer from what was actually rendered,
-	// rather than from a hand-counted total. The count drifts as soon as the
-	// layout does, which is what left the footer short of the bottom of the
-	// terminal. The padding goes inside the body so the renderer still pads
-	// every line to the terminal width.
-	body := s.String()
+	// Pad between the content and the footer from what actually renders, rather
+	// than from a hand-counted total that drifts as soon as the layout does.
+	// The measurement uses the same style as the render, because left padding
+	// and the width can change how many lines the result occupies, and the
+	// padding goes inside the body so every line keeps its width.
+	frame := lipgloss.NewStyle().
+		PaddingLeft(leftPadding).
+		Width(m.width - leftPadding)
 
-	if pad := max(
-		m.height-lipgloss.Height(body)-lipgloss.Height(footer),
-		0,
-	); pad > 0 {
+	body := s.String()
+	pad := max(m.height-lipgloss.Height(frame.Render(body+footer)), 0)
+
+	if pad > 0 {
 		body += strings.Repeat("\n", pad)
 	}
 
-	content := lipgloss.NewStyle().
-		PaddingLeft(leftPadding).
-		Width(m.width - leftPadding).
-		Render(body + footer)
+	content := frame.Render(body + footer)
 
 	view := tea.NewView(content)
 	view.AltScreen = true

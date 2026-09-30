@@ -810,6 +810,7 @@ func TestView_FillsTerminalHeight(t *testing.T) {
 	t.Parallel()
 
 	heights := []int{10, 24, 40}
+	widths := []int{40, 80, 160}
 
 	models := map[string]func() model{
 		"binaries": func() model {
@@ -838,33 +839,36 @@ func TestView_FillsTerminalHeight(t *testing.T) {
 
 	for name, build := range models {
 		for _, height := range heights {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
+			for _, width := range widths {
+				t.Run(name, func(t *testing.T) {
+					t.Parallel()
 
-				m := build()
-				m.height = height
+					m := build()
+					m.height = height
+					m.width = width
 
-				// The real flow recalculates the grid on the first size
-				// message, so the test does the same rather than using
-				// hand-set rows that the program would never have.
-				m.updateGrid()
+					// The real flow recalculates the grid on the first size
+					// message, so the test does the same rather than using
+					// hand-set rows that the program would never have.
+					m.updateGrid()
 
-				rendered := m.View()
-				content := rendered.Content
+					rendered := m.View()
+					content := rendered.Content
 
-				// The view must never fall short of the terminal, which is
-				// what the hand-counted padding used to do. It may exceed it on
-				// a very short terminal with the log panel open, since the
-				// content genuinely does not fit.
-				assert.GreaterOrEqual(t, lipgloss.Height(content), height,
-					"the view must fill at least the terminal height")
+					// The view must never fall short of the terminal, which is
+					// what the hand-counted padding used to do. It may exceed it on
+					// a very short terminal with the log panel open, since the
+					// content genuinely does not fit.
+					assert.GreaterOrEqual(t, lipgloss.Height(content), height,
+						"the view must fill at least the terminal height")
 
-				// The footer is written last, so it must end the view.
-				lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
-				require.NotEmpty(t, lines)
-				assert.NotEmpty(t, strings.TrimSpace(lines[len(lines)-1]),
-					"the last line must not be blank")
-			})
+					// The footer is written last, so it must end the view.
+					lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+					require.NotEmpty(t, lines)
+					assert.NotEmpty(t, strings.TrimSpace(lines[len(lines)-1]),
+						"the last line must not be blank")
+				})
+			}
 		}
 	}
 }
