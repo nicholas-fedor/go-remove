@@ -904,9 +904,11 @@ func TestViewHistory_AlignsColumnsWithCJKNames(t *testing.T) {
 	}
 }
 
-// TestTruncateToWidth verifies truncation ends on a rune boundary.
+// TestTruncateToWidth verifies truncation ends on a grapheme cluster boundary.
 //
 // Slicing at a byte index splits a multi-byte rune and renders invalid UTF-8.
+// Accumulating per rune splits a cluster that spans runes, such as a joined
+// emoji, and leaves a dangling sequence the terminal renders as tofu.
 func TestTruncateToWidth(t *testing.T) {
 	t.Parallel()
 
@@ -922,6 +924,41 @@ func TestTruncateToWidth(t *testing.T) {
 		{name: "multibyte never splits", input: "日本語のツール", width: 5, want: "日本"},
 		{name: "cjk is two cells per rune", input: "日本語", width: 3, want: "日"},
 		{name: "zero width", input: "tool", width: 0, want: ""},
+		{
+			name:  "joined emoji cluster fits whole",
+			input: "👨‍👩‍👧‍👦x",
+			width: 2,
+			want:  "👨‍👩‍👧‍👦",
+		},
+		{
+			// The cluster does not fit in the last two cells, so it is dropped
+			// whole rather than cut after the man, which would leave a
+			// dangling zero-width joiner on screen.
+			name:  "cluster cut off is dropped whole",
+			input: "ab👨‍👩‍👧‍👦",
+			width: 3,
+			want:  "ab",
+		},
+		{
+			name:  "skin tone modifier stays attached",
+			input: "👍🏽x",
+			width: 2,
+			want:  "👍🏽",
+		},
+		{
+			// An "e" plus a combining acute (U+0301): one cluster, one cell.
+			// Per rune it would split, leaving a dangling accent.
+			name:  "combining mark stays attached",
+			input: "e" + string(rune(0x301)) + "x",
+			width: 1,
+			want:  "e" + string(rune(0x301)),
+		},
+		{
+			name:  "flag sequence is one cluster",
+			input: "🇺🇸🇬🇧",
+			width: 2,
+			want:  "🇺🇸",
+		},
 	}
 
 	for _, tt := range tests {
@@ -961,7 +998,7 @@ func TestViewHistory_FitsNarrowTerminal(t *testing.T) {
 		InTrash:    true,
 	}
 
-	for _, width := range []int{30, 40, 80, 160} {
+	for _, width := range []int{20, 24, 28, 30, 41, 42, 80, 160} {
 		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {
 			t.Parallel()
 
@@ -975,12 +1012,104 @@ func TestViewHistory_FitsNarrowTerminal(t *testing.T) {
 			}
 
 			rendered := stripANSI(m.View().Content)
+			lines := strings.Split(rendered, "\n")
 
-			for _, line := range strings.Split(rendered, "\n") {
+			for _, line := range lines {
 				assert.LessOrEqual(t, displayWidth(line), width,
 					"no line may exceed the terminal width, got %d for %q",
 					displayWidth(line), line)
 			}
+
+			// A row wider than the frame wraps onto a second line, and every
+			// wrapped line is still within the width, so the check above misses
+			// it. The entry row is the one carrying the cursor glyph, and the
+			// name has to be finished on that same line: either whole, or
+			// shortened behind an ellipsis. A row that keeps only the leading
+			// characters and spills the tail below has wrapped.
+			row := cursorRow(t, lines)
+			shortened := strings.Contains(row, entry.BinaryName) ||
+				strings.Contains(row, "...")
+
+			assert.True(t, shortened,
+				"the name must finish on the row at width %d, got %q", width, row)
+		})
+	}
+}
+
+// cursorRow returns the rendered table row for the selected entry.
+//
+// The selected row is the one prefixed with the cursor glyph, which
+// defaultStyleConfig renders as a right-pointing triangle.
+//
+// Parameters:
+//   - t: test handle used to fail the test when no such row exists.
+//   - lines: rendered output split into lines.
+//
+// Returns:
+//   - The cursor row.
+func cursorRow(t *testing.T, lines []string) string {
+	t.Helper()
+
+	cursor := defaultStyleConfig().Cursor
+
+	for _, line := range lines {
+		if strings.Contains(line, cursor) {
+			return line
+		}
+	}
+
+	t.Fatalf("no cursor row in %q", lines)
+
+	return ""
+}
+
+// TestViewHistory_DropsTrashColumnWhenItCannotFit verifies the trash column is
+// dropped once the space left for it falls under the minimum name width.
+//
+// The candidate name width must be compared before it is clamped. Clamping it
+// first would lift every candidate to the minimum and pin the trash column on
+// at every width.
+func TestViewHistory_DropsTrashColumnWhenItCannotFit(t *testing.T) {
+	t.Parallel()
+
+	entry := &history.HistoryEntry{
+		ID:         "1",
+		Timestamp:  time.Now(),
+		BinaryName: "a-fairly-long-binary-name",
+		InTrash:    true,
+	}
+
+	tests := []struct {
+		name      string
+		width     int
+		wantTrash bool
+	}{
+		{name: "fits", width: 80, wantTrash: true},
+		{name: "just fits", width: 41, wantTrash: true},
+		{name: "one cell short", width: 40, wantTrash: false},
+		{name: "narrow", width: 30, wantTrash: false},
+		{name: "very narrow", width: 20, wantTrash: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := &model{
+				historyEntries: []*history.HistoryEntry{entry},
+				historyCursor:  0,
+				mode:           modeHistory,
+				width:          tt.width,
+				height:         24,
+				styles:         defaultStyleConfig(),
+			}
+
+			rendered := stripANSI(m.View().Content)
+
+			assert.Equal(t, tt.wantTrash, strings.Contains(rendered, historyTrashHeading),
+				"trash heading presence at width %d", tt.width)
+			assert.Equal(t, tt.wantTrash, strings.Contains(rendered, "Yes"),
+				"trash value presence at width %d", tt.width)
 		})
 	}
 }

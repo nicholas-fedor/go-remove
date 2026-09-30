@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"github.com/rivo/uniseg"
 	"github.com/rs/zerolog"
 	"golang.org/x/term"
 
@@ -1451,10 +1452,14 @@ func displayWidth(s string) int {
 	return lipgloss.Width(s)
 }
 
-// truncateToWidth shortens s to at most width cells, ending on a rune boundary.
+// truncateToWidth shortens s to at most width cells, ending on a grapheme cluster boundary.
 //
 // Slicing at a byte index would split a multi-byte rune in half and render
-// invalid UTF-8 as mojibake.
+// invalid UTF-8 as mojibake. Accumulating per rune is not enough either: an
+// emoji joined into a single cluster (a ZWJ sequence such as a family, or a
+// skin-tone modifier) spans several runes, and cutting between them leaves a
+// dangling cluster that the terminal renders as tofu. uniseg walks whole
+// clusters, and lipgloss measures them, so a cluster is kept or dropped whole.
 func truncateToWidth(s string, width int) string {
 	if displayWidth(s) <= width {
 		return s
@@ -1465,13 +1470,16 @@ func truncateToWidth(s string, width int) string {
 		used    int
 	)
 
-	for _, char := range s {
-		cellWidth := lipgloss.Width(string(char))
+	clusters := uniseg.NewGraphemes(s)
+	for clusters.Next() {
+		cluster := clusters.Str()
+
+		cellWidth := lipgloss.Width(cluster)
 		if used+cellWidth > width {
 			break
 		}
 
-		builder.WriteRune(char)
+		builder.WriteString(cluster)
 
 		used += cellWidth
 	}
@@ -1645,31 +1653,40 @@ func (m *model) viewHistory() tea.View {
 		// Size the columns from the terminal rather than a fixed 50 columns,
 		// which wrapped on a narrow window.
 		//
-		// The frame pads its content by leftPadding and every row carries a
-		// cursor prefix, so both come off the top before the columns are
-		// allocated. The trash column is dropped first because it is the least
+		// The frame sets Width(m.width-leftPadding) and pads its content by
+		// leftPadding, so the space actually left for the columns is the width
+		// less both. Sizing off a single subtraction over-allocates
+		// leftPadding cells and wraps every row. Every row also carries a
+		// cursor prefix, which comes off next.
+		//
+		// The trash column is dropped first because it is the least
 		// informative, and neither remaining column is forced wider than the
 		// space available, so a narrow window truncates rather than wrapping.
-		content := max(m.width-leftPadding, 1)
+		content := max(m.width-2*leftPadding, 1)
 		free := max(content-displayWidth(historyCursorPrefix)-historyColumnDivider, 1)
 
 		trashWidth := len(historyTrashHeading)
 		dateWidth := min(historyDateWidth, max(free-historyMinNameWidth, 1))
 		nameWithoutTrash := max(free-dateWidth-historyColumnDivider, 1)
-		nameWithTrash := max(
+
+		// The candidate is deliberately left unclamped so it reflects the space
+		// that is really left. Clamping it before the comparison would make
+		// every candidate meet the minimum and pin the trash column on even
+		// when it does not fit.
+		nameWithTrashCandidate := max(
 			free-dateWidth-2*historyColumnDivider-trashWidth,
-			historyMinNameWidth,
+			1,
 		)
 
-		showTrash := nameWithTrash >= historyMinNameWidth
+		showTrash := nameWithTrashCandidate >= historyMinNameWidth
 		nameWidth := nameWithoutTrash
 
 		if showTrash {
-			nameWidth = nameWithTrash
+			nameWidth = max(nameWithTrashCandidate, historyMinNameWidth)
 		}
 
 		// Table header
-		header := padToWidth(historyDateHeading, dateWidth) +
+		header := padToWidth(truncateToWidth(historyDateHeading, dateWidth), dateWidth) +
 			strings.Repeat(" ", historyColumnDivider) +
 			padToWidth("Binary", nameWidth)
 
@@ -1751,7 +1768,7 @@ func (m *model) viewHistory() tea.View {
 				trashStr = trashNoStyle.Render("No")
 			}
 
-			row := padToWidth(dateStr, dateWidth) +
+			row := padToWidth(truncateToWidth(dateStr, dateWidth), dateWidth) +
 				strings.Repeat(" ", historyColumnDivider) +
 				padToWidth(nameStr, nameWidth)
 
