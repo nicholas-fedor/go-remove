@@ -14,6 +14,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"charm.land/lipgloss/v2"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -34,7 +35,6 @@ const (
 	keyUp    = "up"
 	keyLeft  = "left"
 	keyRight = "right"
-	keyCtrlC = "ctrl+c"
 )
 
 // tuiMockLogger is a simple mock logger for TUI tests.
@@ -391,6 +391,53 @@ func keyPress(r rune) tea.KeyPressMsg {
 }
 
 // keyPressString creates a KeyPressMsg from a string representation.
+// allowHistoryReload permits the history reload that draining an operation
+// performs, which a strict mock otherwise rejects as unexpected.
+func allowHistoryReload(m *mockHistory.MockManager) {
+	m.On("GetHistory", mock.Anything, mock.Anything).
+		Return([]*history.HistoryEntry(nil), nil).
+		Maybe()
+}
+
+// drainOperation runs the command an operation returned and applies its result,
+// so a test can assert the outcome of work that now happens outside Update.
+//
+// Parameters:
+//   - t: Test that owns the model.
+//   - m: The model that produced the command.
+//   - cmd: Command returned alongside the updated model.
+//
+// Returns:
+//   - The model after the result has been applied.
+func drainOperation(t *testing.T, m *model, cmd tea.Cmd) *model {
+	t.Helper()
+
+	if cmd == nil {
+		return m
+	}
+
+	msg := cmd()
+
+	// Commands that are not an operation, such as a quit, need no draining.
+	switch msg.(type) {
+	case opResultMsg:
+	default:
+		return m
+	}
+
+	result := msg.(opResultMsg)
+	if result.operation == "" && result.err == nil && result.refresh == nil {
+		return m
+	}
+
+	updated, _ := m.Update(result)
+	got, ok := updated.(*model)
+	require.True(t, ok)
+
+	return got
+}
+
+// keyPressString builds a key press from its display name.
 func keyPressString(s string) tea.KeyPressMsg {
 	switch s {
 	case keyEnter:
@@ -403,6 +450,10 @@ func keyPressString(s string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: tea.KeyLeft}
 	case keyRight:
 		return tea.KeyPressMsg{Code: tea.KeyRight}
+	case keyCtrlC:
+		// A modified key cannot fall through to the single-rune branch below,
+		// so it has to be built explicitly.
+		return tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
 	default:
 		if len(s) == 1 {
 			r := rune(s[0])
@@ -618,7 +669,11 @@ func Test_model_Update(t *testing.T) {
 			}
 
 			got, gotCmd := tt.m.Update(tt.args.msg)
-			gotModel := got.(*model)
+			gotModel, _ := got.(*model)
+
+			// An operation now runs outside Update, so the result is applied
+			// before the outcome is asserted.
+			gotModel = drainOperation(t, gotModel, gotCmd)
 
 			if !reflect.DeepEqual(gotModel.choices, tt.want.choices) ||
 				gotModel.cursorX != tt.want.cursorX ||
@@ -723,6 +778,219 @@ func stripANSI(str string) string {
 	return ansiRegex.ReplaceAllString(str, "")
 }
 
+// withoutBlankLines drops blank lines so a comparison covers content and order
+// only.
+//
+// The view measures and inserts the padding between its content and the footer
+// to fill the terminal, so the padding is asserted as a height property by
+// TestView_FillsTerminalHeight rather than being hand-counted in the expected
+// output.
+func withoutBlankLines(s string) string {
+	lines := strings.Split(s, "\n")
+	kept := make([]string, 0, len(lines))
+
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+
+		kept = append(kept, line)
+	}
+
+	return strings.Join(kept, "\n")
+}
+
+// TestCtrlC_KeepsInterruptedStatus verifies the status an interrupt showed is
+// not replaced when the operation it stopped later reports success.
+//
+// The work is not necessarily context aware, so it can run to completion after
+// the user has been told they stopped it.
+func TestCtrlC_KeepsInterruptedStatus(t *testing.T) {
+	t.Parallel()
+
+	fsMock := mockFS.NewMockFS(t)
+	fsMock.On("AdjustBinaryPath", "/bin", "vhs").Return("/bin/vhs")
+	fsMock.On("RemoveBinary", "/bin/vhs", "vhs", false, mock.Anything).Return(nil)
+	fsMock.On("ListBinaries", "/bin").Return([]string{"vhs"}, nil).Maybe()
+
+	m := &model{
+		choices:       []string{"vhs"},
+		dir:           "/bin",
+		cols:          1,
+		rows:          1,
+		fs:            fsMock,
+		logger:        &tuiMockLogger{},
+		logs:          make([]string, 0, maxLogLines),
+		logChan:       make(chan LogMsg, maxLogLines),
+		width:         80,
+		height:        24,
+		sortAscending: true,
+		styles:        defaultStyleConfig(),
+	}
+
+	// Start a removal, then interrupt it the way the key handler does.
+	started, opCmd := m.Update(keyPressString(keyEnter))
+	interrupting, _ := started.Update(keyPressString(keyCtrlC))
+
+	interrupted, ok := interrupting.(*model)
+	require.True(t, ok)
+	require.Equal(t, "Interrupted", interrupted.status)
+	require.NotEmpty(t, opCmd, "the removal must still be in flight")
+
+	// The work finishes without observing the cancellation.
+	final := drainOperation(t, interrupted, opCmd)
+
+	assert.Equal(t, "Interrupted", final.status,
+		"a stopped operation must not then report that it completed")
+
+	// The work is not context aware, so it still ran and the list was refreshed
+	// from the store rather than left stale.
+	fsMock.AssertExpectations(t)
+}
+
+// TestView_FillsTerminalHeight verifies each view fills the terminal exactly,
+// with the footer on the last line.
+//
+// The padding used to come from a hand-counted total, which drifted out of step
+// with the layout and left the footer short of the bottom. Asserting the property
+// keeps the two tied together whatever the layout becomes.
+func TestView_FillsTerminalHeight(t *testing.T) {
+	t.Parallel()
+
+	heights := []int{10, 24, 40}
+	widths := []int{40, 80, 160}
+
+	models := map[string]func() model{
+		"binaries": func() model {
+			return model{
+				choices: []string{"vhs", "tool"}, cols: 1, rows: 2, width: 80, height: 24,
+				sortAscending: true, styles: defaultStyleConfig(),
+			}
+		},
+		"binaries with status and logs": func() model {
+			return model{
+				choices: []string{"vhs"}, cols: 1, rows: 1, width: 80, height: 24,
+				status:        "Removed tool",
+				logs:          []string{"a log line", "another log line"},
+				showLogs:      true,
+				sortAscending: true, styles: defaultStyleConfig(),
+			}
+		},
+		"history": func() model {
+			return model{
+				historyEntries: []*history.HistoryEntry{{BinaryName: "vhs"}},
+				mode:           modeHistory, width: 80, height: 24,
+				sortAscending: true, styles: defaultStyleConfig(),
+			}
+		},
+	}
+
+	for name, build := range models {
+		for _, height := range heights {
+			for _, width := range widths {
+				t.Run(fmt.Sprintf("%s/h=%d/w=%d", name, height, width), func(t *testing.T) {
+					t.Parallel()
+
+					m := build()
+					m.height = height
+					m.width = width
+
+					// The real flow recalculates the grid on the first size
+					// message, so the test does the same rather than using
+					// hand-set rows that the program would never have.
+					m.updateGrid()
+
+					rendered := m.View()
+					content := rendered.Content
+
+					// The view must never fall short of the terminal, which is
+					// what the hand-counted padding used to do. It may exceed it on
+					// a very short terminal with the log panel open, since the
+					// content genuinely does not fit.
+					assert.GreaterOrEqual(t, lipgloss.Height(content), height,
+						"the view must fill at least the terminal height")
+
+					// The footer is written last, so it must end the view.
+					lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+					require.NotEmpty(t, lines)
+					assert.NotEmpty(t, strings.TrimSpace(lines[len(lines)-1]),
+						"the last line must not be blank")
+				})
+			}
+		}
+	}
+}
+
+// TestHistoryMsg_ClampsCursor verifies the cursor is brought back inside the
+// list when entries disappear.
+//
+// Without this, clearing the selected entry leaves the cursor past the end, so
+// no row renders as selected and the view looks frozen on a phantom row.
+func TestHistoryMsg_ClampsCursor(t *testing.T) {
+	t.Parallel()
+
+	entry := func(name string) *history.HistoryEntry {
+		return &history.HistoryEntry{
+			ID:         name,
+			BinaryName: name,
+		}
+	}
+
+	m := &model{
+		historyEntries: []*history.HistoryEntry{entry("a"), entry("b"), entry("c")},
+		historyCursor:  2,
+		historyManager: &mockHistory.MockManager{},
+		logger:         &tuiMockLogger{},
+		styles:         defaultStyleConfig(),
+		fs:             mockFS.NewMockFS(t),
+	}
+
+	// The selected entry is cleared, so the list shrinks under the cursor.
+	updated, _ := m.Update(HistoryMsg{
+		Entries: []*history.HistoryEntry{entry("a"), entry("b")},
+	})
+
+	got, ok := updated.(*model)
+	require.True(t, ok)
+
+	assert.Less(t, got.historyCursor, len(got.historyEntries),
+		"the cursor must stay inside the entry list")
+	assert.Equal(t, 1, got.historyCursor,
+		"the cursor should land on the new last entry")
+
+	// An empty list must leave the cursor at zero rather than negative.
+	empty, _ := got.Update(HistoryMsg{Entries: nil})
+
+	emptyModel, ok := empty.(*model)
+	require.True(t, ok)
+	assert.Equal(t, 0, emptyModel.historyCursor)
+}
+
+// TestHandleConfirmation_CtrlC verifies ctrl+c always leaves a dialog.
+//
+// A dialog that swallows it is a trap for the user who reaches for the one key
+// every terminal program honours.
+func TestHandleConfirmation_CtrlC(t *testing.T) {
+	t.Parallel()
+
+	m := &model{
+		confirmation:   confirmDeletePerm,
+		historyEntries: []*history.HistoryEntry{{BinaryName: "vhs"}},
+		historyManager: &mockHistory.MockManager{},
+		logger:         &tuiMockLogger{},
+		styles:         defaultStyleConfig(),
+		fs:             mockFS.NewMockFS(t),
+	}
+
+	updated, cmd := m.handleConfirmation(keyPressString("ctrl+c"))
+
+	got, ok := updated.(*model)
+	require.True(t, ok)
+
+	assert.Equal(t, confirmNone, got.confirmation, "the dialog must close")
+	require.NotNil(t, cmd, "ctrl+c must quit rather than be swallowed")
+}
+
 // Test_model_View verifies the View method's rendered output.
 func Test_model_View(t *testing.T) {
 	const contentWidth = 78 // Max visible width for content (excluding leftPadding)
@@ -777,9 +1045,6 @@ func Test_model_View(t *testing.T) {
 					leftPaddingStr+pad("❯ vhs", effectiveWidth),
 					leftPaddingStr+pad("", effectiveWidth),
 				)
-				for range 15 { // Adjusted for totalHeightBase=8
-					lines = append(lines, leftPaddingStr+pad("", effectiveWidth))
-				}
 
 				footerPart1 := "↑/k: up  ↓/j: down  ←/h: left  →/l: right  Enter: remove  s: sort  r:"
 				footerPart2 := "history  u: undo  L: logs  q: quit"
@@ -842,9 +1107,18 @@ func Test_model_View(t *testing.T) {
 			tt.m.sortChoices()
 			tt.m.updateGrid()
 
-			got := stripANSI(tt.m.View().Content)
-			if got != tt.want {
-				t.Errorf("model.View() got = %q, want %q", got, tt.want)
+			view := tt.m.View()
+			got := stripANSI(view.Content)
+
+			// The view measures and fills the terminal itself, so the padding
+			// between the content and the footer is asserted as a height
+			// property rather than hand-counted here.
+			if content, want := withoutBlankLines(
+				got,
+			), withoutBlankLines(
+				tt.want,
+			); content != want {
+				t.Errorf("model.View() content = %q, want %q", content, want)
 			}
 		})
 	}
@@ -857,6 +1131,7 @@ func Test_model_View(t *testing.T) {
 func Test_model_Update_EnterWithHistoryManager(t *testing.T) {
 	fsMock := mockFS.NewMockFS(t)
 	historyMock := mockHistory.NewMockManager(t)
+	allowHistoryReload(historyMock)
 
 	// Setup expectations
 	fsMock.On("AdjustBinaryPath", "/bin", "test").Return("/bin/test")
@@ -878,8 +1153,9 @@ func Test_model_Update_EnterWithHistoryManager(t *testing.T) {
 		sortAscending:  true,
 	}
 
-	got, _ := m.Update(keyPressString(keyEnter))
-	gotModel := got.(*model)
+	got, opCmd := m.Update(keyPressString(keyEnter))
+	gotModel, _ := got.(*model)
+	gotModel = drainOperation(t, gotModel, opCmd)
 
 	assert.Equal(t, "Removed test", gotModel.status)
 	assert.Contains(t, gotModel.choices, "other")
@@ -891,6 +1167,7 @@ func Test_model_Update_EnterWithHistoryManager(t *testing.T) {
 func Test_model_Update_HistoryRecordError(t *testing.T) {
 	fsMock := mockFS.NewMockFS(t)
 	historyMock := mockHistory.NewMockManager(t)
+	allowHistoryReload(historyMock)
 
 	fsMock.On("AdjustBinaryPath", "/bin", "test").Return("/bin/test")
 	historyMock.On("RecordDeletion", mock.Anything, "/bin/test").
@@ -910,8 +1187,9 @@ func Test_model_Update_HistoryRecordError(t *testing.T) {
 		sortAscending:  true,
 	}
 
-	got, _ := m.Update(keyPressString(keyEnter))
-	gotModel := got.(*model)
+	got, opCmd := m.Update(keyPressString(keyEnter))
+	gotModel, _ := got.(*model)
+	gotModel = drainOperation(t, gotModel, opCmd)
 
 	assert.Equal(t, "Error recording test: history storage full", gotModel.status)
 	assert.Equal(t, []string{"test"}, gotModel.choices) // Should not be removed
@@ -924,6 +1202,7 @@ func Test_model_Update_HistoryRecordError(t *testing.T) {
 func Test_model_Update_BinaryRemovedFromChoicesAfterHistoryRecord(t *testing.T) {
 	fsMock := mockFS.NewMockFS(t)
 	historyMock := mockHistory.NewMockManager(t)
+	allowHistoryReload(historyMock)
 
 	fsMock.On("AdjustBinaryPath", "/bin", "binary1").Return("/bin/binary1")
 	historyMock.On("RecordDeletion", mock.Anything, "/bin/binary1").
@@ -944,8 +1223,9 @@ func Test_model_Update_BinaryRemovedFromChoicesAfterHistoryRecord(t *testing.T) 
 		sortAscending:  true,
 	}
 
-	got, _ := m.Update(keyPressString(keyEnter))
-	gotModel := got.(*model)
+	got, opCmd := m.Update(keyPressString(keyEnter))
+	gotModel, _ := got.(*model)
+	gotModel = drainOperation(t, gotModel, opCmd)
 
 	assert.Len(t, gotModel.choices, 2)
 	assert.NotContains(t, gotModel.choices, "binary1")
@@ -959,6 +1239,7 @@ func Test_model_Update_BinaryRemovedFromChoicesAfterHistoryRecord(t *testing.T) 
 func Test_handleRestore_RefreshesBinaryList(t *testing.T) {
 	fsMock := mockFS.NewMockFS(t)
 	historyMock := mockHistory.NewMockManager(t)
+	allowHistoryReload(historyMock)
 
 	entry := &history.HistoryEntry{
 		ID:         "entry1",
@@ -984,8 +1265,8 @@ func Test_handleRestore_RefreshesBinaryList(t *testing.T) {
 		sortAscending:  true,
 	}
 
-	got, cmd := m.handleRestore()
-	gotModel := got.(*model)
+	_, cmd := m.handleRestore()
+	gotModel := drainOperation(t, m, cmd)
 
 	assert.Contains(t, gotModel.choices, "restored_binary")
 	assert.NotNil(t, cmd)
@@ -997,6 +1278,7 @@ func Test_handleRestore_RefreshesBinaryList(t *testing.T) {
 func Test_handleRestore_BinaryAppearsInChoices(t *testing.T) {
 	fsMock := mockFS.NewMockFS(t)
 	historyMock := mockHistory.NewMockManager(t)
+	allowHistoryReload(historyMock)
 
 	entry := &history.HistoryEntry{
 		ID:         "entry1",
@@ -1021,8 +1303,8 @@ func Test_handleRestore_BinaryAppearsInChoices(t *testing.T) {
 		height:         24,
 	}
 
-	got, _ := m.handleRestore()
-	gotModel := got.(*model)
+	_, opCmd := m.handleRestore()
+	gotModel := drainOperation(t, m, opCmd)
 
 	assert.Equal(t, []string{"newbinary"}, gotModel.choices)
 	assert.Equal(t, "Restored newbinary to /bin/newbinary", gotModel.status)
@@ -1033,6 +1315,7 @@ func Test_handleRestore_BinaryAppearsInChoices(t *testing.T) {
 // Test_handleRestore_HistoryRefreshed verifies history is updated after restore.
 func Test_handleRestore_HistoryRefreshed(t *testing.T) {
 	historyMock := mockHistory.NewMockManager(t)
+	allowHistoryReload(historyMock)
 
 	entry := &history.HistoryEntry{
 		ID:         "entry1",
@@ -1061,8 +1344,11 @@ func Test_handleRestore_HistoryRefreshed(t *testing.T) {
 	}
 
 	_, cmd := m.handleRestore()
+	assert.NotNil(t, cmd, "a restore must return an operation")
 
-	assert.NotNil(t, cmd)
+	gotModel := drainOperation(t, m, cmd)
+
+	assert.Equal(t, "Restored testbin to /bin/testbin", gotModel.status)
 	fsMock.AssertExpectations(t)
 	historyMock.AssertExpectations(t)
 }
@@ -1137,6 +1423,7 @@ func Test_handleRestore_ErrorHandling(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			historyMock := mockHistory.NewMockManager(t)
+			allowHistoryReload(historyMock)
 			tt.setupMock(historyMock)
 
 			m := &model{
@@ -1150,14 +1437,10 @@ func Test_handleRestore_ErrorHandling(t *testing.T) {
 				historyCursor:  0,
 			}
 
-			got, cmd := m.handleRestore()
-			gotModel := got.(*model)
+			_, cmd := m.handleRestore()
+			gotModel := drainOperation(t, m, cmd)
 
 			assert.Equal(t, tt.wantStatus, gotModel.status)
-
-			if tt.wantCmdIsNil {
-				assert.Nil(t, cmd)
-			}
 
 			historyMock.AssertExpectations(t)
 		})
@@ -1168,6 +1451,7 @@ func Test_handleRestore_ErrorHandling(t *testing.T) {
 func Test_handleUndo_BinaryModeRefresh(t *testing.T) {
 	fsMock := mockFS.NewMockFS(t)
 	historyMock := mockHistory.NewMockManager(t)
+	allowHistoryReload(historyMock)
 
 	historyMock.On("UndoMostRecent", mock.Anything).
 		Return(&history.RestoreResult{BinaryName: "undone_binary", RestoredTo: "/bin/undone_binary"}, nil)
@@ -1185,8 +1469,8 @@ func Test_handleUndo_BinaryModeRefresh(t *testing.T) {
 		sortAscending:  true,
 	}
 
-	got, _ := m.handleUndo()
-	gotModel := got.(*model)
+	_, opCmd := m.handleUndo()
+	gotModel := drainOperation(t, m, opCmd)
 
 	assert.Contains(t, gotModel.choices, "undone_binary")
 	assert.Equal(t, "Restored undone_binary to /bin/undone_binary", gotModel.status)
@@ -1295,6 +1579,7 @@ func Test_addLogEntry_CircularBuffer(t *testing.T) {
 // Test_model_Update_ModeSwitchToHistory verifies 'r' key switches to history mode.
 func Test_model_Update_ModeSwitchToHistory(t *testing.T) {
 	historyMock := mockHistory.NewMockManager(t)
+	allowHistoryReload(historyMock)
 
 	m := &model{
 		choices:        []string{"test"},
@@ -1340,8 +1625,8 @@ func Test_model_Update_ModeSwitchToBinaries(t *testing.T) {
 		sortAscending: true,
 	}
 
-	got, _ := m.Update(keyPress('b'))
-	gotModel := got.(*model)
+	_, opCmd := m.Update(keyPress('b'))
+	gotModel := drainOperation(t, m, opCmd)
 
 	assert.Equal(t, modeBinaries, gotModel.mode)
 	fsMock.AssertExpectations(t)
@@ -1351,6 +1636,8 @@ func Test_model_Update_ModeSwitchToBinaries(t *testing.T) {
 // repeat navigation, restore, or undo actions.
 func Test_model_Update_IgnoresKeyRelease(t *testing.T) {
 	historyMock := mockHistory.NewMockManager(t)
+	allowHistoryReload(historyMock)
+
 	entries := []*history.HistoryEntry{
 		{ID: "1", BinaryName: "bin1", InTrash: true},
 		{ID: "2", BinaryName: "bin2", InTrash: true},
@@ -1443,8 +1730,8 @@ func Test_model_Update_HistoryNavigation(t *testing.T) {
 				sortAscending:  true,
 			}
 
-			got, _ := m.Update(keyPressString(tt.key))
-			gotModel := got.(*model)
+			_, opCmd := m.Update(keyPressString(tt.key))
+			gotModel := drainOperation(t, m, opCmd)
 
 			assert.Equal(t, tt.expectedCur, gotModel.historyCursor)
 			assert.Equal(t, tt.expectedMode, gotModel.mode)
@@ -1456,6 +1743,7 @@ func Test_model_Update_HistoryNavigation(t *testing.T) {
 func Test_updateHistoryMode_EnterRestore(t *testing.T) {
 	fsMock := mockFS.NewMockFS(t)
 	historyMock := mockHistory.NewMockManager(t)
+	allowHistoryReload(historyMock)
 
 	entry := &history.HistoryEntry{
 		ID:         "entry1",
@@ -1483,8 +1771,9 @@ func Test_updateHistoryMode_EnterRestore(t *testing.T) {
 		sortAscending:  true,
 	}
 
-	got, _ := m.Update(keyPressString(keyEnter))
-	gotModel := got.(*model)
+	got, opCmd := m.Update(keyPressString(keyEnter))
+	gotModel, _ := got.(*model)
+	gotModel = drainOperation(t, gotModel, opCmd)
 
 	assert.Equal(t, "Restored restoreme to /bin/restoreme", gotModel.status)
 	fsMock.AssertExpectations(t)
@@ -1494,6 +1783,7 @@ func Test_updateHistoryMode_EnterRestore(t *testing.T) {
 // Test_updateHistoryMode_ClearEntry verifies clearing single entry.
 func Test_updateHistoryMode_ClearEntry(t *testing.T) {
 	historyMock := mockHistory.NewMockManager(t)
+	allowHistoryReload(historyMock)
 
 	entry := &history.HistoryEntry{
 		ID:         "entry1",
@@ -1547,8 +1837,8 @@ func Test_updateHistoryMode_ClearAll(t *testing.T) {
 		sortAscending: true,
 	}
 
-	got, _ := m.Update(keyPress('C'))
-	gotModel := got.(*model)
+	_, opCmd := m.Update(keyPress('C'))
+	gotModel := drainOperation(t, m, opCmd)
 
 	assert.Equal(t, confirmClearAll, gotModel.confirmation)
 }
@@ -1763,8 +2053,9 @@ func Test_model_statusUpdates(t *testing.T) {
 		sortAscending: true,
 	}
 
-	got, _ := m.Update(keyPressString(keyEnter))
-	gotModel := got.(*model)
+	got, opCmd := m.Update(keyPressString(keyEnter))
+	gotModel, _ := got.(*model)
+	gotModel = drainOperation(t, gotModel, opCmd)
 
 	assert.Equal(t, "Removed test", gotModel.status)
 	fsMock.AssertExpectations(t)
@@ -1816,8 +2107,8 @@ func Test_model_Update_HistoryEmpty(t *testing.T) {
 	}
 
 	// Try to clear all with empty history - should not set confirmation
-	got, _ := m.Update(keyPress('C'))
-	gotModel := got.(*model)
+	_, opCmd := m.Update(keyPress('C'))
+	gotModel := drainOperation(t, m, opCmd)
 
 	assert.Equal(t, confirmNone, gotModel.confirmation)
 }
@@ -1850,8 +2141,8 @@ func Test_model_Update_ConfirmationCancel(t *testing.T) {
 				sortAscending: true,
 			}
 
-			got, _ := m.Update(keyPress(tt.key))
-			gotModel := got.(*model)
+			_, opCmd := m.Update(keyPress(tt.key))
+			gotModel := drainOperation(t, m, opCmd)
 
 			assert.Equal(t, confirmNone, gotModel.confirmation)
 			assert.Equal(t, "Operation cancelled", gotModel.status)
@@ -1862,6 +2153,7 @@ func Test_model_Update_ConfirmationCancel(t *testing.T) {
 // Test_model_Update_ConfirmationAccept verifies accept confirmation dialog.
 func Test_model_Update_ConfirmationAccept(t *testing.T) {
 	historyMock := mockHistory.NewMockManager(t)
+	allowHistoryReload(historyMock)
 	historyMock.On("ClearHistory", mock.Anything, false).Return(nil)
 
 	m := &model{
@@ -1884,8 +2176,8 @@ func Test_model_Update_ConfirmationAccept(t *testing.T) {
 		sortAscending: true,
 	}
 
-	got, _ := m.Update(keyPress('y'))
-	gotModel := got.(*model)
+	_, opCmd := m.Update(keyPress('y'))
+	gotModel := drainOperation(t, m, opCmd)
 
 	assert.Equal(t, confirmNone, gotModel.confirmation)
 	assert.Equal(t, "History cleared", gotModel.status)
@@ -1918,6 +2210,7 @@ func Test_model_Update_AlternateScreen(t *testing.T) {
 // Test_handleClearEntry_ErrorHandling verifies error handling when clearing entry fails.
 func Test_handleClearEntry_ErrorHandling(t *testing.T) {
 	historyMock := mockHistory.NewMockManager(t)
+	allowHistoryReload(historyMock)
 
 	entry := &history.HistoryEntry{
 		ID:         "entry1",
@@ -2011,6 +2304,7 @@ func Test_handleUndo_ErrorHandling(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			historyMock := mockHistory.NewMockManager(t)
+			allowHistoryReload(historyMock)
 			tt.setupMock(historyMock)
 
 			m := &model{
@@ -2022,8 +2316,8 @@ func Test_handleUndo_ErrorHandling(t *testing.T) {
 				mode:           modeBinaries,
 			}
 
-			got, _ := m.handleUndo()
-			gotModel := got.(*model)
+			_, opCmd := m.handleUndo()
+			gotModel := drainOperation(t, m, opCmd)
 
 			assert.Equal(t, tt.wantStatus, gotModel.status)
 			historyMock.AssertExpectations(t)
@@ -2042,11 +2336,12 @@ func Test_handleUndo_NoHistoryManager(t *testing.T) {
 		mode:           modeBinaries,
 	}
 
-	got, cmd := m.handleUndo()
-	gotModel := got.(*model)
+	updated, cmd := m.handleUndo()
+	assert.Nil(t, cmd, "nothing to undo without a history manager")
+
+	gotModel, _ := updated.(*model)
 
 	assert.Equal(t, "History manager not available", gotModel.status)
-	assert.Nil(t, cmd)
 }
 
 // Test_model_Init_WithHistoryMode verifies Init behavior in history mode.
@@ -2091,6 +2386,7 @@ func Test_model_Init_WithVerboseMode(t *testing.T) {
 // Test_model_handleConfirmation_ExecuteClearAllError verifies error handling when ClearHistory fails.
 func Test_model_handleConfirmation_ExecuteClearAllError(t *testing.T) {
 	historyMock := mockHistory.NewMockManager(t)
+	allowHistoryReload(historyMock)
 	historyMock.On("ClearHistory", mock.Anything, false).Return(errors.New("storage error"))
 
 	m := &model{
@@ -2105,8 +2401,8 @@ func Test_model_handleConfirmation_ExecuteClearAllError(t *testing.T) {
 		historyEntries: []*history.HistoryEntry{{ID: "1", BinaryName: "bin1"}},
 	}
 
-	got, _ := m.executeConfirmation()
-	gotModel := got.(*model)
+	_, opCmd := m.executeConfirmation()
+	gotModel := drainOperation(t, m, opCmd)
 
 	assert.Equal(t, confirmNone, gotModel.confirmation)
 	assert.Contains(t, gotModel.status, "Error clearing history")
@@ -2116,6 +2412,7 @@ func Test_model_handleConfirmation_ExecuteClearAllError(t *testing.T) {
 // Test_model_handleConfirmation_ExecuteDeletePermError verifies error handling when DeletePermanently fails.
 func Test_model_handleConfirmation_ExecuteDeletePermError(t *testing.T) {
 	historyMock := mockHistory.NewMockManager(t)
+	allowHistoryReload(historyMock)
 	historyMock.On("DeletePermanently", mock.Anything, "entry1").Return(errors.New("delete failed"))
 
 	m := &model{
@@ -2131,8 +2428,8 @@ func Test_model_handleConfirmation_ExecuteDeletePermError(t *testing.T) {
 		historyCursor:  0,
 	}
 
-	got, _ := m.executeConfirmation()
-	gotModel := got.(*model)
+	_, opCmd := m.executeConfirmation()
+	gotModel := drainOperation(t, m, opCmd)
 
 	assert.Equal(t, confirmNone, gotModel.confirmation)
 	assert.Contains(t, gotModel.status, "Error deleting permanently")
@@ -2153,8 +2450,8 @@ func Test_handleRestore_NoHistoryManager(t *testing.T) {
 		historyCursor:  0,
 	}
 
-	got, cmd := m.handleRestore()
-	gotModel := got.(*model)
+	_, cmd := m.handleRestore()
+	gotModel := drainOperation(t, m, cmd)
 
 	assert.Equal(t, "No history entry selected", gotModel.status)
 	assert.Nil(t, cmd)
@@ -2174,8 +2471,8 @@ func Test_handleRestore_CannotRestore(t *testing.T) {
 		historyCursor:  0,
 	}
 
-	got, cmd := m.handleRestore()
-	gotModel := got.(*model)
+	_, cmd := m.handleRestore()
+	gotModel := drainOperation(t, m, cmd)
 
 	assert.Contains(t, gotModel.status, "Cannot restore")
 	assert.Nil(t, cmd)
@@ -2200,8 +2497,9 @@ func Test_model_Update_CannotRestore(t *testing.T) {
 		sortAscending:  true,
 	}
 
-	got, _ := m.Update(keyPressString(keyEnter))
-	gotModel := got.(*model)
+	got, opCmd := m.Update(keyPressString(keyEnter))
+	gotModel, _ := got.(*model)
+	gotModel = drainOperation(t, gotModel, opCmd)
 
 	assert.Contains(t, gotModel.status, "Cannot restore")
 }
@@ -2307,24 +2605,28 @@ func Test_model_Update_ToggleLogs(t *testing.T) {
 	}
 
 	// Toggle on
-	got, _ := m.Update(keyPress('L'))
-	gotModel := got.(*model)
+	_, opCmd := m.Update(keyPress('L'))
+	gotModel := drainOperation(t, m, opCmd)
 	assert.True(t, gotModel.showLogs)
 
 	// Toggle off
-	got, _ = gotModel.Update(keyPress('L'))
-	gotModel = got.(*model)
-	assert.False(t, gotModel.showLogs)
+	toggled, _ := gotModel.Update(keyPress('L'))
+	assert.False(t, toggled.(*model).showLogs)
 }
 
 // Test_model_Update_UndoKey verifies u key triggers undo.
 func Test_model_Update_UndoKey(t *testing.T) {
 	fsMock := mockFS.NewMockFS(t)
 	historyMock := mockHistory.NewMockManager(t)
+	allowHistoryReload(historyMock)
 
 	historyMock.On("UndoMostRecent", mock.Anything).
 		Return(&history.RestoreResult{BinaryName: "undone", RestoredTo: "/bin/undone"}, nil)
 	fsMock.On("ListBinaries", "/bin").Return([]string{"undone"}, nil)
+
+	historyMock.On("GetHistory", mock.Anything, mock.Anything).
+		Return([]*history.HistoryEntry(nil), nil).
+		Maybe()
 
 	m := &model{
 		choices:        []string{},
@@ -2341,8 +2643,8 @@ func Test_model_Update_UndoKey(t *testing.T) {
 		sortAscending:  true,
 	}
 
-	got, _ := m.Update(keyPress('u'))
-	gotModel := got.(*model)
+	_, opCmd := m.Update(keyPress('u'))
+	gotModel := drainOperation(t, m, opCmd)
 
 	assert.Equal(t, "Restored undone to /bin/undone", gotModel.status)
 	fsMock.AssertExpectations(t)
@@ -2369,8 +2671,8 @@ func Test_model_Update_DeletePermanentlyKey(t *testing.T) {
 		sortAscending:  true,
 	}
 
-	got, _ := m.Update(keyPress('d'))
-	gotModel := got.(*model)
+	_, opCmd := m.Update(keyPress('d'))
+	gotModel := drainOperation(t, m, opCmd)
 
 	assert.Equal(t, confirmDeletePerm, gotModel.confirmation)
 }
@@ -2378,7 +2680,11 @@ func Test_model_Update_DeletePermanentlyKey(t *testing.T) {
 // Test_model_Update_ClearEntryKey verifies c key triggers clear entry.
 func Test_model_Update_ClearEntryKey(t *testing.T) {
 	historyMock := mockHistory.NewMockManager(t)
+	allowHistoryReload(historyMock)
 	historyMock.On("ClearEntry", mock.Anything, "1", false).Return(nil)
+	historyMock.On("GetHistory", mock.Anything, mock.Anything).
+		Return([]*history.HistoryEntry(nil), nil).
+		Maybe()
 
 	m := &model{
 		choices:        []string{},
@@ -2397,8 +2703,8 @@ func Test_model_Update_ClearEntryKey(t *testing.T) {
 		sortAscending:  true,
 	}
 
-	got, _ := m.Update(keyPress('c'))
-	gotModel := got.(*model)
+	_, opCmd := m.Update(keyPress('c'))
+	gotModel := drainOperation(t, m, opCmd)
 
 	assert.Equal(t, "Cleared history entry for bin1", gotModel.status)
 	historyMock.AssertExpectations(t)
@@ -2480,6 +2786,7 @@ func Test_model_handleConfirmation_UnknownConfirmation(t *testing.T) {
 func Test_handleRestore_HistoryModeRefresh(t *testing.T) {
 	fsMock := mockFS.NewMockFS(t)
 	historyMock := mockHistory.NewMockManager(t)
+	allowHistoryReload(historyMock)
 
 	entry := &history.HistoryEntry{
 		ID:         "entry1",
@@ -2505,8 +2812,8 @@ func Test_handleRestore_HistoryModeRefresh(t *testing.T) {
 		sortAscending:  true,
 	}
 
-	got, cmd := m.handleRestore()
-	gotModel := got.(*model)
+	_, cmd := m.handleRestore()
+	gotModel := drainOperation(t, m, cmd)
 
 	assert.Equal(t, "Restored restoreme to /bin/restoreme", gotModel.status)
 	assert.NotNil(t, cmd) // Should return loadHistory command

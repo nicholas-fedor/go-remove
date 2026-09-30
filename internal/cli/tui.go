@@ -29,11 +29,13 @@ import (
 // Layout constants for TUI rendering.
 // These constants must be kept consistent between updateGrid() and the view functions.
 const (
+	// keyCtrlC is the key that interrupts, and the one a dialog must honour.
+	keyCtrlC = "ctrl+c"
+
 	colWidthPadding          = 3                  // Padding added to column width for spacing
 	availWidthAdjustment     = 4                  // Adjustment to width for border and padding
 	minAvailHeightAdjustment = 8                  // Minimum height adjustment for UI elements (title + footer + padding)
 	visibleLenPrefix         = 2                  // Prefix length for cursor visibility
-	totalHeightBase          = 8                  // Base height for non-grid UI components (must match minAvailHeightAdjustment)
 	footerHeight             = 1                  // Height reserved for footer/instructions
 	leftPadding              = 2                  // Left padding for the entire TUI
 	maxLogLines              = 50                 // Maximum number of log lines to retain
@@ -42,7 +44,6 @@ const (
 	maxHistoryEntries        = 100                // Maximum number of history entries to display
 	dateTimeFormat           = "2006-01-02 15:04" // Format for displaying timestamps
 	separatorAdjustment      = 2                  // Extra width for column separator
-	baseContentHeight        = 3                  // Base height for content area (title + empty lines)
 	historyTableHeaderLines  = 2                  // Number of lines for history table header (header + separator)
 )
 
@@ -88,6 +89,10 @@ type LogMsg struct {
 type HistoryMsg struct {
 	Entries []*history.HistoryEntry
 	Error   error
+
+	// quiet marks a background refresh, such as the one after an operation, which
+	// must not replace the status the operation reported.
+	quiet bool
 }
 
 // ProgramRunner defines an interface for running Bubbletea programs.
@@ -126,6 +131,20 @@ type styleConfig struct {
 type model struct {
 	// ctx governs the work the model starts, so an interrupt reaches it.
 	ctx context.Context
+
+	// busy names the operation currently running outside Update, or is empty
+	// when the model is idle.
+	busy string
+
+	// interrupted records that the running operation was stopped by the user, so
+	// its result cannot claim the work finished.
+	interrupted bool
+
+	// cancelOp stops the operation in flight, and opDone is closed when it has
+	// finished. Shutdown waits on opDone so the history manager is never closed
+	// under a recovery that is still running.
+	cancelOp context.CancelFunc
+	opDone   chan struct{}
 
 	// Mode and view state
 	mode         string // Current mode: "binaries" or "history"
@@ -255,21 +274,27 @@ func RunTUI(
 	}
 
 	// Run the program and capture any runtime errors.
-	_, err = program.Run()
-	if err != nil {
+	_, runErr := program.Run()
+
+	// An operation may still be running, possibly part way through a recovery.
+	// The history manager is closed by the caller straight after this returns,
+	// so wait rather than closing the store underneath it.
+	m.waitForOperation()
+
+	if runErr != nil {
 		// An interrupt is the user asking to quit, so it is not a failure.
-		if errors.Is(err, tea.ErrInterrupted) {
+		if errors.Is(runErr, tea.ErrInterrupted) {
 			return nil
 		}
 
 		// A cancelled context makes Bubbletea kill the program, which is still
 		// the user's interrupt rather than a real failure. Anything else keeps
 		// its own identity, so an unexpected kill is still reported.
-		if errors.Is(err, tea.ErrProgramKilled) && errors.Is(ctx.Err(), context.Canceled) {
+		if errors.Is(runErr, tea.ErrProgramKilled) && errors.Is(ctx.Err(), context.Canceled) {
 			return nil
 		}
 
-		return fmt.Errorf("failed to run TUI program: %w", err)
+		return fmt.Errorf("failed to run TUI program: %w", runErr)
 	}
 
 	return nil
@@ -416,16 +441,27 @@ func (m *model) Init() tea.Cmd {
 // Returns:
 //   - Command that produces a HistoryMsg.
 func (m *model) loadHistory() tea.Cmd {
+	return m.loadHistoryReporting(false)
+}
+
+// loadHistoryReporting loads the history, optionally as a background refresh.
+//
+// Parameters:
+//   - quiet: When true the result leaves the status line alone.
+//
+// Returns:
+//   - Command that produces a HistoryMsg.
+func (m *model) loadHistoryReporting(quiet bool) tea.Cmd {
 	return func() tea.Msg {
 		// Check if history manager is available
 		if m.historyManager == nil {
-			return HistoryMsg{Entries: nil, Error: ErrHistoryNotInitialized}
+			return HistoryMsg{Entries: nil, Error: ErrHistoryNotInitialized, quiet: quiet}
 		}
 
 		ctx := m.context()
 		entries, err := m.historyManager.GetHistory(ctx, maxHistoryEntries)
 
-		return HistoryMsg{Entries: entries, Error: err}
+		return HistoryMsg{Entries: entries, Error: err, quiet: quiet}
 	}
 }
 
@@ -453,8 +489,162 @@ func (m *model) pollLogChannel() tea.Cmd {
 // pollInterval is the duration between log channel polls.
 const pollInterval = 50 * time.Millisecond
 
+// restoreErrorStatus maps a restore failure to a message that names the entry.
+//
+// Without this every failure collapses into one generic message, losing the
+// difference between an entry that cannot be restored and a real fault.
+//
+// Parameters:
+//   - name: Binary name the restore was for.
+//
+// Returns:
+//   - A function mapping an error to a status message.
+func restoreErrorStatus(name string) func(error) string {
+	return func(err error) string {
+		switch {
+		case errors.Is(err, history.ErrAlreadyRestored):
+			return name + " has already been restored"
+		case errors.Is(err, history.ErrNotInTrash):
+			return name + " is no longer in trash"
+		case errors.Is(err, history.ErrRestoreCollision):
+			return fmt.Sprintf("Cannot restore %s: file already exists", name)
+		default:
+			// The error is already wrapped with the binary name.
+			return "Error " + err.Error()
+		}
+	}
+}
+
 // pollLogTickMsg is a message sent when it's time to poll for logs again.
 type pollLogTickMsg struct{}
+
+// opResultMsg carries the outcome of work that must not block the render loop.
+type opResultMsg struct {
+	// operation names the work, for the status line.
+	operation string
+
+	// err is the outcome, nil on success.
+	err error
+
+	// errStatus turns a failure into a specific message. Without it the generic
+	// "Error <op>" form is used, which loses the distinction the history layer
+	// makes between an unrestorable entry and a real fault.
+	errStatus func(error) string
+
+	// okStatus is the operation's own success message. Only the operation knows
+	// its result, so it supplies the wording.
+	okStatus string
+
+	// refresh updates the model once the operation has finished. It runs on the
+	// update goroutine, never in the operation's own goroutine.
+	refresh func(m *model)
+}
+
+// runAsync starts an operation outside the update goroutine and reports the
+// outcome back as a message.
+//
+// The work runs with a context derived from the model's own, so an interrupt
+// reaches it and the shutdown path can wait for it to finish.
+//
+// Parameters:
+//   - op: Human-readable name of the operation, shown while it runs.
+//   - work: The operation to perform.
+//   - refresh: Applied to the model on the update goroutine after success.
+//
+// Returns:
+//   - A command that performs the work and yields the result.
+func (m *model) runAsync(
+	operation string,
+	work func(context.Context) error,
+	refresh func(m *model),
+) tea.Cmd {
+	return m.runAsyncReporting(operation, work, refresh, nil, nil)
+}
+
+// runAsyncReporting starts an operation that maps its own failures to status
+// messages.
+//
+// Parameters:
+//   - op: Human-readable name of the operation, shown while it runs.
+//   - work: The operation to perform.
+//   - refresh: Applied to the model on the update goroutine after success.
+//   - errStatus: Maps a failure to a status message, or nil for the generic form.
+//   - okStatus: Supplies the success message from the operation's own result.
+//
+// Returns:
+//   - A command that performs the work and yields the result.
+func (m *model) runAsyncReporting(
+	operation string,
+	work func(context.Context) error,
+	refresh func(m *model),
+	errStatus func(error) string,
+	okStatus func() string,
+) tea.Cmd {
+	// Only one operation at a time, so a second keypress cannot start another
+	// while the first is still in flight.
+	if m.busy != "" {
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(m.context())
+	done := make(chan struct{})
+
+	m.busy = operation
+	m.cancelOp = cancel
+	m.opDone = done
+
+	return func() tea.Msg {
+		defer close(done)
+
+		err := work(ctx)
+
+		result := opResultMsg{
+			operation: operation,
+			err:       err,
+			refresh:   refresh,
+			errStatus: errStatus,
+		}
+
+		if err == nil && okStatus != nil {
+			result.okStatus = okStatus()
+		}
+
+		return result
+	}
+}
+
+// cancelInFlight stops the running operation and reports progress.
+//
+// Parameters:
+//   - None.
+func (m *model) cancelInFlight() {
+	if m.cancelOp != nil {
+		m.cancelOp()
+	}
+
+	m.busy = ""
+	// The work may not observe the cancellation at all, so remember that the
+	// user stopped it rather than trusting the result it eventually reports.
+	m.interrupted = true
+}
+
+// waitForOperation blocks until the running operation has finished.
+//
+// It exists so shutdown does not close the history manager under a recovery
+// that is still running.
+//
+// Returns:
+//   - True if an operation had to be waited on.
+func (m *model) waitForOperation() bool {
+	if m.opDone == nil {
+		return false
+	}
+
+	<-m.opDone
+	m.opDone = nil
+
+	return true
+}
 
 // Update processes TUI events and updates the model state.
 //
@@ -467,6 +657,18 @@ type pollLogTickMsg struct{}
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
+		// An interrupt always works, so a long operation can be stopped.
+		if msg.String() == keyCtrlC {
+			m.cancelInFlight()
+			m.status = "Interrupted"
+		}
+
+		// While an operation is running the model is not in a state a keypress
+		// can act on, so the key is ignored rather than acted on halfway.
+		if m.busy != "" && msg.String() != keyCtrlC {
+			return m, nil
+		}
+
 		// Ignore KeyReleaseMsg. KeyMsg matches both, so a single physical
 		// keystroke would otherwise undo or restore twice.
 		if m.confirmation != confirmNone {
@@ -493,6 +695,68 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m, cmd
 
+	case opResultMsg:
+		// The operation has finished, so the model is interactive again.
+		m.busy = ""
+		m.cancelOp = nil
+		m.updateGrid()
+
+		// An interrupted operation still applies its side effects, because the
+		// work may not have observed the cancellation, but it must not then
+		// report success the user has already been told they stopped.
+		interrupted := m.interrupted
+		m.interrupted = false
+
+		if msg.err != nil {
+			if !interrupted {
+				if msg.errStatus != nil {
+					m.status = msg.errStatus(msg.err)
+				} else {
+					// The error is already wrapped with the operation.
+					m.status = "Error " + msg.err.Error()
+				}
+			}
+
+			if m.historyManager == nil {
+				return m, nil
+			}
+
+			reload := m.loadHistoryReporting(true)
+
+			return m, reload
+		}
+
+		// The operation may report a more specific outcome than the generic
+		// form, so its own status wins when it sets one. An interrupted
+		// operation keeps the status the interrupt already showed, even though
+		// the refresh below reports the work as done.
+		preserved := m.status
+
+		if !interrupted {
+			m.status = msg.okStatus
+		}
+
+		if msg.refresh != nil {
+			msg.refresh(m)
+		}
+
+		switch {
+		case interrupted:
+			m.status = preserved
+		case m.status == "":
+			m.status = "Done " + msg.operation
+		}
+
+		m.updateGrid()
+
+		if m.historyManager == nil {
+			return m, nil
+		}
+
+		reload := m.loadHistoryReporting(true)
+
+		return m, reload
+
 	case LogMsg:
 		// Add log message to the circular buffer.
 		m.addLogEntry(msg)
@@ -507,6 +771,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case HistoryMsg:
 		// Handle history loading result
 		m.historyLoading = false
+
+		if msg.quiet {
+			// A background refresh keeps whatever the operation reported.
+			if msg.Error == nil {
+				m.historyEntries = msg.Entries
+				m.clampHistoryCursor()
+			}
+
+			return m, nil
+		}
+
 		if msg.Error != nil {
 			m.status = fmt.Sprintf("Error loading history: %v", msg.Error)
 		} else {
@@ -516,6 +791,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.status = fmt.Sprintf("Loaded %d history entries", len(m.historyEntries))
 			}
+
+			// The list may have shrunk, leaving the cursor past the end, in
+			// which case no row renders as selected and the view looks frozen on
+			// a phantom row until the user moves up.
+			m.clampHistoryCursor()
 		}
 
 		return m, nil
@@ -537,6 +817,13 @@ func (m *model) handleConfirmation(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "y", "Y":
 		// Confirmed - execute the operation
 		return m.executeConfirmation()
+	case "ctrl+c":
+		// The one key a dialog must never swallow, otherwise the prompt
+		// becomes a trap for anyone who reaches for it.
+		m.confirmation = confirmNone
+		m.status = "Operation cancelled"
+
+		return m, tea.Quit
 	case "n", "N", "q", "esc":
 		// Cancelled - clear confirmation
 		m.confirmation = confirmNone
@@ -546,44 +833,98 @@ func (m *model) handleConfirmation(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// clampHistoryCursor keeps the history cursor within the loaded entries.
+//
+// Parameters:
+//   - None.
+func (m *model) clampHistoryCursor() {
+	if len(m.historyEntries) == 0 {
+		m.historyCursor = 0
+
+		return
+	}
+
+	if m.historyCursor >= len(m.historyEntries) {
+		m.historyCursor = len(m.historyEntries) - 1
+	}
+
+	if m.historyCursor < 0 {
+		m.historyCursor = 0
+	}
+}
+
 // executeConfirmation executes the pending confirmation operation.
 //
 // Returns:
 //   - Updated model.
 //   - Follow-up command, if any.
 func (m *model) executeConfirmation() (tea.Model, tea.Cmd) {
-	ctx := m.context()
+	confirmation := m.confirmation
 
-	switch m.confirmation {
-	case confirmClearAll:
-		if m.historyManager != nil {
-			if err := m.historyManager.ClearHistory(ctx, false); err != nil {
-				m.status = fmt.Sprintf("Error clearing history: %v", err)
-			} else {
-				m.status = "History cleared"
-				m.historyEntries = make([]*history.HistoryEntry, 0)
-				m.historyCursor = 0
-			}
-		}
+	// The user has confirmed, so the dialog closes as the work starts. Keys are
+	// ignored while it runs.
+	m.confirmation = confirmNone
 
-	case confirmDeletePerm:
-		if m.historyManager != nil && m.historyCursor < len(m.historyEntries) {
-			entry := m.historyEntries[m.historyCursor]
-			if err := m.historyManager.DeletePermanently(ctx, entry.ID); err != nil {
-				m.status = fmt.Sprintf("Error deleting permanently: %v", err)
-			} else {
-				m.status = "Permanently deleted " + entry.BinaryName
-				// Clear confirmation state before refreshing history
-				m.confirmation = confirmNone
-				// Refresh history
-				cmd := m.loadHistory()
+	manager := m.historyManager
 
-				return m, cmd
-			}
-		}
+	var entry *history.HistoryEntry
+
+	if m.historyCursor < len(m.historyEntries) {
+		entry = m.historyEntries[m.historyCursor]
 	}
 
-	m.confirmation = confirmNone
+	// Clearing the history iterates and permanently deletes every trashed
+	// binary, the longest operation in the tool. All confirmations run outside
+	// Update so the view keeps rendering and stays interruptible.
+	switch confirmation {
+	case confirmClearAll:
+		if manager == nil {
+			return m, nil
+		}
+
+		clearCmd := m.runAsyncReporting(
+			"clearing history",
+			func(ctx context.Context) error {
+				if err := manager.ClearHistory(ctx, false); err != nil {
+					return fmt.Errorf("clearing history: %w", err)
+				}
+
+				return nil
+			},
+			func(m *model) {
+				m.historyEntries = make([]*history.HistoryEntry, 0)
+				m.historyCursor = 0
+			},
+			nil,
+			func() string { return "History cleared" },
+		)
+
+		return m, clearCmd
+
+	case confirmDeletePerm:
+		if manager == nil || entry == nil {
+			return m, nil
+		}
+
+		entryID := entry.ID
+		name := entry.BinaryName
+
+		deleteCmd := m.runAsyncReporting(
+			"deleting "+name+" permanently",
+			func(ctx context.Context) error {
+				if err := manager.DeletePermanently(ctx, entryID); err != nil {
+					return fmt.Errorf("deleting permanently: %w", err)
+				}
+
+				return nil
+			},
+			nil,
+			nil,
+			func() string { return "Permanently deleted " + name },
+		)
+
+		return m, deleteCmd
+	}
 
 	return m, nil
 }
@@ -735,52 +1076,61 @@ func (m *model) updateBinaryMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if idx < len(m.choices) {
 				binaryPath := m.fs.AdjustBinaryPath(m.dir, m.choices[idx])
 				name := m.choices[idx]
+				manager := m.historyManager
+				filesystem := m.fs
+				verbose := m.config.Verbose
+				log := m.logger
 
-				// Use history manager if available (it handles trash + history)
-				if m.historyManager != nil {
-					ctx := m.context()
-					if _, err := m.historyManager.RecordDeletion(ctx, binaryPath); err != nil {
-						m.status = fmt.Sprintf("Error recording %s: %v", name, err)
+				// Moving the binary can take a while on a large file, so it runs
+				// outside Update to keep the view responsive and interruptible.
+				removeCmd := m.runAsync(
+					"removing "+name,
+					func(ctx context.Context) error {
+						// Use history manager if available (it handles trash
+						// plus history).
+						if manager != nil {
+							if _, err := manager.RecordDeletion(ctx, binaryPath); err != nil {
+								return fmt.Errorf("recording %s: %w", name, err)
+							}
 
-						return m, nil
-					}
-				} else {
-					// Fallback: permanent delete only if no history manager
-					if err := m.fs.RemoveBinary(
-						binaryPath,
-						name,
-						m.config.Verbose,
-						m.logger,
-					); err != nil {
-						m.status = fmt.Sprintf("Error removing %s: %v", name, err)
+							return nil
+						}
 
-						return m, nil
-					}
-				}
+						// Fallback: permanent delete only without a manager.
+						if err := filesystem.RemoveBinary(
+							binaryPath,
+							name,
+							verbose,
+							log,
+						); err != nil {
+							return fmt.Errorf("removing %s: %w", name, err)
+						}
 
-				m.status = "Removed " + name
+						return nil
+					},
+					func(m *model) {
+						// Drop the deleted entry before rescanning, so a failed
+						// rescan cannot leave the view showing a binary that is
+						// already gone.
+						m.choices = slices.DeleteFunc(m.choices, func(choice string) bool {
+							return choice == name
+						})
+						m.refreshChoices()
+						m.sortChoices()
 
-				// Drop the deleted entry before rescanning, so a failed rescan
-				// cannot leave the view showing a binary that is already gone.
-				m.choices = slices.DeleteFunc(m.choices, func(choice string) bool {
-					return choice == name
-				})
-				m.refreshChoices()
-				m.sortChoices()
+						// Adjust cursor if it exceeds remaining choices.
+						if m.cursorY+m.cursorX*m.rows >= len(m.choices) {
+							lastIdx := len(m.choices) - 1
+							m.cursorX = lastIdx / m.rows
+							m.cursorY = lastIdx % m.rows
+						}
 
-				// Exit if no binaries remain.
-				if len(m.choices) == 0 {
-					return m, tea.Quit
-				}
+						m.updateGrid()
+						m.status = "Removed " + name
+					},
+				)
 
-				// Adjust cursor if it exceeds remaining choices.
-				if m.cursorY+m.cursorX*m.rows >= len(m.choices) {
-					lastIdx := len(m.choices) - 1
-					m.cursorX = lastIdx / m.rows
-					m.cursorY = lastIdx % m.rows
-				}
-
-				m.updateGrid()
+				return m, removeCmd
 			}
 		}
 	}
@@ -809,33 +1159,39 @@ func (m *model) handleRestore() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	ctx := m.context()
+	name := entry.BinaryName
+	manager := m.historyManager
 
-	result, err := m.historyManager.Restore(ctx, entry.ID)
-	if err != nil {
-		switch {
-		case errors.Is(err, history.ErrAlreadyRestored):
-			m.status = entry.BinaryName + " has already been restored"
-		case errors.Is(err, history.ErrNotInTrash):
-			m.status = entry.BinaryName + " is no longer in trash"
-		case errors.Is(err, history.ErrRestoreCollision):
-			m.status = fmt.Sprintf("Cannot restore %s: file already exists", entry.BinaryName)
-		default:
-			m.status = fmt.Sprintf("Error restoring %s: %v", entry.BinaryName, err)
-		}
-	} else {
-		m.status = fmt.Sprintf("Restored %s to %s", result.BinaryName, result.RestoredTo)
-		// Refresh the binary list to include the restored binary
-		m.refreshChoices()
-		m.sortChoices()
-		m.updateGrid()
-		// Refresh history to update trash status
-		cmd := m.loadHistory()
+	// The destination is only known to the operation, which reads it from the
+	// result on its own goroutine.
+	var restoredTo string
 
-		return m, cmd
-	}
+	// The restore touches the filesystem and the history store, so it runs
+	// outside Update to keep the view responsive.
+	restoreCmd := m.runAsyncReporting(
+		"restoring "+name,
+		func(ctx context.Context) error {
+			result, err := manager.Restore(ctx, entry.ID)
+			if err != nil {
+				return fmt.Errorf("restoring %s: %w", name, err)
+			}
 
-	return m, nil
+			if result != nil {
+				restoredTo = fmt.Sprintf("Restored %s to %s", result.BinaryName, result.RestoredTo)
+			}
+
+			return nil
+		},
+		func(m *model) {
+			m.refreshChoices()
+			m.sortChoices()
+			m.updateGrid()
+		},
+		restoreErrorStatus(name),
+		func() string { return restoredTo },
+	)
+
+	return m, restoreCmd
 }
 
 // handleUndo restores the most recently deleted binary.
@@ -850,39 +1206,61 @@ func (m *model) handleUndo() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	ctx := m.context()
+	manager := m.historyManager
 
-	result, err := m.historyManager.UndoMostRecent(ctx)
-	if err != nil {
-		switch {
-		case errors.Is(err, history.ErrNoHistory):
-			m.status = "No deletion history found - nothing to undo"
-		case errors.Is(err, history.ErrAlreadyRestored):
-			m.status = "Binary has already been restored"
-		case errors.Is(err, history.ErrNotInTrash):
-			m.status = "Binary is no longer in trash - cannot restore"
-		case errors.Is(err, history.ErrRestoreCollision):
-			m.status = "A file already exists at the restore location"
-		default:
-			m.status = fmt.Sprintf("Undo failed: %v", err)
-		}
-	} else {
-		m.status = fmt.Sprintf("Restored %s to %s", result.BinaryName, result.RestoredTo)
-		// Refresh history and binaries if in binary mode
-		if m.mode == modeBinaries {
-			m.refreshChoices()
-			m.sortChoices()
-			m.updateGrid()
-		}
-		// Refresh history view if in history mode
-		if m.mode == modeHistory {
-			cmd := m.loadHistory()
+	// The destination is only known to the operation, which reads it from the
+	// result on its own goroutine.
+	var restoredTo string
 
-			return m, cmd
-		}
-	}
+	// Undo walks the history in pages and restores from the trash, so it runs
+	// outside Update to keep the view responsive and interruptible.
+	undoCmd := m.runAsyncReporting(
+		"undoing the most recent deletion",
+		func(ctx context.Context) error {
+			result, err := manager.UndoMostRecent(ctx)
+			if err != nil {
+				return fmt.Errorf("undo failed: %w", err)
+			}
 
-	return m, nil
+			if result != nil {
+				restoredTo = fmt.Sprintf("Restored %s to %s", result.BinaryName, result.RestoredTo)
+			}
+
+			return nil
+		},
+		func(m *model) {
+			// Refresh history and binaries if in binary mode.
+			if m.mode == modeBinaries {
+				m.refreshChoices()
+				m.sortChoices()
+				m.updateGrid()
+			}
+		},
+		func(err error) string {
+			switch {
+			case errors.Is(err, history.ErrNoHistory):
+				return "No deletion history found - nothing to undo"
+			case errors.Is(err, history.ErrAlreadyRestored):
+				return "Binary has already been restored"
+			case errors.Is(err, history.ErrNotInTrash):
+				return "Binary is no longer in trash - cannot restore"
+			case errors.Is(err, history.ErrRestoreCollision):
+				return "A file already exists at the restore location"
+			default:
+				// The error is already wrapped with the operation, and a
+				// status line reads better capitalised.
+				msg := err.Error()
+				if msg == "" {
+					return "Undo failed"
+				}
+
+				return strings.ToUpper(msg[:1]) + msg[1:]
+			}
+		},
+		func() string { return restoredTo },
+	)
+
+	return m, undoCmd
 }
 
 // handleClearEntry removes a history entry and optionally deletes it from trash.
@@ -1133,7 +1511,11 @@ func (m *model) viewBinaries() tea.View {
 		s.WriteString("\n")
 	}
 
-	if m.status != "" {
+	switch {
+	case m.busy != "":
+		s.WriteString(statusStyle.Render("Working: " + m.busy + " (ctrl+c to stop)"))
+		s.WriteString("\n")
+	case m.status != "":
 		s.WriteString(statusStyle.Render(m.status))
 		s.WriteString("\n")
 	}
@@ -1142,38 +1524,23 @@ func (m *model) viewBinaries() tea.View {
 	footerText := "↑/k: up  ↓/j: down  ←/h: left  →/l: right  Enter: remove  s: sort  r: history  u: undo  L: logs  q: quit"
 	footer := footerStyle.Render(footerText)
 
-	lenStatus := 0
-	if m.status != "" {
-		lenStatus = 1
-	}
-
-	// Account for log panel in height calculation
-	logPanelLines := 0
-
-	if m.showLogs {
-		visibleLogs := m.getVisibleLogs()
-		if len(visibleLogs) == 0 {
-			// Empty log panel: header + placeholder + separator
-			logPanelLines = 1 + logPanelSeparatorLines
-		} else {
-			// Log panel header + log lines + separator
-			logPanelLines = len(visibleLogs) + logPanelSeparatorLines
-		}
-	}
-
-	totalHeight := m.rows + totalHeightBase + lenStatus + logPanelLines
-
-	// Add padding lines to fill the terminal height.
-	for i := totalHeight; i < m.height; i++ {
-		s.WriteString("\n")
-	}
-
-	s.WriteString(footer)
-
-	content := lipgloss.NewStyle().
+	// Pad between the content and the footer from what actually renders, rather
+	// than from a hand-counted total that drifts as soon as the layout does.
+	// The measurement uses the same style as the render, because left padding
+	// and the width can change how many lines the result occupies, and the
+	// padding goes inside the body so every line keeps its width.
+	frame := lipgloss.NewStyle().
 		PaddingLeft(leftPadding).
-		Width(m.width - leftPadding).
-		Render(s.String())
+		Width(m.width - leftPadding)
+
+	body := s.String()
+	pad := max(m.height-lipgloss.Height(frame.Render(body+footer)), 0)
+
+	if pad > 0 {
+		body += strings.Repeat("\n", pad)
+	}
+
+	content := frame.Render(body + footer)
 
 	view := tea.NewView(content)
 	view.AltScreen = true
@@ -1367,52 +1734,23 @@ func (m *model) viewHistory() tea.View {
 
 	footer := footerStyle.Render(footerText)
 
-	// Calculate total height using actual displayed rows, not adjusted visibleCount
-	// The visibleCount variable may have been decremented for the "show more" indicator,
-	// so we calculate the actual displayed rows separately
-	contentHeight := baseContentHeight
-
-	if !m.historyLoading && len(m.historyEntries) > 0 {
-		// Calculate actual displayed rows (before visibleCount was potentially decremented)
-		actualVisibleCount := min(entryCount, maxVisibleEntries)
-		contentHeight += actualVisibleCount + historyTableHeaderLines
-		// Account for the "...and X more" indicator line if it will be displayed
-		if entryCount > maxVisibleEntries {
-			contentHeight++
-		}
-	}
-
-	lenStatus := 0
-	if m.status != "" || m.confirmation != confirmNone {
-		lenStatus = 1
-	}
-
-	// Account for log panel in height calculation
-	logPanelLines := 0
-
-	if m.showLogs {
-		visibleLogs := m.getVisibleLogs()
-		if len(visibleLogs) == 0 {
-			// Empty log panel: header + placeholder + separator
-			logPanelLines = 1 + logPanelSeparatorLines
-		} else {
-			logPanelLines = len(visibleLogs) + logPanelSeparatorLines
-		}
-	}
-
-	totalHeight := contentHeight + totalHeightBase + lenStatus + logPanelLines
-
-	// Add padding lines to fill the terminal height.
-	for i := totalHeight; i < m.height; i++ {
-		s.WriteString("\n")
-	}
-
-	s.WriteString(footer)
-
-	content := lipgloss.NewStyle().
+	// Pad between the content and the footer from what actually renders, rather
+	// than from a hand-counted total that drifts as soon as the layout does.
+	// The measurement uses the same style as the render, because left padding
+	// and the width can change how many lines the result occupies, and the
+	// padding goes inside the body so every line keeps its width.
+	frame := lipgloss.NewStyle().
 		PaddingLeft(leftPadding).
-		Width(m.width - leftPadding).
-		Render(s.String())
+		Width(m.width - leftPadding)
+
+	body := s.String()
+	pad := max(m.height-lipgloss.Height(frame.Render(body+footer)), 0)
+
+	if pad > 0 {
+		body += strings.Repeat("\n", pad)
+	}
+
+	content := frame.Render(body + footer)
 
 	view := tea.NewView(content)
 	view.AltScreen = true
