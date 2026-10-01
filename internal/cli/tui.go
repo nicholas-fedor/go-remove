@@ -34,19 +34,14 @@ const (
 	// keyCtrlC is the key that interrupts, and the one a dialog must honour.
 	keyCtrlC = "ctrl+c"
 
-	colWidthPadding          = 3                  // Padding added to column width for spacing
-	availWidthAdjustment     = 4                  // Adjustment to width for border and padding
-	minAvailHeightAdjustment = 8                  // Minimum height adjustment for UI elements (title + footer + padding)
-	visibleLenPrefix         = 2                  // Prefix length for cursor visibility
-	footerHeight             = 1                  // Height reserved for footer/instructions
-	leftPadding              = 2                  // Left padding for the entire TUI
-	maxLogLines              = 50                 // Maximum number of log lines to retain
-	maxVisibleLogLines       = 5                  // Maximum number of log lines to display
-	logPanelSeparatorLines   = 2                  // Number of separator lines for log panel
-	maxHistoryEntries        = 100                // Maximum number of history entries to display
-	dateTimeFormat           = "2006-01-02 15:04" // Format for displaying timestamps
-	separatorAdjustment      = 2                  // Extra width for column separator
-	historyTableHeaderLines  = 2                  // Number of lines for history table header (header + separator)
+	visibleLenPrefix        = 2                  // Prefix length for cursor visibility
+	footerHeight            = 1                  // Height reserved for footer/instructions
+	leftPadding             = 2                  // Left padding for the entire TUI
+	maxLogLines             = 50                 // Maximum number of log lines to retain
+	maxHistoryEntries       = 100                // Maximum number of history entries to display
+	dateTimeFormat          = "2006-01-02 15:04" // Format for displaying timestamps
+	separatorAdjustment     = 2                  // Extra width for column separator
+	historyTableHeaderLines = 2                  // Number of lines for history table header (header + separator)
 
 	// History table column sizing.
 	historyDateHeading   = "Date/Time"
@@ -1323,8 +1318,8 @@ func (m *model) getVisibleLogs() []string {
 		return nil
 	}
 
-	// Return the last maxVisibleLogLines entries
-	start := max(len(m.logs)-maxVisibleLogLines, 0)
+	// Return the last render.MaxVisibleLogLines entries
+	start := max(len(m.logs)-render.MaxVisibleLogLines, 0)
 
 	return m.logs[start:]
 }
@@ -1343,77 +1338,25 @@ func (m *model) sortChoices() {
 }
 
 // updateGrid recalculates the grid layout from the current state and terminal size.
+//
+// The arithmetic lives in the render package. This applies the result, because
+// the grid and the cursor are model state rather than a rendering decision.
 func (m *model) updateGrid() {
-	// Determine the maximum length of binary names for column sizing.
-	maxNameLen := 0
-	for _, choice := range m.choices {
-		if render.DisplayWidth(choice) > maxNameLen {
-			maxNameLen = render.DisplayWidth(choice)
-		}
-	}
+	grid := render.GridLayout(&render.GridInput{
+		Choices:  m.choices,
+		Width:    m.width,
+		Height:   m.height,
+		Status:   m.status,
+		ShowLogs: m.showLogs,
+		LogCount: len(m.logs),
+		CursorX:  m.cursorX,
+		CursorY:  m.cursorY,
+	})
 
-	// Calculate column width and available space for the grid.
-	colWidth := maxNameLen + colWidthPadding
-	availWidth := m.width - availWidthAdjustment
-
-	// Account for status line when calculating available height.
-	// The status line takes 1 line when present, but minAvailHeightAdjustment
-	// is a constant that doesn't account for dynamic status display.
-	statusAdjustment := 0
-	if m.status != "" {
-		statusAdjustment = 1
-	}
-
-	availHeight := max(m.height-minAvailHeightAdjustment-statusAdjustment, 1)
-
-	// Adjust available height for log panel if visible
-	if m.showLogs {
-		// Reserve up to maxVisibleLogLines lines for log panel (plus separator lines)
-		visibleLogCount := min(len(m.logs), maxVisibleLogLines)
-		if visibleLogCount == 0 {
-			// Empty log panel: header + placeholder
-			visibleLogCount = 1
-		}
-
-		logPanelHeight := visibleLogCount + logPanelSeparatorLines
-		availHeight = max(availHeight-logPanelHeight, 1)
-	}
-
-	// Clear grid if no choices remain.
-	if len(m.choices) == 0 {
-		m.rows = 0
-		m.cols = 0
-		m.cursorX = 0
-		m.cursorY = 0
-
-		return
-	}
-
-	// Compute grid dimensions: maximize rows, limit columns by width.
-	maxCols := max(availWidth/colWidth, 1)
-
-	m.rows = min(availHeight, len(m.choices))
-	if m.rows == 0 {
-		m.rows = 1 // Ensure at least one row
-	}
-
-	m.cols = min(maxCols, (len(m.choices)+m.rows-1)/m.rows)
-
-	// Clamp cursor position to valid bounds after resizing.
-	if m.cursorX >= m.cols {
-		m.cursorX = m.cols - 1
-	}
-
-	if m.cursorY >= m.rows {
-		m.cursorY = m.rows - 1
-	}
-
-	currentIdx := m.cursorY + m.cursorX*m.rows
-	if currentIdx >= len(m.choices) {
-		lastIdx := len(m.choices) - 1
-		m.cursorX = lastIdx / m.rows
-		m.cursorY = lastIdx % m.rows
-	}
+	m.rows = grid.Rows
+	m.cols = grid.Cols
+	m.cursorX = grid.CursorX
+	m.cursorY = grid.CursorY
 }
 
 // View renders the TUI interface.
@@ -1455,7 +1398,7 @@ func (m *model) viewBinaries() tea.View {
 		}
 	}
 
-	colWidth := maxNameLen + colWidthPadding
+	colWidth := maxNameLen + render.ColWidthPadding
 
 	// Build the grid of binary choices with cursor highlighting.
 	var grid strings.Builder
@@ -1643,12 +1586,12 @@ func (m *model) viewHistory() tea.View {
 
 		if m.showLogs {
 			// Reserve additional space for log panel (header + separator + lines)
-			visibleLogCount := min(len(m.logs), maxVisibleLogLines)
+			visibleLogCount := min(len(m.logs), render.MaxVisibleLogLines)
 			if visibleLogCount == 0 {
 				visibleLogCount = 1 // Placeholder line
 			}
 
-			reservedHeight += visibleLogCount + logPanelSeparatorLines
+			reservedHeight += visibleLogCount + render.LogPanelSeparatorLines
 		}
 
 		maxVisibleEntries = max(m.height-reservedHeight, 1)

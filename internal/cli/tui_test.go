@@ -2964,7 +2964,7 @@ func Test_model_getVisibleLogs(t *testing.T) {
 			name:     "logs exceed max visible",
 			showLogs: true,
 			logs:     []string{"1", "2", "3", "4", "5", "6", "7"},
-			wantLen:  maxVisibleLogLines,
+			wantLen:  render.MaxVisibleLogLines,
 		},
 	}
 
