@@ -16,6 +16,7 @@ import (
 
 	"github.com/nicholas-fedor/go-remove/internal/buildinfo"
 	"github.com/nicholas-fedor/go-remove/internal/logger"
+	"github.com/nicholas-fedor/go-remove/internal/paths"
 )
 
 // OS-specific constants for filesystem operations.
@@ -27,7 +28,11 @@ const (
 var goBinaryExtractor = &buildinfo.DefaultExtractor{}
 
 // ErrGorootNotSet indicates that GOROOT is not set when required.
-var ErrGorootNotSet = errors.New("GOROOT is not set")
+//
+// The error now originates in internal/paths, alongside the other environment
+// resolution. It is aliased rather than redeclared so that errors.Is matches
+// both fs.ErrGorootNotSet and paths.ErrGorootNotSet.
+var ErrGorootNotSet = paths.ErrGorootNotSet
 
 // ErrBinaryNotFound indicates that a binary does not exist at the specified path.
 var ErrBinaryNotFound = errors.New("binary not found")
@@ -102,31 +107,8 @@ func NewRealFS() FS {
 //   - Absolute path to the binary directory.
 //   - An error if GOROOT is requested but not set.
 func (r *RealFS) DetermineBinDir(useGoroot bool) (string, error) {
-	if useGoroot {
-		gorootDir := os.Getenv("GOROOT")
-		if gorootDir == "" {
-			return "", ErrGorootNotSet
-		}
-
-		return filepath.Join(gorootDir, "bin"), nil
-	}
-
-	goBin := os.Getenv("GOBIN")
-	if goBin == "" {
-		gopath := os.Getenv("GOPATH")
-		if gopath == "" {
-			home := os.Getenv("HOME")
-			if runtime.GOOS == windowsOS && home == "" {
-				home = os.Getenv("USERPROFILE")
-			}
-
-			gopath = filepath.Join(home, "go")
-		}
-
-		goBin = filepath.Join(gopath, "bin")
-	}
-
-	return goBin, nil
+	//nolint:wrapcheck // paths.ErrGorootNotSet is the same sentinel as fs.ErrGorootNotSet, so wrapping it here would obscure the identity callers compare against.
+	return paths.BinDir(useGoroot)
 }
 
 // AdjustBinaryPath constructs a full binary path, adding .exe on Windows if needed.

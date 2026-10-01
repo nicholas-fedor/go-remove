@@ -17,6 +17,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/nicholas-fedor/go-remove/internal/paths"
 )
 
 // Permission constants for file operations.
@@ -51,7 +53,7 @@ var _ Trasher = (*managedTrasher)(nil)
 //   - Managed trash implementation.
 //   - An error if the trash directories cannot be created.
 func newTrasher() (Trasher, error) {
-	trashPath := platformTrashRoot()
+	trashPath := paths.TrashRoot()
 	if trashPath == "" {
 		return nil, fmt.Errorf("%w: could not determine trash path", ErrTrashFull)
 	}
