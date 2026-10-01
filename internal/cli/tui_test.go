@@ -876,7 +876,7 @@ func TestViewHistory_AlignsColumnsWithCJKNames(t *testing.T) {
 	lines := strings.Split(stripANSI(m.View().Content), "\n")
 
 	// The rows follow the title, a blank line, the column heading and the rule.
-	firstRow := historyTitleLines + historyTableHeaderLines
+	firstRow := render.HistoryTitleLines + render.HistoryTableHeaderLines
 
 	// Each row ends with its trash value. A name column sized by runes rather
 	// than cells shifts that column, so compare the cell offset of the value
@@ -1030,7 +1030,7 @@ func TestViewHistory_DropsTrashColumnWhenItCannotFit(t *testing.T) {
 
 			rendered := stripANSI(m.View().Content)
 
-			assert.Equal(t, tt.wantTrash, strings.Contains(rendered, historyTrashHeading),
+			assert.Equal(t, tt.wantTrash, strings.Contains(rendered, render.HistoryTrashHeading),
 				"trash heading presence at width %d", tt.width)
 			assert.Equal(t, tt.wantTrash, strings.Contains(rendered, "Yes"),
 				"trash value presence at width %d", tt.width)

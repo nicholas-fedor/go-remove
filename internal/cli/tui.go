@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/lipgloss/v2"
 	"github.com/rs/zerolog"
 	"golang.org/x/term"
 
@@ -28,34 +27,13 @@ import (
 	"github.com/nicholas-fedor/go-remove/internal/tui/render"
 )
 
-// Layout constants for TUI rendering.
-// These constants must be kept consistent between updateGrid() and the view functions.
+// Layout constants for TUI state that is not a rendering decision.
 const (
 	// keyCtrlC is the key that interrupts, and the one a dialog must honour.
 	keyCtrlC = "ctrl+c"
 
-	visibleLenPrefix        = 2                  // Prefix length for cursor visibility
-	footerHeight            = 1                  // Height reserved for footer/instructions
-	leftPadding             = 2                  // Left padding for the entire TUI
-	maxLogLines             = 50                 // Maximum number of log lines to retain
-	maxHistoryEntries       = 100                // Maximum number of history entries to display
-	dateTimeFormat          = "2006-01-02 15:04" // Format for displaying timestamps
-	separatorAdjustment     = 2                  // Extra width for column separator
-	historyTableHeaderLines = 2                  // Number of lines for history table header (header + separator)
-
-	// History table column sizing.
-	historyDateHeading   = "Date/Time"
-	historyTrashHeading  = "In Trash"
-	historyDateWidth     = 16    // Widest date the table shows before yielding space
-	historyMinNameWidth  = 8     // Narrowest the name column may become before it is useless
-	historyColumnDivider = 1     // Spaces between two columns
-	historyEllipsis      = "..." // Trailing ellipsis on a name shortened to fit its column
-
-	// historyCursorPrefix is the gutter every row carries, selected or not.
-	historyCursorPrefix = "  "
-
-	// historyTitleLines covers the view title and the blank line beneath it.
-	historyTitleLines = 2
+	maxLogLines       = 50  // Maximum number of log lines to retain
+	maxHistoryEntries = 100 // Maximum number of history entries to display
 )
 
 // Mode constants for TUI state.
@@ -66,9 +44,9 @@ const (
 
 // Confirmation constants for destructive operations.
 const (
-	confirmNone       = ""                 // No confirmation pending
-	confirmClearAll   = "clear_all"        // Confirm clearing all history
-	confirmDeletePerm = "delete_permanent" // Confirm permanent deletion
+	confirmNone       = render.ConfirmNone       // No confirmation pending
+	confirmClearAll   = render.ConfirmClearAll   // Confirm clearing all history
+	confirmDeletePerm = render.ConfirmDeletePerm // Confirm permanent deletion
 )
 
 // ErrNoBinariesFound signals that no binaries were found in the target directory.
@@ -1349,11 +1327,13 @@ func (m *model) updateGrid() {
 // Returns:
 //   - Bubble Tea view for the current mode.
 func (m *model) View() tea.View {
+	state := m.renderState()
+
 	if m.mode == modeHistory {
-		return m.viewHistory()
+		return render.History(state)
 	}
 
-	return render.Binaries(m.renderState())
+	return render.Binaries(state)
 }
 
 // renderState captures the model as a snapshot for the view to draw.
@@ -1383,267 +1363,4 @@ func (m *model) renderState() *render.State {
 		Logs:           m.logs,
 		ShowLogs:       m.showLogs,
 	}
-}
-
-// viewHistory renders the history view.
-//
-// Returns:
-//   - Bubble Tea view listing deletion history.
-func (m *model) viewHistory() tea.View {
-	// Apply configured styles for UI elements.
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(m.styles.TitleColor))
-	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(m.styles.HistoryColor))
-	cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.styles.CursorColor))
-	footerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.styles.FooterColor))
-	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.styles.StatusColor))
-	logStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.styles.LogColor))
-	trashYesStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.styles.TrashYesColor))
-	trashNoStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.styles.TrashNoColor))
-
-	var s strings.Builder
-
-	s.WriteString(titleStyle.Render("Deletion History\n"))
-	s.WriteString("\n")
-
-	// Calculate visible count first for use in both rendering and height calculation
-	var (
-		visibleCount      int
-		entryCount        int
-		maxVisibleEntries int
-	)
-
-	// Show loading state or history entries
-
-	switch {
-	case m.historyLoading:
-		s.WriteString("Loading history...\n")
-	case len(m.historyEntries) == 0:
-		s.WriteString("No deletion history found.\n")
-	default:
-		// Size the columns from the terminal rather than a fixed 50 columns,
-		// which wrapped on a narrow window.
-		//
-		// The frame sets Width(m.width-leftPadding) and pads its content by
-		// leftPadding, so the space actually left for the columns is the width
-		// less both. Sizing off a single subtraction over-allocates
-		// leftPadding cells and wraps every row. Every row also carries a
-		// cursor prefix, which comes off next.
-		//
-		// The trash column is dropped first because it is the least
-		// informative, and neither remaining column is forced wider than the
-		// space available, so a narrow window truncates rather than wrapping.
-		content := max(m.width-2*leftPadding, 1)
-		free := max(content-render.DisplayWidth(historyCursorPrefix)-historyColumnDivider, 1)
-
-		trashWidth := len(historyTrashHeading)
-		dateWidth := min(historyDateWidth, max(free-historyMinNameWidth, 1))
-		nameWithoutTrash := max(free-dateWidth-historyColumnDivider, 1)
-
-		// The candidate is deliberately left unclamped so it reflects the space
-		// that is really left. Clamping it before the comparison would make
-		// every candidate meet the minimum and pin the trash column on even
-		// when it does not fit.
-		nameWithTrashCandidate := max(
-			free-dateWidth-2*historyColumnDivider-trashWidth,
-			1,
-		)
-
-		showTrash := nameWithTrashCandidate >= historyMinNameWidth
-		nameWidth := nameWithoutTrash
-
-		if showTrash {
-			nameWidth = max(nameWithTrashCandidate, historyMinNameWidth)
-		}
-
-		// Table header
-		dateHeading := render.TruncateToWidth(historyDateHeading, dateWidth)
-
-		header := render.PadToWidth(dateHeading, dateWidth) +
-			strings.Repeat(" ", historyColumnDivider) +
-			render.PadToWidth("Binary", nameWidth)
-
-		if showTrash {
-			header += strings.Repeat(" ", historyColumnDivider) +
-				render.PadToWidth(historyTrashHeading, trashWidth)
-		}
-
-		s.WriteString(headerStyle.Render(header))
-		s.WriteString("\n")
-		s.WriteString(strings.Repeat("─", min(
-			dateWidth+nameWidth+separatorAdjustment,
-			content,
-		)))
-		s.WriteString("\n")
-
-		// Calculate available height for history entries
-		// Reserve space for: title(2) + header(2) + footer(1) + status(1) + padding(2)
-		reservedHeight := 8
-
-		if m.showLogs {
-			// Reserve additional space for log panel (header + separator + lines)
-			visibleLogCount := min(len(m.logs), render.MaxVisibleLogLines)
-			if visibleLogCount == 0 {
-				visibleLogCount = 1 // Placeholder line
-			}
-
-			reservedHeight += visibleLogCount + render.LogPanelSeparatorLines
-		}
-
-		maxVisibleEntries = max(m.height-reservedHeight, 1)
-		entryCount = len(m.historyEntries)
-		visibleCount = min(entryCount, maxVisibleEntries)
-
-		// Adjust if we need to show "...and X more" message
-		showMoreIndicator := entryCount > maxVisibleEntries
-		if showMoreIndicator && visibleCount > 0 {
-			visibleCount--
-		}
-
-		// Ensure cursor is within visible range
-		// This will scroll the view as needed
-		startIdx := 0
-		if m.historyCursor >= visibleCount {
-			// If cursor is below visible range, adjust start index
-			startIdx = m.historyCursor - visibleCount + 1
-			// Recalculate visible count based on new start
-			visibleCount = min(entryCount-startIdx, maxVisibleEntries)
-			if showMoreIndicator && visibleCount > 0 {
-				visibleCount--
-			}
-		}
-
-		// Table rows - display only visible entries
-		for i := range visibleCount {
-			entryIdx := startIdx + i
-			if entryIdx >= entryCount {
-				break
-			}
-
-			entry := m.historyEntries[entryIdx]
-
-			prefix := historyCursorPrefix
-			if entryIdx == m.historyCursor {
-				prefix = cursorStyle.Render(m.styles.Cursor)
-			}
-
-			dateStr := entry.Timestamp.Format(dateTimeFormat)
-
-			nameStr := entry.BinaryName
-			if render.DisplayWidth(nameStr) > nameWidth {
-				// The ellipsis occupies cells of its own, so the name is
-				// shortened into what the column has left once they are paid
-				// for. A column narrower than the ellipsis leaves no budget at
-				// all, which would put the ellipsis past the column edge, so the
-				// result is capped to the column afterwards.
-				budget := max(nameWidth-render.DisplayWidth(historyEllipsis), 0)
-
-				nameStr = render.TruncateToWidth(nameStr, budget) + historyEllipsis
-				nameStr = render.TruncateToWidth(nameStr, nameWidth)
-			}
-
-			var trashStr string
-			if entry.InTrash {
-				trashStr = trashYesStyle.Render("Yes")
-			} else {
-				trashStr = trashNoStyle.Render("No")
-			}
-
-			row := render.PadToWidth(render.TruncateToWidth(dateStr, dateWidth), dateWidth) +
-				strings.Repeat(" ", historyColumnDivider) +
-				render.PadToWidth(nameStr, nameWidth)
-
-			if showTrash {
-				row += strings.Repeat(" ", historyColumnDivider) +
-					render.PadToWidth(trashStr, trashWidth)
-			}
-
-			s.WriteString(prefix + row)
-			s.WriteString("\n")
-		}
-
-		// Show indicator if there are more entries
-		if showMoreIndicator {
-			remaining := entryCount - startIdx - visibleCount
-			moreMsg := fmt.Sprintf("...and %d more", remaining)
-			s.WriteString(footerStyle.Render(moreMsg))
-			s.WriteString("\n")
-		}
-	}
-
-	s.WriteString("\n")
-
-	// Render log panel if enabled
-	if m.showLogs {
-		visibleLogs := render.VisibleLogs(m.logs)
-
-		s.WriteString(logStyle.Render("─ Log Messages ─"))
-		s.WriteString("\n")
-
-		if len(visibleLogs) == 0 {
-			s.WriteString(logStyle.Render("No log messages yet"))
-			s.WriteString("\n")
-		} else {
-			for _, logEntry := range visibleLogs {
-				s.WriteString(logStyle.Render(logEntry))
-				s.WriteString("\n")
-			}
-		}
-
-		s.WriteString("\n")
-	}
-
-	// Show confirmation dialog if active
-	switch m.confirmation {
-	case confirmClearAll:
-		s.WriteString(statusStyle.Render("Clear all history? This cannot be undone. (y/n)"))
-		s.WriteString("\n")
-	case confirmDeletePerm:
-		if m.historyCursor < len(m.historyEntries) {
-			entry := m.historyEntries[m.historyCursor]
-			s.WriteString(
-				statusStyle.Render(fmt.Sprintf("Permanently delete %s? (y/n)", entry.BinaryName)),
-			)
-			s.WriteString("\n")
-		}
-	default:
-		if m.status != "" {
-			s.WriteString(statusStyle.Render(m.status))
-			s.WriteString("\n")
-		}
-	}
-
-	// Footer with history-specific key bindings
-	var footerText string
-
-	switch {
-	case m.confirmation != confirmNone:
-		footerText = "y: confirm  n: cancel"
-	default:
-		footerText = "↑/k: up  ↓/j: down  Enter: restore  d: delete  c: clear entry  C: clear all  b: back  u: undo  L: logs  q: quit"
-	}
-
-	footer := footerStyle.Render(footerText)
-
-	// Pad between the content and the footer from what actually renders, rather
-	// than from a hand-counted total that drifts as soon as the layout does.
-	// The measurement uses the same style as the render, because left padding
-	// and the width can change how many lines the result occupies, and the
-	// padding goes inside the body so every line keeps its width.
-	frame := lipgloss.NewStyle().
-		PaddingLeft(leftPadding).
-		Width(m.width - leftPadding)
-
-	body := s.String()
-	pad := max(m.height-lipgloss.Height(frame.Render(body+footer)), 0)
-
-	if pad > 0 {
-		body += strings.Repeat("\n", pad)
-	}
-
-	content := frame.Render(body + footer)
-
-	view := tea.NewView(content)
-	view.AltScreen = true
-
-	return view
 }
