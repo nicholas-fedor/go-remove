@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/nicholas-fedor/go-remove/internal/history"
+	"github.com/nicholas-fedor/go-remove/internal/tui/render"
 )
 
 // FuzzView verifies View rendering does not panic for arbitrary terminal sizes.
@@ -26,7 +27,7 @@ func FuzzView(f *testing.F) {
 			width:         width,
 			height:        height,
 			logs:          []string{},
-			styles:        defaultStyleConfig(),
+			styles:        render.DefaultStyleConfig(),
 			sortAscending: true,
 			mode:          modeBinaries,
 		}

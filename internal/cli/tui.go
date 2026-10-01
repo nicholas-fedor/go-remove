@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
-	"github.com/rivo/uniseg"
 	"github.com/rs/zerolog"
 	"golang.org/x/term"
 
@@ -26,6 +25,7 @@ import (
 	"github.com/nicholas-fedor/go-remove/internal/fs"
 	"github.com/nicholas-fedor/go-remove/internal/history"
 	"github.com/nicholas-fedor/go-remove/internal/logger"
+	"github.com/nicholas-fedor/go-remove/internal/tui/render"
 )
 
 // Layout constants for TUI rendering.
@@ -125,19 +125,6 @@ type ProgramRunner interface {
 	RunProgram(m tea.Model, opts ...tea.ProgramOption) (*tea.Program, error)
 }
 
-// styleConfig holds TUI appearance settings.
-type styleConfig struct {
-	TitleColor    string // ANSI 256-color code for title
-	CursorColor   string // ANSI 256-color code for cursor
-	FooterColor   string // ANSI 256-color code for footer
-	StatusColor   string // ANSI 256-color code for status
-	LogColor      string // ANSI 256-color code for log messages
-	HistoryColor  string // ANSI 256-color code for history table header
-	TrashYesColor string // ANSI 256-color code for "Yes" in trash available column
-	TrashNoColor  string // ANSI 256-color code for "No" in trash available column
-	Cursor        string // Symbol used for the cursor
-}
-
 // model encapsulates the state of the TUI.
 //
 // context has to travel on the model for the handlers to reach the work they
@@ -180,18 +167,18 @@ type model struct {
 	historyLoading bool                    // Whether history is being loaded
 
 	// General state
-	dir           string        // Directory containing binaries
-	config        Config        // CLI configuration
-	logger        logger.Logger // Logger instance
-	fs            fs.FS         // Filesystem operations
-	width         int           // Terminal width
-	height        int           // Terminal height
-	status        string        // Status message
-	styles        styleConfig   // TUI appearance settings
-	sortAscending bool          // True for ascending sort, false for descending
-	logs          []string      // Captured log messages (circular buffer)
-	showLogs      bool          // Toggle log panel visibility
-	logChan       chan LogMsg   // Channel for receiving log messages from the logger
+	dir           string             // Directory containing binaries
+	config        Config             // CLI configuration
+	logger        logger.Logger      // Logger instance
+	fs            fs.FS              // Filesystem operations
+	width         int                // Terminal width
+	height        int                // Terminal height
+	status        string             // Status message
+	styles        render.StyleConfig // TUI appearance settings
+	sortAscending bool               // True for ascending sort, false for descending
+	logs          []string           // Captured log messages (circular buffer)
+	showLogs      bool               // Toggle log panel visibility
+	logChan       chan LogMsg        // Channel for receiving log messages from the logger
 }
 
 // DefaultRunner provides the default Bubbletea program runner.
@@ -252,7 +239,7 @@ func RunTUI(
 		cursorX:        0,
 		cursorY:        0,
 		sortAscending:  true,
-		styles:         defaultStyleConfig(),
+		styles:         render.DefaultStyleConfig(),
 		logs:           make([]string, 0, maxLogLines),
 		showLogs:       config.Verbose,
 		mode:           modeBinaries,
@@ -394,24 +381,6 @@ func (m *model) toggleVerboseLogging() {
 	// The panel changes the space available to the grid, so the reserved height
 	// has to be recalculated.
 	m.updateGrid()
-}
-
-// defaultStyleConfig provides default TUI style settings.
-//
-// Returns:
-//   - Default color and cursor configuration.
-func defaultStyleConfig() styleConfig {
-	return styleConfig{
-		TitleColor:    "39",  // Bright blue
-		CursorColor:   "214", // Orange
-		FooterColor:   "245", // Light gray
-		StatusColor:   "46",  // Lime green
-		LogColor:      "240", // Dark gray for subtle log display
-		HistoryColor:  "141", // Purple for history header
-		TrashYesColor: "46",  // Green for "Yes"
-		TrashNoColor:  "196", // Red for "No"
-		Cursor:        "❯ ",
-	}
 }
 
 // RunProgram launches a Bubble Tea program with the given model and options.
@@ -1378,8 +1347,8 @@ func (m *model) updateGrid() {
 	// Determine the maximum length of binary names for column sizing.
 	maxNameLen := 0
 	for _, choice := range m.choices {
-		if displayWidth(choice) > maxNameLen {
-			maxNameLen = displayWidth(choice)
+		if render.DisplayWidth(choice) > maxNameLen {
+			maxNameLen = render.DisplayWidth(choice)
 		}
 	}
 
@@ -1459,58 +1428,6 @@ func (m *model) View() tea.View {
 	return m.viewBinaries()
 }
 
-// displayWidth returns the number of terminal cells a string occupies.
-//
-// Rune count is not sufficient: a CJK character occupies two cells, so a grid
-// sized on runes overflows the terminal and its padding comes out short.
-func displayWidth(s string) int {
-	return lipgloss.Width(s)
-}
-
-// truncateToWidth shortens s to at most width cells, ending on a grapheme cluster boundary.
-//
-// Slicing at a byte index would split a multi-byte rune in half and render
-// invalid UTF-8 as mojibake. Accumulating per rune is not enough either: an
-// emoji joined into a single cluster (a ZWJ sequence such as a family, or a
-// skin-tone modifier) spans several runes, and cutting between them leaves a
-// dangling cluster that the terminal renders as tofu. uniseg walks whole
-// clusters, and lipgloss measures them, so a cluster is kept or dropped whole.
-func truncateToWidth(s string, width int) string {
-	if displayWidth(s) <= width {
-		return s
-	}
-
-	var (
-		builder strings.Builder
-		used    int
-	)
-
-	clusters := uniseg.NewGraphemes(s)
-	for clusters.Next() {
-		cluster := clusters.Str()
-
-		cellWidth := lipgloss.Width(cluster)
-		if used+cellWidth > width {
-			break
-		}
-
-		builder.WriteString(cluster)
-
-		used += cellWidth
-	}
-
-	return builder.String()
-}
-
-// padToWidth appends spaces so s occupies exactly width terminal cells.
-//
-// fmt's %-*s pads by rune count, which is too few for a wide rune and leaves
-// the column overflowing. A styled string measures by its printable text, so
-// this also works on a rendered value.
-func padToWidth(s string, width int) string {
-	return s + strings.Repeat(" ", max(width-displayWidth(s), 0))
-}
-
 // viewBinaries renders the binary selection view.
 //
 // Returns:
@@ -1533,8 +1450,8 @@ func (m *model) viewBinaries() tea.View {
 	// Calculate column width based on the longest binary name.
 	var maxNameLen int
 	for _, choice := range m.choices {
-		if displayWidth(choice) > maxNameLen {
-			maxNameLen = displayWidth(choice)
+		if render.DisplayWidth(choice) > maxNameLen {
+			maxNameLen = render.DisplayWidth(choice)
 		}
 	}
 
@@ -1556,7 +1473,7 @@ func (m *model) viewBinaries() tea.View {
 			}
 
 			item := m.choices[idx]
-			visibleLen := visibleLenPrefix + displayWidth(item)
+			visibleLen := visibleLenPrefix + render.DisplayWidth(item)
 			padding := max(colWidth-visibleLen, 0)
 			cell := prefix + item + strings.Repeat(" ", padding)
 			grid.WriteString(cell)
@@ -1678,7 +1595,7 @@ func (m *model) viewHistory() tea.View {
 		// informative, and neither remaining column is forced wider than the
 		// space available, so a narrow window truncates rather than wrapping.
 		content := max(m.width-2*leftPadding, 1)
-		free := max(content-displayWidth(historyCursorPrefix)-historyColumnDivider, 1)
+		free := max(content-render.DisplayWidth(historyCursorPrefix)-historyColumnDivider, 1)
 
 		trashWidth := len(historyTrashHeading)
 		dateWidth := min(historyDateWidth, max(free-historyMinNameWidth, 1))
@@ -1701,13 +1618,15 @@ func (m *model) viewHistory() tea.View {
 		}
 
 		// Table header
-		header := padToWidth(truncateToWidth(historyDateHeading, dateWidth), dateWidth) +
+		dateHeading := render.TruncateToWidth(historyDateHeading, dateWidth)
+
+		header := render.PadToWidth(dateHeading, dateWidth) +
 			strings.Repeat(" ", historyColumnDivider) +
-			padToWidth("Binary", nameWidth)
+			render.PadToWidth("Binary", nameWidth)
 
 		if showTrash {
 			header += strings.Repeat(" ", historyColumnDivider) +
-				padToWidth(historyTrashHeading, trashWidth)
+				render.PadToWidth(historyTrashHeading, trashWidth)
 		}
 
 		s.WriteString(headerStyle.Render(header))
@@ -1772,16 +1691,16 @@ func (m *model) viewHistory() tea.View {
 			dateStr := entry.Timestamp.Format(dateTimeFormat)
 
 			nameStr := entry.BinaryName
-			if displayWidth(nameStr) > nameWidth {
+			if render.DisplayWidth(nameStr) > nameWidth {
 				// The ellipsis occupies cells of its own, so the name is
 				// shortened into what the column has left once they are paid
 				// for. A column narrower than the ellipsis leaves no budget at
 				// all, which would put the ellipsis past the column edge, so the
 				// result is capped to the column afterwards.
-				budget := max(nameWidth-displayWidth(historyEllipsis), 0)
+				budget := max(nameWidth-render.DisplayWidth(historyEllipsis), 0)
 
-				nameStr = truncateToWidth(nameStr, budget) + historyEllipsis
-				nameStr = truncateToWidth(nameStr, nameWidth)
+				nameStr = render.TruncateToWidth(nameStr, budget) + historyEllipsis
+				nameStr = render.TruncateToWidth(nameStr, nameWidth)
 			}
 
 			var trashStr string
@@ -1791,13 +1710,13 @@ func (m *model) viewHistory() tea.View {
 				trashStr = trashNoStyle.Render("No")
 			}
 
-			row := padToWidth(truncateToWidth(dateStr, dateWidth), dateWidth) +
+			row := render.PadToWidth(render.TruncateToWidth(dateStr, dateWidth), dateWidth) +
 				strings.Repeat(" ", historyColumnDivider) +
-				padToWidth(nameStr, nameWidth)
+				render.PadToWidth(nameStr, nameWidth)
 
 			if showTrash {
 				row += strings.Repeat(" ", historyColumnDivider) +
-					padToWidth(trashStr, trashWidth)
+					render.PadToWidth(trashStr, trashWidth)
 			}
 
 			s.WriteString(prefix + row)

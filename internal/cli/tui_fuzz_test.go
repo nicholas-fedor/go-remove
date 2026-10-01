@@ -10,6 +10,7 @@ import (
 
 	"github.com/nicholas-fedor/go-remove/internal/history"
 	"github.com/nicholas-fedor/go-remove/internal/logger"
+	"github.com/nicholas-fedor/go-remove/internal/tui/render"
 )
 
 type fuzzFS struct{}
@@ -67,7 +68,7 @@ func Fuzz_model_Update(f *testing.F) {
 			dir:           "/bin",
 			fs:            fuzzFS{},
 			logger:        &tuiMockLogger{},
-			styles:        defaultStyleConfig(),
+			styles:        render.DefaultStyleConfig(),
 		}
 
 		msg := keyPressString(key)
@@ -284,7 +285,7 @@ func Fuzz_model_stateConsistency(f *testing.F) {
 			dir:            "/bin",
 			fs:             fuzzFS{},
 			logger:         &tuiMockLogger{},
-			styles:         defaultStyleConfig(),
+			styles:         render.DefaultStyleConfig(),
 			historyEntries: make([]*history.HistoryEntry, 0),
 			historyCursor:  0,
 			confirmation:   confirmNone,

@@ -10,7 +10,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 package mocks
 
 import (
-	"charm.land/bubbletea/v2"
+	tea "charm.land/bubbletea/v2"
 	mock "github.com/stretchr/testify/mock"
 )
 

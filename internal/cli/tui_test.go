@@ -27,6 +27,7 @@ import (
 	"github.com/nicholas-fedor/go-remove/internal/history"
 	mockHistory "github.com/nicholas-fedor/go-remove/internal/history/mocks"
 	"github.com/nicholas-fedor/go-remove/internal/logger"
+	"github.com/nicholas-fedor/go-remove/internal/tui/render"
 )
 
 // Constants for key press strings to avoid magic string repetition.
@@ -195,7 +196,7 @@ func TestLogPolling_AlwaysRuns(t *testing.T) {
 				logChan:  make(chan LogMsg, maxLogLines),
 				logger:   &tuiMockLogger{},
 				showLogs: verbose,
-				styles:   defaultStyleConfig(),
+				styles:   render.DefaultStyleConfig(),
 				config:   Config{Verbose: verbose, LogLevel: "info"},
 			}
 
@@ -233,7 +234,7 @@ func TestToggleVerboseLogging_StartsNoExtraPollChain(t *testing.T) {
 		logs:    make([]string, 0, maxLogLines),
 		logChan: make(chan LogMsg, maxLogLines),
 		logger:  &tuiMockLogger{},
-		styles:  defaultStyleConfig(),
+		styles:  render.DefaultStyleConfig(),
 		config:  Config{LogLevel: "warn"},
 		choices: []string{"tool"},
 	}
@@ -262,7 +263,7 @@ func TestToggleVerboseLogging_PreservesStartupVerbose(t *testing.T) {
 			logs:    make([]string, 0, maxLogLines),
 			logChan: make(chan LogMsg, maxLogLines),
 			logger:  recorder,
-			styles:  defaultStyleConfig(),
+			styles:  render.DefaultStyleConfig(),
 			// RunTUI opens the panel when --verbose is given.
 			showLogs: true,
 			config:   Config{Verbose: true, LogLevel: "info"},
@@ -288,7 +289,7 @@ func TestToggleVerboseLogging_PreservesStartupVerbose(t *testing.T) {
 			logs:    make([]string, 0, maxLogLines),
 			logChan: make(chan LogMsg, maxLogLines),
 			logger:  recorder,
-			styles:  defaultStyleConfig(),
+			styles:  render.DefaultStyleConfig(),
 			config:  Config{Verbose: false, LogLevel: "warn"},
 			choices: []string{"tool"},
 		}
@@ -318,7 +319,7 @@ func TestRefreshChoices_ReportsReadFailure(t *testing.T) {
 		dir:     "/bin",
 		choices: []string{"existing"},
 		logger:  &tuiMockLogger{},
-		styles:  defaultStyleConfig(),
+		styles:  render.DefaultStyleConfig(),
 		fs:      fsMock,
 	}
 
@@ -342,7 +343,7 @@ func TestRefreshChoices_ReplacesListOnSuccess(t *testing.T) {
 		choices: []string{"stale"},
 		status:  "Could not read /bin: permission denied",
 		logger:  &tuiMockLogger{},
-		styles:  defaultStyleConfig(),
+		styles:  render.DefaultStyleConfig(),
 		fs:      fsMock,
 	}
 
@@ -826,7 +827,7 @@ func TestCtrlC_KeepsInterruptedStatus(t *testing.T) {
 		width:         80,
 		height:        24,
 		sortAscending: true,
-		styles:        defaultStyleConfig(),
+		styles:        render.DefaultStyleConfig(),
 	}
 
 	// Start a removal, then interrupt it the way the key handler does.
@@ -869,7 +870,7 @@ func TestViewHistory_AlignsColumnsWithCJKNames(t *testing.T) {
 		mode:           modeHistory,
 		width:          80,
 		height:         24,
-		styles:         defaultStyleConfig(),
+		styles:         render.DefaultStyleConfig(),
 	}
 
 	lines := strings.Split(stripANSI(m.View().Content), "\n")
@@ -895,95 +896,13 @@ func TestViewHistory_AlignsColumnsWithCJKNames(t *testing.T) {
 
 		require.Positivef(t, at, "row %d has no trash column: %q", i, cell)
 
-		offsets = append(offsets, displayWidth(cell[:at]))
+		offsets = append(offsets, render.DisplayWidth(cell[:at]))
 	}
 
 	for i := 1; i < len(offsets); i++ {
 		assert.Equal(t, offsets[0], offsets[i],
 			"row %d has its trash column shifted by the name before it", i)
 	}
-}
-
-// TestTruncateToWidth verifies truncation ends on a grapheme cluster boundary.
-//
-// Slicing at a byte index splits a multi-byte rune and renders invalid UTF-8.
-// Accumulating per rune splits a cluster that spans runes, such as a joined
-// emoji, and leaves a dangling sequence the terminal renders as tofu.
-func TestTruncateToWidth(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name  string
-		input string
-		width int
-		want  string
-	}{
-		{name: "fits", input: "tool", width: 10, want: "tool"},
-		{name: "ascii truncation", input: "a-very-long-tool-name", width: 8, want: "a-very-l"},
-		{name: "multibyte whole runes", input: "héllo", width: 4, want: "héll"},
-		{name: "multibyte never splits", input: "日本語のツール", width: 5, want: "日本"},
-		{name: "cjk is two cells per rune", input: "日本語", width: 3, want: "日"},
-		{name: "zero width", input: "tool", width: 0, want: ""},
-		{
-			name:  "joined emoji cluster fits whole",
-			input: "👨‍👩‍👧‍👦x",
-			width: 2,
-			want:  "👨‍👩‍👧‍👦",
-		},
-		{
-			// The cluster does not fit in the last two cells, so it is dropped
-			// whole rather than cut after the man, which would leave a
-			// dangling zero-width joiner on screen.
-			name:  "cluster cut off is dropped whole",
-			input: "ab👨‍👩‍👧‍👦",
-			width: 3,
-			want:  "ab",
-		},
-		{
-			name:  "skin tone modifier stays attached",
-			input: "👍🏽x",
-			width: 2,
-			want:  "👍🏽",
-		},
-		{
-			// An "e" plus a combining acute (U+0301): one cluster, one cell.
-			// Per rune it would split, leaving a dangling accent.
-			name:  "combining mark stays attached",
-			input: "e" + string(rune(0x301)) + "x",
-			width: 1,
-			want:  "e" + string(rune(0x301)),
-		},
-		{
-			name:  "flag sequence is one cluster",
-			input: "🇺🇸🇬🇧",
-			width: 2,
-			want:  "🇺🇸",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			got := truncateToWidth(tt.input, tt.width)
-
-			assert.Equal(t, tt.want, got)
-			assert.True(t, utf8.ValidString(got),
-				"truncation must not leave invalid UTF-8")
-			assert.LessOrEqual(t, displayWidth(got), tt.width,
-				"the result must fit the width")
-		})
-	}
-}
-
-// TestDisplayWidth_IgnoresRuneCount verifies a wide rune counts as two cells, so
-// a grid sized on runes would overflow.
-func TestDisplayWidth_IgnoresRuneCount(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, 4, displayWidth("tool"))
-	assert.Equal(t, 5, displayWidth("héllo"), "accents stay single width")
-	assert.Equal(t, 6, displayWidth("日本語"), "CJK runes are two cells each")
 }
 
 // TestViewHistory_FitsNarrowTerminal verifies the table is sized to the window
@@ -1011,16 +930,16 @@ func TestViewHistory_FitsNarrowTerminal(t *testing.T) {
 				mode:           modeHistory,
 				width:          width,
 				height:         24,
-				styles:         defaultStyleConfig(),
+				styles:         render.DefaultStyleConfig(),
 			}
 
 			rendered := stripANSI(m.View().Content)
 			lines := strings.Split(rendered, "\n")
 
 			for _, line := range lines {
-				assert.LessOrEqual(t, displayWidth(line), width,
+				assert.LessOrEqual(t, render.DisplayWidth(line), width,
 					"no line may exceed the terminal width, got %d for %q",
-					displayWidth(line), line)
+					render.DisplayWidth(line), line)
 			}
 
 			// A row wider than the frame wraps onto a second line, and every
@@ -1044,7 +963,7 @@ func TestViewHistory_FitsNarrowTerminal(t *testing.T) {
 // entry.
 //
 // The selected row is the one prefixed with the cursor glyph, which
-// defaultStyleConfig renders as a right-pointing triangle.
+// render.DefaultStyleConfig renders as a right-pointing triangle.
 //
 // Parameters:
 //   - t: test handle used to fail the test when no such row exists.
@@ -1055,7 +974,7 @@ func TestViewHistory_FitsNarrowTerminal(t *testing.T) {
 func cursorRowIndex(t *testing.T, lines []string) int {
 	t.Helper()
 
-	cursor := defaultStyleConfig().Cursor
+	cursor := render.DefaultStyleConfig().Cursor
 
 	for index, line := range lines {
 		if strings.Contains(line, cursor) {
@@ -1106,7 +1025,7 @@ func TestViewHistory_DropsTrashColumnWhenItCannotFit(t *testing.T) {
 				mode:           modeHistory,
 				width:          tt.width,
 				height:         24,
-				styles:         defaultStyleConfig(),
+				styles:         render.DefaultStyleConfig(),
 			}
 
 			rendered := stripANSI(m.View().Content)
@@ -1138,16 +1057,16 @@ func TestViewBinaries_FitsNarrowTerminal(t *testing.T) {
 				width:         width,
 				height:        24,
 				sortAscending: true,
-				styles:        defaultStyleConfig(),
+				styles:        render.DefaultStyleConfig(),
 			}
 			m.updateGrid()
 
 			rendered := stripANSI(m.View().Content)
 
 			for _, line := range strings.Split(rendered, "\n") {
-				assert.LessOrEqual(t, displayWidth(line), width,
+				assert.LessOrEqual(t, render.DisplayWidth(line), width,
 					"no line may exceed the terminal width, got %d for %q",
-					displayWidth(line), line)
+					render.DisplayWidth(line), line)
 			}
 		})
 	}
@@ -1169,7 +1088,7 @@ func TestView_FillsTerminalHeight(t *testing.T) {
 		"binaries": func() model {
 			return model{
 				choices: []string{"vhs", "tool"}, cols: 1, rows: 2, width: 80, height: 24,
-				sortAscending: true, styles: defaultStyleConfig(),
+				sortAscending: true, styles: render.DefaultStyleConfig(),
 			}
 		},
 		"binaries with status and logs": func() model {
@@ -1178,14 +1097,14 @@ func TestView_FillsTerminalHeight(t *testing.T) {
 				status:        "Removed tool",
 				logs:          []string{"a log line", "another log line"},
 				showLogs:      true,
-				sortAscending: true, styles: defaultStyleConfig(),
+				sortAscending: true, styles: render.DefaultStyleConfig(),
 			}
 		},
 		"history": func() model {
 			return model{
 				historyEntries: []*history.HistoryEntry{{BinaryName: "vhs"}},
 				mode:           modeHistory, width: 80, height: 24,
-				sortAscending: true, styles: defaultStyleConfig(),
+				sortAscending: true, styles: render.DefaultStyleConfig(),
 			}
 		},
 	}
@@ -1246,7 +1165,7 @@ func TestHistoryMsg_ClampsCursor(t *testing.T) {
 		historyCursor:  2,
 		historyManager: &mockHistory.MockManager{},
 		logger:         &tuiMockLogger{},
-		styles:         defaultStyleConfig(),
+		styles:         render.DefaultStyleConfig(),
 		fs:             mockFS.NewMockFS(t),
 	}
 
@@ -1283,7 +1202,7 @@ func TestHandleConfirmation_CtrlC(t *testing.T) {
 		historyEntries: []*history.HistoryEntry{{BinaryName: "vhs"}},
 		historyManager: &mockHistory.MockManager{},
 		logger:         &tuiMockLogger{},
-		styles:         defaultStyleConfig(),
+		styles:         render.DefaultStyleConfig(),
 		fs:             mockFS.NewMockFS(t),
 	}
 
@@ -1338,7 +1257,7 @@ func Test_model_View(t *testing.T) {
 				cursorX:       0,
 				cursorY:       0,
 				sortAscending: true,
-				styles:        defaultStyleConfig(),
+				styles:        render.DefaultStyleConfig(),
 			},
 			want: func() string {
 				lines := make([]string, 0, 25)
@@ -1375,7 +1294,7 @@ func Test_model_View(t *testing.T) {
 				cursorX:       0,
 				cursorY:       0,
 				sortAscending: true,
-				styles:        defaultStyleConfig(),
+				styles:        render.DefaultStyleConfig(),
 			},
 			want: func() string {
 				lines := make([]string, 0, 25)
