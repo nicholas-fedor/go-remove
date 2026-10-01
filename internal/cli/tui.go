@@ -1309,21 +1309,6 @@ func (m *model) addLogEntry(msg LogMsg) {
 	}
 }
 
-// getVisibleLogs returns the last log lines that fit in the panel.
-//
-// Returns:
-//   - Visible log lines, or nil when the log panel is hidden.
-func (m *model) getVisibleLogs() []string {
-	if !m.showLogs {
-		return nil
-	}
-
-	// Return the last render.MaxVisibleLogLines entries
-	start := max(len(m.logs)-render.MaxVisibleLogLines, 0)
-
-	return m.logs[start:]
-}
-
 // sortChoices sorts the binary list according to the current sort order.
 func (m *model) sortChoices() {
 	if len(m.choices) == 0 {
@@ -1368,126 +1353,36 @@ func (m *model) View() tea.View {
 		return m.viewHistory()
 	}
 
-	return m.viewBinaries()
+	return render.Binaries(m.renderState())
 }
 
-// viewBinaries renders the binary selection view.
+// renderState captures the model as a snapshot for the view to draw.
+//
+// Parameters:
+//   - None.
 //
 // Returns:
-//   - Bubble Tea view listing binaries in a grid.
-func (m *model) viewBinaries() tea.View {
-	if len(m.choices) == 0 {
-		view := tea.NewView("No binaries found.\n")
-		view.AltScreen = true
-
-		return view
+//   - The state describing the current frame.
+func (m *model) renderState() *render.State {
+	return &render.State{
+		Mode:           render.ModeBinaries,
+		Width:          m.width,
+		Height:         m.height,
+		Styles:         m.styles,
+		Choices:        m.choices,
+		Rows:           m.rows,
+		Cols:           m.cols,
+		CursorX:        m.cursorX,
+		CursorY:        m.cursorY,
+		HistoryEntries: m.historyEntries,
+		HistoryCursor:  m.historyCursor,
+		HistoryLoading: m.historyLoading,
+		Status:         m.status,
+		Busy:           m.busy,
+		Confirmation:   m.confirmation,
+		Logs:           m.logs,
+		ShowLogs:       m.showLogs,
 	}
-
-	// Apply configured styles for UI elements.
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(m.styles.TitleColor))
-	cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.styles.CursorColor))
-	footerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.styles.FooterColor))
-	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.styles.StatusColor))
-	logStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.styles.LogColor))
-
-	// Calculate column width based on the longest binary name.
-	var maxNameLen int
-	for _, choice := range m.choices {
-		if render.DisplayWidth(choice) > maxNameLen {
-			maxNameLen = render.DisplayWidth(choice)
-		}
-	}
-
-	colWidth := maxNameLen + render.ColWidthPadding
-
-	// Build the grid of binary choices with cursor highlighting.
-	var grid strings.Builder
-
-	for row := range m.rows {
-		for col := range m.cols {
-			idx := row + col*m.rows // Column-major index (fill down columns)
-			if idx >= len(m.choices) {
-				break
-			}
-
-			prefix := "  "
-			if row == m.cursorY && col == m.cursorX {
-				prefix = cursorStyle.Render(m.styles.Cursor)
-			}
-
-			item := m.choices[idx]
-			visibleLen := visibleLenPrefix + render.DisplayWidth(item)
-			padding := max(colWidth-visibleLen, 0)
-			cell := prefix + item + strings.Repeat(" ", padding)
-			grid.WriteString(cell)
-		}
-
-		grid.WriteString("\n")
-	}
-
-	// Assemble the full TUI layout: title, grid, logs (if visible), status, and footer.
-	var s strings.Builder
-
-	s.WriteString(titleStyle.Render("Select a binary to remove:\n"))
-	s.WriteString("\n")
-	s.WriteString(grid.String())
-	s.WriteString("\n")
-
-	// Render log panel if enabled
-	if m.showLogs {
-		visibleLogs := m.getVisibleLogs()
-
-		s.WriteString(logStyle.Render("─ Log Messages ─"))
-		s.WriteString("\n")
-
-		if len(visibleLogs) == 0 {
-			s.WriteString(logStyle.Render("No log messages yet"))
-			s.WriteString("\n")
-		} else {
-			for _, logEntry := range visibleLogs {
-				s.WriteString(logStyle.Render(logEntry))
-				s.WriteString("\n")
-			}
-		}
-
-		s.WriteString("\n")
-	}
-
-	switch {
-	case m.busy != "":
-		s.WriteString(statusStyle.Render("Working: " + m.busy + " (ctrl+c to stop)"))
-		s.WriteString("\n")
-	case m.status != "":
-		s.WriteString(statusStyle.Render(m.status))
-		s.WriteString("\n")
-	}
-
-	// Update footer to include new key bindings
-	footerText := "↑/k: up  ↓/j: down  ←/h: left  →/l: right  Enter: remove  s: sort  r: history  u: undo  L: logs  q: quit"
-	footer := footerStyle.Render(footerText)
-
-	// Pad between the content and the footer from what actually renders, rather
-	// than from a hand-counted total that drifts as soon as the layout does.
-	// The measurement uses the same style as the render, because left padding
-	// and the width can change how many lines the result occupies, and the
-	// padding goes inside the body so every line keeps its width.
-	frame := lipgloss.NewStyle().
-		PaddingLeft(leftPadding).
-		Width(m.width - leftPadding)
-
-	body := s.String()
-	pad := max(m.height-lipgloss.Height(frame.Render(body+footer)), 0)
-
-	if pad > 0 {
-		body += strings.Repeat("\n", pad)
-	}
-
-	content := frame.Render(body + footer)
-
-	view := tea.NewView(content)
-	view.AltScreen = true
-
-	return view
 }
 
 // viewHistory renders the history view.
@@ -1679,7 +1574,7 @@ func (m *model) viewHistory() tea.View {
 
 	// Render log panel if enabled
 	if m.showLogs {
-		visibleLogs := m.getVisibleLogs()
+		visibleLogs := render.VisibleLogs(m.logs)
 
 		s.WriteString(logStyle.Render("─ Log Messages ─"))
 		s.WriteString("\n")

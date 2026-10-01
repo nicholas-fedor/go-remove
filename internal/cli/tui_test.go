@@ -2934,53 +2934,6 @@ func Test_model_Update_ClearEntryKey(t *testing.T) {
 	historyMock.AssertExpectations(t)
 }
 
-// Test_model_getVisibleLogs verifies getVisibleLogs behavior.
-func Test_model_getVisibleLogs(t *testing.T) {
-	tests := []struct {
-		name     string
-		showLogs bool
-		logs     []string
-		wantLen  int
-	}{
-		{
-			name:     "logs visible",
-			showLogs: true,
-			logs:     []string{"log1", "log2", "log3"},
-			wantLen:  3,
-		},
-		{
-			name:     "logs not visible",
-			showLogs: false,
-			logs:     []string{"log1", "log2"},
-			wantLen:  0,
-		},
-		{
-			name:     "empty logs",
-			showLogs: true,
-			logs:     []string{},
-			wantLen:  0,
-		},
-		{
-			name:     "logs exceed max visible",
-			showLogs: true,
-			logs:     []string{"1", "2", "3", "4", "5", "6", "7"},
-			wantLen:  render.MaxVisibleLogLines,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := &model{
-				showLogs: tt.showLogs,
-				logs:     tt.logs,
-			}
-
-			got := m.getVisibleLogs()
-			assert.Len(t, got, tt.wantLen)
-		})
-	}
-}
-
 // Test_model_handleConfirmation_UnknownConfirmation verifies behavior with unknown confirmation type.
 func Test_model_handleConfirmation_UnknownConfirmation(t *testing.T) {
 	m := &model{
