@@ -21,6 +21,7 @@ import (
 
 	"github.com/nicholas-fedor/go-remove/internal/buildinfo"
 	"github.com/nicholas-fedor/go-remove/internal/cli"
+	"github.com/nicholas-fedor/go-remove/internal/errmsg"
 	"github.com/nicholas-fedor/go-remove/internal/fs"
 	"github.com/nicholas-fedor/go-remove/internal/history"
 	"github.com/nicholas-fedor/go-remove/internal/logger"
@@ -155,23 +156,26 @@ func runUndo(ctx context.Context, verbose bool, logLevel string) error {
 
 	result, err := manager.UndoMostRecent(ctx)
 	if err != nil {
-		if errors.Is(err, history.ErrNoHistory) {
+		fallback := fmt.Errorf("undo failed: %w", err)
+
+		// The category comes from internal/errmsg; the wording is the command
+		// layer's own, since a process error reads differently from a TUI
+		// status line.
+		switch errmsg.Classify(err) {
+		case errmsg.KindNoHistory:
 			return ErrNoDeletionHistory
-		}
-
-		if errors.Is(err, history.ErrNotInTrash) {
+		case errmsg.KindNotInTrash:
 			return ErrBinaryNotInTrash
-		}
-
-		if errors.Is(err, history.ErrAlreadyRestored) {
+		case errmsg.KindAlreadyRestored:
 			return ErrBinaryAlreadyRestored
-		}
-
-		if errors.Is(err, history.ErrRestoreCollision) {
+		case errmsg.KindRestoreCollision:
 			return ErrRestoreCollisionCLI
+		case errmsg.KindUnknown:
+			return fallback
+		default:
+			// A Kind was added without an error for this operation.
+			return fallback
 		}
-
-		return fmt.Errorf("undo failed: %w", err)
 	}
 
 	// Print success message

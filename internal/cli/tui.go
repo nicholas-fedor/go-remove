@@ -22,6 +22,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/nicholas-fedor/go-remove/internal/errmsg"
 	"github.com/nicholas-fedor/go-remove/internal/fs"
 	"github.com/nicholas-fedor/go-remove/internal/history"
 	"github.com/nicholas-fedor/go-remove/internal/logger"
@@ -516,16 +517,23 @@ const pollInterval = 50 * time.Millisecond
 //   - A function mapping an error to a status message.
 func restoreErrorStatus(name string) func(error) string {
 	return func(err error) string {
-		switch {
-		case errors.Is(err, history.ErrAlreadyRestored):
+		// The error is already wrapped with the binary name.
+		fallback := "Error " + err.Error()
+
+		switch errmsg.Classify(err) {
+		case errmsg.KindAlreadyRestored:
 			return name + " has already been restored"
-		case errors.Is(err, history.ErrNotInTrash):
+		case errmsg.KindNotInTrash:
 			return name + " is no longer in trash"
-		case errors.Is(err, history.ErrRestoreCollision):
+		case errmsg.KindRestoreCollision:
 			return fmt.Sprintf("Cannot restore %s: file already exists", name)
+		case errmsg.KindNoHistory, errmsg.KindUnknown:
+			// A restore has no history to consult, so a no-history error lands
+			// here along with anything unclassified.
+			return fallback
 		default:
-			// The error is already wrapped with the binary name.
-			return "Error " + err.Error()
+			// A Kind was added without a message for this operation.
+			return fallback
 		}
 	}
 }
@@ -1252,24 +1260,31 @@ func (m *model) handleUndo() (tea.Model, tea.Cmd) {
 			}
 		},
 		func(err error) string {
-			switch {
-			case errors.Is(err, history.ErrNoHistory):
-				return "No deletion history found - nothing to undo"
-			case errors.Is(err, history.ErrAlreadyRestored):
-				return "Binary has already been restored"
-			case errors.Is(err, history.ErrNotInTrash):
-				return "Binary is no longer in trash - cannot restore"
-			case errors.Is(err, history.ErrRestoreCollision):
-				return "A file already exists at the restore location"
-			default:
-				// The error is already wrapped with the operation, and a
-				// status line reads better capitalised.
+			// The error is already wrapped with the operation, and a status
+			// line reads better capitalised.
+			fallback := func() string {
 				msg := err.Error()
 				if msg == "" {
 					return "Undo failed"
 				}
 
 				return strings.ToUpper(msg[:1]) + msg[1:]
+			}
+
+			switch errmsg.Classify(err) {
+			case errmsg.KindNoHistory:
+				return "No deletion history found - nothing to undo"
+			case errmsg.KindAlreadyRestored:
+				return "Binary has already been restored"
+			case errmsg.KindNotInTrash:
+				return "Binary is no longer in trash - cannot restore"
+			case errmsg.KindRestoreCollision:
+				return "A file already exists at the restore location"
+			case errmsg.KindUnknown:
+				return fallback()
+			default:
+				// A Kind was added without a message for this operation.
+				return fallback()
 			}
 		},
 		func() string { return restoredTo },
