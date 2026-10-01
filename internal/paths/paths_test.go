@@ -96,9 +96,6 @@ func TestDataHomeCandidates_NoEmptyEntries(t *testing.T) {
 
 // TestWritableDataHome_RejectsRelativeXDG verifies a relative XDG_DATA_HOME is
 // ignored and the resolved data home is absolute.
-//
-// Moved from cmd/root_test.go, which could no longer reach the logic once it
-// moved here.
 func TestWritableDataHome_RejectsRelativeXDG(t *testing.T) {
 	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
 		t.Skip("XDG_DATA_HOME is not consulted on this platform")
@@ -166,8 +163,6 @@ func TestIsDirWritable(t *testing.T) {
 
 // TestStoragePath verifies the history database path is built beneath the data
 // home.
-//
-// Moved from cmd/root_test.go.
 func TestStoragePath(t *testing.T) {
 	switch runtime.GOOS {
 	case "windows":
@@ -251,12 +246,9 @@ func TestBinDir(t *testing.T) {
 	}
 }
 
-// TestBinDir_UnresolvableHome verifies an error is returned when neither
-// GOPATH nor the home directory can be resolved.
-//
-// The previous implementation read $HOME and %USERPROFILE% directly, so an
-// unset home produced filepath.Join("", "go") and a relative "go/bin" result
-// that resolved against the working directory.
+// TestBinDir_UnresolvableHome verifies an error when neither GOPATH nor the
+// home directory can be resolved, rather than a relative path that would be
+// resolved against the working directory.
 func TestBinDir_UnresolvableHome(t *testing.T) {
 	t.Setenv("GOBIN", "")
 	t.Setenv("GOPATH", "")
@@ -270,8 +262,6 @@ func TestBinDir_UnresolvableHome(t *testing.T) {
 }
 
 // FuzzIsDirWritable verifies IsDirWritable does not panic on arbitrary paths.
-//
-// Moved from cmd/cmd_fuzz_test.go.
 func FuzzIsDirWritable(f *testing.F) {
 	f.Add("")
 	f.Add("subdir")

@@ -17,11 +17,8 @@ import (
 
 // TestTrashRoot verifies the XDG rule for the trash root.
 //
-// This function had no test coverage before it moved into this package: the
-// test files that lived alongside it in internal/trash covered only the
-// cross-device predicate. The absolute-path rule is the one that had already
-// drifted between the command layer and the trash layer, so it is worth
-// pinning down here.
+// The absolute-path rule is shared with DataHomeCandidates, so the last case
+// pins the two against each other.
 func TestTrashRoot(t *testing.T) {
 	t.Run("absolute XDG_DATA_HOME is used", func(t *testing.T) {
 		home := isolateHome(t)

@@ -57,9 +57,8 @@ var (
 
 	// ErrNoWritableStorage indicates no writable directory was found for storage.
 	//
-	// The error now originates in internal/paths, which owns environment
-	// resolution. It is aliased so that errors.Is matches both this name and
-	// paths.ErrNoWritableStorage.
+	// It is the same sentinel as paths.ErrNoWritableStorage, so errors.Is matches
+	// either name.
 	ErrNoWritableStorage = paths.ErrNoWritableStorage
 )
 

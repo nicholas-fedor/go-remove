@@ -29,9 +29,8 @@ var goBinaryExtractor = &buildinfo.DefaultExtractor{}
 
 // ErrGorootNotSet indicates that GOROOT is not set when required.
 //
-// The error now originates in internal/paths, alongside the other environment
-// resolution. It is aliased rather than redeclared so that errors.Is matches
-// both fs.ErrGorootNotSet and paths.ErrGorootNotSet.
+// It is the same sentinel as paths.ErrGorootNotSet, so errors.Is matches either
+// name.
 var ErrGorootNotSet = paths.ErrGorootNotSet
 
 // ErrBinaryNotFound indicates that a binary does not exist at the specified path.

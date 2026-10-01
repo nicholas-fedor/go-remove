@@ -182,10 +182,9 @@ func BinDir(useGoroot bool) (string, error) {
 
 	gopath := os.Getenv("GOPATH")
 	if gopath == "" {
-		// os.UserHomeDir reads $HOME on Unix and %USERPROFILE% on Windows,
-		// which is what the rest of this package already relies on. Reading
-		// those variables by hand produced a relative "go" path when neither
-		// was set, which then resolved against the working directory.
+		// os.UserHomeDir reads $HOME on Unix and %USERPROFILE% on Windows. An
+		// unresolvable home is an error rather than a relative path, which
+		// would resolve against the working directory.
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", fmt.Errorf("resolving home directory: %w", err)
