@@ -133,8 +133,8 @@ func TestRunTUI(t *testing.T) {
 				stdinIsTerminal: alwaysTerminal,
 			},
 			wantErr: true,
-			// Creating a program can no longer fail on its own, so the error
-			// path is the one that reaches the running program.
+			// An expired context is what reaches a running program, so
+			// ErrProgramKilled is the error the run can produce.
 			wantErrIs: tea.ErrProgramKilled,
 		},
 	}

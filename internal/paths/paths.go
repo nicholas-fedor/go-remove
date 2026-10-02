@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // DirPermissions defines the permissions for directories this package creates.
@@ -56,6 +57,13 @@ func DataHomeCandidates() []string {
 			candidates = append(candidates, userProfile)
 		}
 	case "darwin":
+		// An explicit XDG_DATA_HOME is honoured here as well, so the same
+		// variable selects both the application data directory and the trash
+		// root. Application Support remains the default when it is unset.
+		if dataHome := os.Getenv("XDG_DATA_HOME"); dataHome != "" && filepath.IsAbs(dataHome) {
+			candidates = append(candidates, dataHome)
+		}
+
 		// Try ~/Library/Application Support
 		if userHome, err := os.UserHomeDir(); err == nil {
 			candidates = append(
@@ -158,6 +166,13 @@ func IsDirWritable(dir string) bool {
 //
 // Without useGoroot the order is $GOBIN, then $GOPATH/bin, then ~/go/bin.
 //
+// A relative $GOBIN or $GOPATH is treated as unset, because a relative binary
+// directory would resolve against the working directory, which is wherever the
+// tool happens to be invoked from rather than where the toolchain lives. The
+// same absolute-path rule is applied by DataHomeCandidates, so the binary
+// directory and the application data root cannot disagree about which paths
+// count as resolved.
+//
 // Parameters:
 //   - useGoroot: Whether to target $GOROOT/bin instead.
 //
@@ -176,18 +191,39 @@ func BinDir(useGoroot bool) (string, error) {
 	}
 
 	goBin := os.Getenv("GOBIN")
-	if goBin != "" {
+	if goBin != "" && filepath.IsAbs(goBin) {
 		return goBin, nil
 	}
 
 	gopath := os.Getenv("GOPATH")
+	if gopath != "" {
+		// GOPATH is a list, and only its first entry is the search root.
+		// Validating the whole string would accept "/abs/path:relative" as
+		// absolute on the strength of its first character and then join the
+		// binary directory onto the entire list.
+		gopath, _, _ = strings.Cut(gopath, string(os.PathListSeparator))
+	}
+
+	if gopath != "" && !filepath.IsAbs(gopath) {
+		// A relative GOPATH would place the binary directory inside the working
+		// directory, so it falls through to the home directory exactly as an
+		// unset value does.
+		gopath = ""
+	}
+
 	if gopath == "" {
-		// os.UserHomeDir reads $HOME on Unix and %USERPROFILE% on Windows. An
-		// unresolvable home is an error rather than a relative path, which
-		// would resolve against the working directory.
+		// os.UserHomeDir reads $HOME on Unix and %USERPROFILE% on Windows, and
+		// returns either verbatim. An unresolvable home is an error rather than
+		// a path, and a relative one is rejected for the same reason a relative
+		// GOPATH is, because joining it would resolve against the working
+		// directory.
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", fmt.Errorf("resolving home directory: %w", err)
+		}
+
+		if !filepath.IsAbs(home) {
+			return "", fmt.Errorf("%w: %q is not an absolute path", ErrNoWritableStorage, home)
 		}
 
 		gopath = filepath.Join(home, "go")

@@ -20,9 +20,8 @@ import (
 // TestLogPolling_AlwaysRuns verifies that log polling starts regardless of
 // --verbose, and that a captured line is retained while the panel is hidden.
 //
-// Polling used to start only in verbose mode while the capture callback was
-// always installed, which filled a channel nobody drained. Every message was
-// therefore discarded and the panel opened empty.
+// The capture callback is always installed, so polling has to run too. Without
+// it the channel fills with nothing draining it and the panel opens empty.
 func TestLogPolling_AlwaysRuns(t *testing.T) {
 	t.Parallel()
 
@@ -89,8 +88,8 @@ func TestToggleVerboseLogging_StartsNoExtraPollChain(t *testing.T) {
 // TestToggleVerboseLogging_PreservesStartupVerbose verifies that hiding the log
 // panel does not reduce verbosity the user asked for at startup.
 //
-// The toggle used to return to the configured level, so starting with --verbose
-// and then pressing L silently dropped debug output.
+// A --verbose request is independent of the panel, so closing it must not
+// quietly drop back below what was asked.
 func TestToggleVerboseLogging_PreservesStartupVerbose(t *testing.T) {
 	t.Parallel()
 

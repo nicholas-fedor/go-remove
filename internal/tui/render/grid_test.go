@@ -156,3 +156,39 @@ func TestGridLayout_StatusLineCostsARow(t *testing.T) {
 	assert.Equal(t, without.Rows-1, status.Rows,
 		"a status line must take one row from the grid")
 }
+
+// TestGridLayout_BusyLineCostsARow verifies the "Working: ..." line reduces the
+// height available to the grid.
+//
+// The busy line replaces the status line rather than joining it, so it costs the
+// same single row. Without a reservation for it the grid stayed one row taller
+// than the terminal for as long as an operation ran, and the last row wrapped
+// out of view.
+func TestGridLayout_BusyLineCostsARow(t *testing.T) {
+	t.Parallel()
+
+	base := GridInput{
+		Choices: []string{"a", "b", "c", "d", "e", "f", "g", "h"},
+		Width:   100,
+		Height:  12,
+	}
+
+	without := GridLayout(&base)
+
+	withBusy := base
+	withBusy.Busy = "removing tool"
+	busy := GridLayout(&withBusy)
+
+	assert.Equal(t, without.Rows-1, busy.Rows,
+		"a busy line must take one row from the grid")
+
+	// A status line and a busy line share the one row between them, so a model
+	// that still holds a status must not lose a second row to the busy line.
+	withStatus := base
+	withStatus.Status = "removed tool"
+	withStatus.Busy = "removing tool"
+	both := GridLayout(&withStatus)
+
+	assert.Equal(t, without.Rows-1, both.Rows,
+		"the busy line replaces the status line rather than adding to it")
+}

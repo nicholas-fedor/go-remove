@@ -49,8 +49,7 @@ func (m *Model) setupLogCapture(log logger.Logger) {
 // toggleVerboseLogging toggles log panel visibility and logging level.
 //
 // Polling already runs for the whole session, so this only changes what is
-// shown and how much detail is emitted. It deliberately does not start a
-// second poll chain, which previously left one running per press.
+// shown and how much detail is emitted.
 func (m *Model) toggleVerboseLogging() {
 	m.showLogs = !m.showLogs
 

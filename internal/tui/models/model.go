@@ -263,11 +263,18 @@ func (m *Model) sortChoices() {
 // The arithmetic lives in the render package. This applies the result, because
 // the grid and the cursor are model state rather than a rendering decision.
 func (m *Model) updateGrid() {
+	// A status or busy line takes a row from the grid, so a relayout can change
+	// the row count. The selection is carried across as the index it pointed
+	// at, because the same coordinates address a different binary in a grid
+	// with different rows.
+	selected := m.cursorY + m.cursorX*max(m.rows, 1)
+
 	grid := render.GridLayout(&render.GridInput{
 		Choices:  m.choices,
 		Width:    m.width,
 		Height:   m.height,
 		Status:   m.status,
+		Busy:     m.busy,
 		ShowLogs: m.showLogs,
 		LogCount: len(m.logs),
 		CursorX:  m.cursorX,
@@ -276,8 +283,18 @@ func (m *Model) updateGrid() {
 
 	m.rows = grid.Rows
 	m.cols = grid.Cols
-	m.cursorX = grid.CursorX
-	m.cursorY = grid.CursorY
+
+	m.cursorX, m.cursorY = 0, 0
+
+	switch {
+	case len(m.choices) == 0 || m.rows == 0:
+		return
+	case selected >= len(m.choices):
+		selected = len(m.choices) - 1
+	}
+
+	m.cursorX = selected / m.rows
+	m.cursorY = selected % m.rows
 }
 
 // View renders the TUI interface.
@@ -299,8 +316,13 @@ func (m *Model) View() tea.View {
 // Returns:
 //   - The state describing the current frame.
 func (m *Model) renderState() *render.State {
+	mode := render.ModeBinaries
+	if m.mode == modeHistory {
+		mode = render.ModeHistory
+	}
+
 	return &render.State{
-		Mode:           render.ModeBinaries,
+		Mode:           mode,
 		Width:          m.width,
 		Height:         m.height,
 		Styles:         m.styles,

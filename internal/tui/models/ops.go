@@ -151,6 +151,10 @@ func (m *Model) runAsyncReporting(
 	m.cancelOp = cancel
 	m.opDone = done
 
+	// The busy line costs a row, so the grid has to be laid out again or the
+	// choices overflow the terminal for as long as the work runs.
+	m.updateGrid()
+
 	return func() tea.Msg {
 		defer close(done)
 
@@ -181,6 +185,11 @@ func (m *Model) cancelInFlight() {
 	// The work may not observe the cancellation at all, so remember that the
 	// user stopped it rather than trusting the result it eventually reports.
 	m.interrupted = true
+
+	// The busy line is gone, so the row it reserved is released here. Waiting for
+	// the result to arrive would leave the reservation behind until the work
+	// happened to finish.
+	m.updateGrid()
 }
 
 // waitForOperation blocks until the running operation has finished.

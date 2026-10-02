@@ -43,6 +43,12 @@ func Test_model_Update(t *testing.T) {
 		args    args
 		want    Model
 		wantCmd tea.Cmd
+
+		// wantOp marks a case whose command is the operation itself rather than
+		// a follow-up. drainOperation has already consumed such a command by the
+		// time the outcome is asserted, and its message carries the callbacks
+		// the refresh uses, so it is asserted by type rather than by message.
+		wantOp bool
 	}{
 		{
 			name:    "quit with q",
@@ -173,7 +179,7 @@ func Test_model_Update(t *testing.T) {
 				width:         80,
 				height:        24,
 			},
-			wantCmd: nil,
+			wantOp: true,
 		},
 		{
 			name: "enter with error",
@@ -206,7 +212,7 @@ func Test_model_Update(t *testing.T) {
 				width:         80,
 				height:        24,
 			},
-			wantCmd: nil,
+			wantOp: true,
 		},
 		{
 			name: "window size update",
@@ -255,11 +261,26 @@ func Test_model_Update(t *testing.T) {
 				t.Errorf("model.Update() got = %+v, want %+v", gotModel, tt.want)
 			}
 
-			gotCmdType := reflect.TypeFor[tea.Cmd]()
-
-			cmdType := reflect.TypeFor[tea.Cmd]()
-			if gotCmdType != nil && gotCmdType != cmdType {
-				t.Errorf("model.Update() gotCmd = %T, want tea.Cmd", gotCmd)
+			// A command is compared by the message it produces, since two funcs
+			// of the same type are otherwise indistinguishable and a case such
+			// as the quit would pass whatever it returned. An operation is not
+			// invoked again, because the work behind it has already run once and
+			// a second run would repeat a side effect; the drain above proves
+			// what it was instead.
+			switch {
+			case tt.wantOp:
+				require.NotNil(t, gotCmd,
+					"the operation must be returned as a command")
+				assert.Empty(t, gotModel.busy,
+					"the operation must have been applied, leaving the model idle")
+			case tt.wantCmd == nil:
+				require.Nil(t, gotCmd,
+					"model.Update() returned a command, want none")
+			default:
+				require.NotNil(t, gotCmd,
+					"model.Update() returned no command, want one")
+				assert.Equal(t, tt.wantCmd(), gotCmd(),
+					"model.Update() produced the wrong command message")
 			}
 
 			tt.m.fs.(*mockFS.MockFS).AssertExpectations(t)

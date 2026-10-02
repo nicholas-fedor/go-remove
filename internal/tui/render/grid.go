@@ -27,6 +27,11 @@ type GridInput struct {
 	// Status is the current status line. A non-empty status costs one row.
 	Status string
 
+	// Busy names the operation in flight. The busy line is drawn in place of the
+	// status line rather than beside it, so a non-empty Busy costs one row too,
+	// and not one row each.
+	Busy string
+
 	// ShowLogs reports whether the log panel is visible, and LogCount is how
 	// many lines it currently holds.
 	ShowLogs bool
@@ -69,10 +74,11 @@ func GridLayout(input *GridInput) Grid {
 	colWidth := maxNameLen + ColWidthPadding
 	availWidth := input.Width - availWidthAdjustment
 
-	// The status line takes one row when present. The constant height adjustment
-	// does not account for it dynamically.
+	// The status line takes one row when present, and so does the busy line,
+	// which replaces the status line rather than joining it. The constant height
+	// adjustment does not account for either dynamically.
 	statusAdjustment := 0
-	if input.Status != "" {
+	if input.Status != "" || input.Busy != "" {
 		statusAdjustment = 1
 	}
 

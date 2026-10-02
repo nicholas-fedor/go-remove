@@ -563,13 +563,8 @@ func (m *Model) handleRemove() (tea.Model, tea.Cmd) {
 			m.refreshChoices()
 			m.sortChoices()
 
-			// Adjust cursor if it exceeds remaining choices.
-			if m.cursorY+m.cursorX*m.rows >= len(m.choices) {
-				lastIdx := len(m.choices) - 1
-				m.cursorX = lastIdx / m.rows
-				m.cursorY = lastIdx % m.rows
-			}
-
+			// updateGrid clamps the cursor against the layout the new choice list
+			// produces, so nothing has to be recomputed here.
 			m.updateGrid()
 			m.status = "Removed " + name
 		},

@@ -56,9 +56,8 @@ func withGrid(state *State) {
 // TestView_FillsTerminalHeight verifies each view fills the terminal exactly,
 // with the footer on the last line.
 //
-// The padding used to come from a hand-counted total, which drifted out of step
-// with the layout and left the footer short of the bottom. Asserting the property
-// keeps the two tied together whatever the layout becomes.
+// The padding is measured from what actually renders, so asserting the
+// property keeps the body and the footer tied to the real layout.
 func TestView_FillsTerminalHeight(t *testing.T) {
 	t.Parallel()
 
@@ -116,10 +115,9 @@ func TestView_FillsTerminalHeight(t *testing.T) {
 						content = Binaries(state).Content
 					}
 
-					// The view must never fall short of the terminal, which is
-					// what the hand-counted padding used to do. It may exceed it on
-					// a very short terminal with the log panel open, since the
-					// content genuinely does not fit.
+					// The view must fill the terminal, never fall short of it. It
+					// may exceed it on a very short terminal with the log panel
+					// open, since the content genuinely does not fit.
 					got := lipgloss.Height(content)
 
 					if state.ShowLogs && got > height {

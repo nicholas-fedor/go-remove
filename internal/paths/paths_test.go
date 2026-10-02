@@ -33,8 +33,8 @@ func isolateHome(t *testing.T) string {
 // TestDataHomeCandidates_AbsoluteXDG verifies an absolute XDG_DATA_HOME is
 // preferred on Unix-like systems.
 func TestDataHomeCandidates_AbsoluteXDG(t *testing.T) {
-	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
-		t.Skip("XDG_DATA_HOME is not consulted on this platform")
+	if runtime.GOOS == "windows" {
+		t.Skip("XDG_DATA_HOME is not consulted on Windows")
 	}
 
 	home := isolateHome(t)
@@ -45,8 +45,16 @@ func TestDataHomeCandidates_AbsoluteXDG(t *testing.T) {
 
 	require.NotEmpty(t, candidates)
 	assert.Equal(t, xdg, candidates[0], "an absolute XDG_DATA_HOME must come first")
-	assert.Contains(t, candidates, filepath.Join(home, ".local", "share"),
-		"the XDG default must remain a candidate")
+
+	// The platform default differs: macOS uses Application Support, the other
+	// Unix-like systems use the XDG default.
+	fallback := filepath.Join(home, ".local", "share")
+	if runtime.GOOS == "darwin" {
+		fallback = filepath.Join(home, "Library", "Application Support")
+	}
+
+	assert.Contains(t, candidates, fallback,
+		"the platform default must remain a candidate")
 }
 
 // TestDataHomeCandidates_RelativeXDGIgnored verifies a relative XDG_DATA_HOME is
@@ -56,8 +64,8 @@ func TestDataHomeCandidates_AbsoluteXDG(t *testing.T) {
 // value would otherwise place the data directory inside the current directory,
 // which is where the tool happens to be running.
 func TestDataHomeCandidates_RelativeXDGIgnored(t *testing.T) {
-	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
-		t.Skip("XDG_DATA_HOME is not consulted on this platform")
+	if runtime.GOOS == "windows" {
+		t.Skip("XDG_DATA_HOME is not consulted on Windows")
 	}
 
 	isolateHome(t)
@@ -72,8 +80,8 @@ func TestDataHomeCandidates_RelativeXDGIgnored(t *testing.T) {
 // TestDataHomeCandidates_EmptyXDGIgnored verifies an empty XDG_DATA_HOME is
 // treated as unset.
 func TestDataHomeCandidates_EmptyXDGIgnored(t *testing.T) {
-	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
-		t.Skip("XDG_DATA_HOME is not consulted on this platform")
+	if runtime.GOOS == "windows" {
+		t.Skip("XDG_DATA_HOME is not consulted on Windows")
 	}
 
 	isolateHome(t)
@@ -97,8 +105,8 @@ func TestDataHomeCandidates_NoEmptyEntries(t *testing.T) {
 // TestWritableDataHome_RejectsRelativeXDG verifies a relative XDG_DATA_HOME is
 // ignored and the resolved data home is absolute.
 func TestWritableDataHome_RejectsRelativeXDG(t *testing.T) {
-	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
-		t.Skip("XDG_DATA_HOME is not consulted on this platform")
+	if runtime.GOOS == "windows" {
+		t.Skip("XDG_DATA_HOME is not consulted on Windows")
 	}
 
 	isolateHome(t)
@@ -116,8 +124,8 @@ func TestWritableDataHome_RejectsRelativeXDG(t *testing.T) {
 // TestWritableDataHome_PrefersWritableCandidate verifies the first writable
 // candidate wins, and that an absolute XDG_DATA_HOME is the one selected.
 func TestWritableDataHome_PrefersWritableCandidate(t *testing.T) {
-	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
-		t.Skip("XDG_DATA_HOME is not consulted on this platform")
+	if runtime.GOOS == "windows" {
+		t.Skip("XDG_DATA_HOME is not consulted on Windows")
 	}
 
 	isolateHome(t)
@@ -189,7 +197,26 @@ func TestStoragePath(t *testing.T) {
 }
 
 // TestBinDir verifies the Go toolchain lookup order.
+//
+// Every case names GOBIN, GOPATH, HOME and USERPROFILE explicitly, so a value
+// inherited from the environment running the suite cannot decide the outcome.
+// Both home variables are set because os.UserHomeDir reads $HOME on Unix and
+// %USERPROFILE% on Windows, and a case that set only one would resolve the
+// real home of whichever platform the suite runs on.
 func TestBinDir(t *testing.T) {
+	// A literal such as "/gobin" is not absolute on Windows, which has no
+	// volume for it, so the absolute inputs are built from a temporary
+	// directory that is absolute on every platform.
+	root := t.TempDir()
+	goBinAbs := filepath.Join(root, "gobin")
+	goPathAbs := filepath.Join(root, "gopath")
+	goRootAbs := filepath.Join(root, "goroot")
+
+	// The home fallback is built from the temporary root so it is absolute on
+	// every platform, which a literal such as "/home/u" is not on Windows.
+	home := filepath.Join(root, "home", "u")
+	homeGoBin := filepath.Join(home, "go", "bin")
+
 	tests := []struct {
 		name      string
 		useGoroot bool
@@ -200,29 +227,119 @@ func TestBinDir(t *testing.T) {
 		{
 			name:      "goroot is used when requested",
 			useGoroot: true,
-			env:       map[string]string{"GOROOT": "/opt/go", "GOBIN": "/ignored/bin"},
-			want:      filepath.FromSlash("/opt/go/bin"),
+			env: map[string]string{
+				"GOROOT":      goRootAbs,
+				"GOBIN":       goBinAbs,
+				"GOPATH":      goPathAbs,
+				"HOME":        home,
+				"USERPROFILE": home,
+			},
+			want: filepath.Join(goRootAbs, "bin"),
 		},
 		{
 			name:      "goroot unset is an error",
 			useGoroot: true,
-			env:       map[string]string{"GOROOT": ""},
-			wantErr:   true,
+			env: map[string]string{
+				"GOROOT":      "",
+				"GOBIN":       goBinAbs,
+				"GOPATH":      goPathAbs,
+				"HOME":        home,
+				"USERPROFILE": home,
+			},
+			wantErr: true,
 		},
 		{
 			name: "gobin wins over gopath",
-			env:  map[string]string{"GOBIN": "/gobin", "GOPATH": "/gopath", "HOME": "/home/u"},
-			want: "/gobin",
+			env: map[string]string{
+				"GOBIN":       goBinAbs,
+				"GOPATH":      goPathAbs,
+				"HOME":        home,
+				"USERPROFILE": home,
+			},
+			want: goBinAbs,
 		},
 		{
 			name: "gopath is used when gobin is unset",
-			env:  map[string]string{"GOBIN": "", "GOPATH": "/gopath", "HOME": "/home/u"},
-			want: filepath.FromSlash("/gopath/bin"),
+			env: map[string]string{
+				"GOBIN":       "",
+				"GOPATH":      goPathAbs,
+				"HOME":        home,
+				"USERPROFILE": home,
+			},
+			want: filepath.Join(goPathAbs, "bin"),
 		},
 		{
 			name: "home go path is the last resort",
-			env:  map[string]string{"GOBIN": "", "GOPATH": "", "HOME": "/home/u"},
-			want: filepath.FromSlash("/home/u/go/bin"),
+			env: map[string]string{
+				"GOBIN":       "",
+				"GOPATH":      "",
+				"HOME":        home,
+				"USERPROFILE": home,
+			},
+			want: homeGoBin,
+		},
+		{
+			// A relative GOBIN would put the binary directory inside the working
+			// directory, so it is skipped exactly as an unset value is.
+			name: "relative gobin is skipped",
+			env: map[string]string{
+				"GOBIN":       filepath.FromSlash("relative/gobin"),
+				"GOPATH":      goPathAbs,
+				"HOME":        home,
+				"USERPROFILE": home,
+			},
+			want: filepath.Join(goPathAbs, "bin"),
+		},
+		{
+			// The same rule for GOPATH, which falls through to the home
+			// directory rather than to GOBIN.
+			name: "relative gopath is skipped",
+			env: map[string]string{
+				"GOBIN":       "",
+				"GOPATH":      filepath.FromSlash("relative/gopath"),
+				"HOME":        home,
+				"USERPROFILE": home,
+			},
+			want: homeGoBin,
+		},
+		{
+			// GOPATH is a list. Only its first entry is the search root, so a
+			// trailing entry must not turn an absolute first entry into a path
+			// with a list separator glued onto it.
+			name: "a gopath list uses its first entry",
+			env: map[string]string{
+				"GOBIN":       "",
+				"GOPATH":      goPathAbs + string(os.PathListSeparator) + goRootAbs,
+				"HOME":        home,
+				"USERPROFILE": home,
+			},
+			want: filepath.Join(goPathAbs, "bin"),
+		},
+		{
+			// The first entry is what counts, so a list that starts relative is
+			// rejected just as a single relative value is.
+			name: "a gopath list with a relative first entry is skipped",
+			env: map[string]string{
+				"GOBIN": "",
+				"GOPATH": filepath.FromSlash("relative/gopath") +
+					string(os.PathListSeparator) + goPathAbs,
+				"HOME":        home,
+				"USERPROFILE": home,
+			},
+			want: homeGoBin,
+		},
+		{
+			// os.UserHomeDir returns $HOME verbatim, so a relative home would
+			// otherwise produce a binary directory resolved against the working
+			// directory.
+			name: "a relative home is rejected",
+			env: map[string]string{
+				"GOBIN":       "",
+				"GOPATH":      "",
+				"HOME":        filepath.FromSlash("relative/home"),
+				"USERPROFILE": filepath.FromSlash("relative/home"),
+			},
+			wantErr: true,
 		},
 	}
 
@@ -235,13 +352,22 @@ func TestBinDir(t *testing.T) {
 			got, err := BinDir(tt.useGoroot)
 
 			if tt.wantErr {
-				require.ErrorIs(t, err, ErrGorootNotSet)
+				// The GOROOT case reports its own sentinel. A home that cannot
+				// be used reports a different failure, so only require an
+				// error when the case does not name one to match.
+				if tt.useGoroot {
+					require.ErrorIs(t, err, ErrGorootNotSet)
+				} else {
+					require.Error(t, err)
+				}
 
 				return
 			}
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
+			assert.True(t, filepath.IsAbs(got),
+				"the binary directory must be absolute, got %q", got)
 		})
 	}
 }

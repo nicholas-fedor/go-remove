@@ -108,23 +108,7 @@ func Binaries(state *State) tea.View {
 	footerText := "↑/k: up  ↓/j: down  ←/h: left  →/l: right  Enter: remove  s: sort  r: history  u: undo  L: logs  q: quit"
 	footer := footerStyle.Render(footerText)
 
-	// Pad between the content and the footer from what actually renders, rather
-	// than from a hand-counted total that drifts as soon as the layout does.
-	// The measurement uses the same style as the render, because left padding
-	// and the width can change how many lines the result occupies, and the
-	// padding goes inside the body so every line keeps its width.
-	frame := lipgloss.NewStyle().
-		PaddingLeft(LeftPadding).
-		Width(state.Width - LeftPadding)
-
-	body := s.String()
-	pad := max(state.Height-lipgloss.Height(frame.Render(body+footer)), 0)
-
-	if pad > 0 {
-		body += strings.Repeat("\n", pad)
-	}
-
-	content := frame.Render(body + footer)
-
-	return newAltScreenView(content)
+	// The frame pads between the content and the footer from what actually
+	// renders, so the two views share one implementation of it.
+	return newAltScreenView(frame(state, s.String(), footer))
 }

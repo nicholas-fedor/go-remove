@@ -177,26 +177,31 @@ func History(state *State) tea.View {
 
 		maxVisibleEntries = max(state.Height-reservedHeight, 1)
 		entryCount = len(state.HistoryEntries)
-		visibleCount = min(entryCount, maxVisibleEntries)
 
-		// Adjust if we need to show "...and X more" message
-		showMoreIndicator := entryCount > maxVisibleEntries
-		if showMoreIndicator && visibleCount > 0 {
-			visibleCount--
+		// The last row of the budget always goes to an entry: an indicator on its
+		// own says nothing about what it is reporting.
+		rowBudget := maxVisibleEntries
+
+		indicatorRowFreed := entryCount > maxVisibleEntries && rowBudget > 1
+		if indicatorRowFreed {
+			rowBudget--
 		}
 
-		// Ensure cursor is within visible range
-		// This will scroll the view as needed
+		// Ensure the cursor is within the visible range, scrolling the window
+		// when it is not.
 		startIdx := 0
+
+		visibleCount = min(entryCount, rowBudget)
+
 		if state.HistoryCursor >= visibleCount {
-			// If cursor is below visible range, adjust start index
 			startIdx = state.HistoryCursor - visibleCount + 1
-			// Recalculate visible count based on new start
-			visibleCount = min(entryCount-startIdx, maxVisibleEntries)
-			if showMoreIndicator && visibleCount > 0 {
-				visibleCount--
-			}
+			visibleCount = min(entryCount-startIdx, rowBudget)
 		}
+
+		// What is left below the window is all the indicator can honestly
+		// report, so it appears only while something remains and there is a row
+		// to show it on.
+		showMoreIndicator := indicatorRowFreed && startIdx+visibleCount < entryCount
 
 		// Table rows - display only visible entries
 		for i := range visibleCount {
