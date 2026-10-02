@@ -96,7 +96,6 @@ func TestHistoryManager_RecordDeletion(t *testing.T) {
 		VCSRevision: testVCSRevision,
 		VCSTime:     testVCSTime,
 		GoVersion:   testGoVersion,
-		RawJSON:     []byte(`{"test": "data"}`),
 	}
 
 	t.Run("success", func(t *testing.T) {

@@ -297,7 +297,6 @@ func (m *HistoryManager) RecordDeletion(
 		VCSRevision:    buildData.VCSRevision,
 		VCSTime:        time.Time{}, // Will be empty if parsing fails
 		GoVersion:      buildData.GoVersion,
-		BuildInfo:      string(buildData.RawJSON),
 		Checksum:       checksum,
 		TrashAvailable: false, // The binary has not moved yet.
 		OriginalDir:    originalDir,

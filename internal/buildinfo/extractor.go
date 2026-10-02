@@ -10,7 +10,6 @@ import (
 	"crypto/sha256"
 	"debug/buildinfo"
 	"encoding/hex"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -88,9 +87,6 @@ type BuildInfoData struct {
 
 	// Settings contains all build settings from debug.BuildInfo.
 	Settings map[string]string `json:"settings"`
-
-	// RawJSON contains the full BuildInfo as JSON for future-proofing.
-	RawJSON []byte `json:"raw_json"`
 }
 
 // DefaultExtractor implements the Extractor interface using debug/buildinfo.
@@ -182,14 +178,6 @@ func (e *DefaultExtractor) Extract(ctx context.Context, binaryPath string) (*Bui
 			data.VCSTime = setting.Value
 		}
 	}
-
-	// Serialize full build info to JSON
-	rawJSON, err := json.Marshal(info)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling build info to JSON: %w", err)
-	}
-
-	data.RawJSON = rawJSON
 
 	return data, nil
 }

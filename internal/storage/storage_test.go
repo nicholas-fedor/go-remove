@@ -16,6 +16,8 @@ import (
 	"github.com/dgraph-io/badger/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	json "encoding/json/v2"
 )
 
 // testBinaryName is a constant for the test binary name to avoid magic strings.
@@ -52,7 +54,6 @@ func createTestRecord(timestamp int64, binaryName string) HistoryRecord {
 		VCSRevision:    "abc123",
 		VCSTime:        time.Now(),
 		GoVersion:      "go1.22.0",
-		BuildInfo:      `{"path":"github.com/test/` + binaryName + `","version":"v1.0.0"}`,
 		Checksum:       "sha256:1234567890abcdef",
 		TrashAvailable: true,
 		OriginalDir:    "/usr/local/bin",
@@ -1085,4 +1086,27 @@ func TestErrorWrapping(t *testing.T) {
 		_, err := store.GetRecord(ctx, key)
 		assert.ErrorIs(t, err, ErrRecordNotFound)
 	})
+}
+
+// TestDeserialize_LegacyRecordWithBuildInfo verifies a record written before
+// BuildInfo was dropped still decodes.
+//
+// The field carried the full debug.BuildInfo, so a database written by an
+// earlier version still holds it. Undecoded keys are ignored rather than
+// rejected, so those records stay readable and are simply rewritten without it
+// on their next save.
+func TestDeserialize_LegacyRecordWithBuildInfo(t *testing.T) {
+	t.Parallel()
+
+	legacy := []byte(
+		`{"binary_name":"vhs","checksum":"abc123",` +
+			`"build_info":"{\"path\":\"github.com/test\",\"-ldflags\":\"-X main.token=s3cret\"}"}`,
+	)
+
+	var record HistoryRecord
+
+	require.NoError(t, json.Unmarshal(legacy, &record))
+
+	assert.Equal(t, "vhs", record.BinaryName)
+	assert.Equal(t, "abc123", record.Checksum)
 }
