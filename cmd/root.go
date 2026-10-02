@@ -28,6 +28,8 @@ import (
 	"github.com/nicholas-fedor/go-remove/internal/paths"
 	"github.com/nicholas-fedor/go-remove/internal/storage"
 	"github.com/nicholas-fedor/go-remove/internal/trash"
+	"github.com/nicholas-fedor/go-remove/internal/tui"
+	"github.com/nicholas-fedor/go-remove/internal/tui/models"
 )
 
 // Common errors for CLI operations.
@@ -261,14 +263,19 @@ func runRemove(ctx context.Context, config cli.Config) error {
 		return fmt.Errorf("determining binary directory: %w", err)
 	}
 
-	if err := cli.RunTUI(
+	if err := tui.Run(
 		ctx,
-		binDir,
-		config,
-		log,
-		filesystem,
-		cli.DefaultRunner{},
-		manager,
+		tui.Options{
+			Dir: binDir,
+			Config: models.Config{
+				Verbose:     config.Verbose,
+				LogLevel:    config.LogLevel,
+				RestoreMode: config.RestoreMode,
+			},
+			Logger:         log,
+			FS:             filesystem,
+			HistoryManager: manager,
+		},
 	); err != nil {
 		return fmt.Errorf("running TUI: %w", err)
 	}

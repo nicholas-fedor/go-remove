@@ -14,6 +14,8 @@ import (
 	"github.com/nicholas-fedor/go-remove/internal/fs"
 	"github.com/nicholas-fedor/go-remove/internal/history"
 	"github.com/nicholas-fedor/go-remove/internal/logger"
+	"github.com/nicholas-fedor/go-remove/internal/tui"
+	"github.com/nicholas-fedor/go-remove/internal/tui/models"
 )
 
 // Config holds command-line configuration options.
@@ -52,15 +54,17 @@ func Run(ctx context.Context, deps Dependencies, config Config) error {
 	}
 
 	if config.Binary == "" {
-		if err := RunTUI(
-			ctx,
-			binDir,
-			config,
-			log,
-			deps.FS,
-			DefaultRunner{},
-			deps.HistoryManager,
-		); err != nil {
+		if err := tui.Run(ctx, tui.Options{
+			Dir: binDir,
+			Config: models.Config{
+				Verbose:     config.Verbose,
+				LogLevel:    config.LogLevel,
+				RestoreMode: config.RestoreMode,
+			},
+			Logger:         log,
+			FS:             deps.FS,
+			HistoryManager: deps.HistoryManager,
+		}); err != nil {
 			return fmt.Errorf("running TUI: %w", err)
 		}
 

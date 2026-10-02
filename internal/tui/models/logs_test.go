@@ -103,7 +103,7 @@ func TestToggleVerboseLogging_PreservesStartupVerbose(t *testing.T) {
 			logChan: make(chan LogMsg, maxLogLines),
 			logger:  recorder,
 			styles:  render.DefaultStyleConfig(),
-			// RunTUI opens the panel when --verbose is given.
+			// The panel starts open when --verbose is given.
 			showLogs: true,
 			config:   Config{Verbose: true, LogLevel: "info"},
 			choices:  []string{"tool"},
