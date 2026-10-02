@@ -24,9 +24,6 @@ type StyleConfig struct {
 
 // DefaultStyleConfig returns the appearance used when none is configured.
 //
-// Parameters:
-//   - None.
-//
 // Returns:
 //   - The default StyleConfig.
 func DefaultStyleConfig() StyleConfig {

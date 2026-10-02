@@ -138,12 +138,6 @@ func clampCursor(grid Grid, count int) Grid {
 }
 
 // LeftPadding is the padding applied to the left of every rendered frame.
-//
-// Parameters:
-//   - None.
-//
-// Returns:
-//   - The left padding in cells.
 const LeftPadding = 2
 
 // visibleLenPrefix is the gutter every choice row carries, selected or not.

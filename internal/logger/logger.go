@@ -255,6 +255,28 @@ func NewLoggerWithCapture() (Logger, *captureWriter, error) {
 	return logger, captureWriter, nil
 }
 
+// NopLogger returns a logger that discards everything written to it.
+//
+// It wraps zerolog's disabled logger, so no event is ever formatted or
+// serialised. Every level method still returns a usable event, which keeps
+// chained calls such as Debug().Str("k", v).Msgf(...) working exactly as they do
+// against a real logger, rather than short-circuiting on a nil receiver.
+//
+// Use it where logging is not the subject: tests, and any caller that wants a
+// logger it can pass along without producing output.
+//
+// Returns:
+//   - A logger that writes nothing.
+func NopLogger() Logger {
+	capture := &captureWriter{output: io.Discard}
+
+	return &ZerologLogger{
+		logger:        zerolog.Nop().Output(capture),
+		output:        io.Discard,
+		captureWriter: capture,
+	}
+}
+
 // Debug returns a debug-level event for logging.
 //
 // Returns:
