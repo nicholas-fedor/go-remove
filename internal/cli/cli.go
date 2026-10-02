@@ -31,6 +31,9 @@ type Dependencies struct {
 	FS             fs.FS
 	Logger         logger.Logger
 	HistoryManager history.Manager
+
+	// IsTerminal reports whether standard input is an interactive terminal.
+	IsTerminal func() bool
 }
 
 // Run executes the CLI logic with the provided dependencies and configuration.
@@ -51,7 +54,7 @@ func Run(ctx context.Context, deps Dependencies, config Config) error {
 	}
 
 	if config.Binary == "" {
-		if err := tui.Run(ctx, tui.Options{
+		opts := tui.Options{
 			Dir: binDir,
 			Config: models.Config{
 				Verbose:     config.Verbose,
@@ -61,7 +64,13 @@ func Run(ctx context.Context, deps Dependencies, config Config) error {
 			Logger:         log,
 			FS:             deps.FS,
 			HistoryManager: deps.HistoryManager,
-		}); err != nil {
+		}
+
+		if deps.IsTerminal != nil {
+			opts.StdinIsTerminal = deps.IsTerminal
+		}
+
+		if err := tui.Run(ctx, opts); err != nil {
 			return fmt.Errorf("running TUI: %w", err)
 		}
 

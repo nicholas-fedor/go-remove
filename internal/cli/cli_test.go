@@ -68,8 +68,9 @@ type testCase struct {
 	setupFS    func(t *testing.T) *mockFS.MockFS
 	setupLog   func() logger.Logger
 	wantErr    bool
-	wantErrIs  error
-	wantOutput string // Expected stdout output for non-verbose success
+	wantErrIs  error       // Sentinel the error must match, when set
+	isTerminal func() bool // Terminal check for the interactive branch, when set
+	wantOutput string      // Expected stdout output for non-verbose success
 }
 
 // runTestCase executes a single test case with the provided configuration.
@@ -85,8 +86,9 @@ func runTestCase(t *testing.T, tt *testCase) {
 	mockLog := tt.setupLog()
 
 	deps := Dependencies{
-		FS:     mockFSInstance,
-		Logger: mockLog,
+		FS:         mockFSInstance,
+		Logger:     mockLog,
+		IsTerminal: tt.isTerminal,
 	}
 
 	// Execute the run function and capture any errors.
@@ -167,6 +169,9 @@ func TestRun(t *testing.T) {
 			setupLog:  logger.NopLogger,
 			wantErr:   true,
 			wantErrIs: tui.ErrNotATerminal,
+			// Without this the guard falls back to the real terminal check,
+			// which passes when the test binary inherits a shell's stdin.
+			isTerminal: func() bool { return false },
 		},
 		{
 			name:   "bin dir error",
