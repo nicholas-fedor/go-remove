@@ -9,7 +9,6 @@ import (
 	"bytes"
 	"context"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -208,28 +207,6 @@ func TestRunE_RejectsUnknownLogLevel(t *testing.T) {
 		"the error must list the accepted values")
 }
 
-// TestGetWritableDataHome_RejectsRelativeXDG verifies a relative XDG_DATA_HOME
-// is ignored rather than used to build a data directory.
-//
-// Only a path can be trusted, and the XDG specification says a relative value
-// must be treated as unset.
-func TestGetWritableDataHome_RejectsRelativeXDG(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-
-	// A relative value must not be used, and the platform default is selected.
-	t.Setenv("XDG_DATA_HOME", "relative/data")
-
-	dir, err := getWritableDataHome()
-	require.NoError(t, err)
-
-	require.NotEmpty(t, dir)
-	assert.True(t, filepath.IsAbs(dir), "the data home must be absolute, got %q", dir)
-	assert.NotContains(t, dir, filepath.Join("relative", "data"),
-		"a relative XDG_DATA_HOME must be ignored")
-}
-
 // TestExecute_ResetsSilenceUsageEachRun verifies the usage suppression set by
 // RunE does not leak into a later execution.
 //
@@ -365,25 +342,5 @@ func TestFlagErrorsShowUsage(t *testing.T) {
 				t.Errorf("usage must list the valid flags, got %q", got)
 			}
 		})
-	}
-}
-
-// TestGetStoragePath verifies the storage path calculation.
-func TestGetStoragePath(t *testing.T) {
-	// This test verifies that getStoragePath returns a non-empty string and no error.
-	// The actual path depends on environment variables, so we just verify
-	// it doesn't return empty or panic.
-	path, err := getStoragePath()
-	if err != nil {
-		t.Errorf("getStoragePath() returned error: %v", err)
-	}
-
-	if path == "" {
-		t.Error("getStoragePath() returned empty string")
-	}
-
-	// Verify it contains the expected components
-	if !strings.Contains(path, "go-remove") {
-		t.Errorf("getStoragePath() = %q, expected to contain 'go-remove'", path)
 	}
 }

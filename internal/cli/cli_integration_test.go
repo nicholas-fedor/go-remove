@@ -452,10 +452,10 @@ func (s *CLIIntegrationTestSuite) TestRunHistoryRecordError() {
 	s.Require().ErrorIs(err, recordError)
 }
 
-// Note: TUI tests using ProgramRunner are not included in integration tests
-// because RunTUI requires complex Bubbletea program initialization that is
-// better tested at the unit level in internal/cli. The integration tests
-// focus on the Run() function which delegates to RunTUI internally.
+// Note: TUI tests are not included in integration tests because internal/tui
+// needs a terminal and an input stream to drive a real Bubble Tea program,
+// which is better tested at the unit level there. The integration tests focus
+// on the Run() function which delegates to tui.Run internally.
 
 // TestRunConfigPropagation verifies that all config fields are properly propagated.
 //

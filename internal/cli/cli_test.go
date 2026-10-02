@@ -12,49 +12,20 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/rs/zerolog"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
 
 	tea "charm.land/bubbletea/v2"
 
-	mockRunner "github.com/nicholas-fedor/go-remove/internal/cli/mocks"
 	mockFS "github.com/nicholas-fedor/go-remove/internal/fs/mocks"
+	"github.com/nicholas-fedor/go-remove/internal/logger"
 	mockLogger "github.com/nicholas-fedor/go-remove/internal/logger/mocks"
+	"github.com/nicholas-fedor/go-remove/internal/tui"
+	"github.com/nicholas-fedor/go-remove/internal/tui/models"
 )
-
-// mockNoOpRunner provides a no-op runner for TUI tests.
-func mockNoOpRunner(tea.Model, ...tea.ProgramOption) (*tea.Program, error) {
-	return nil, nil //nolint:nilnil // Mock no-op runner returns nil values for test simplicity
-}
-
-// newMockLoggerWithDefaults creates a MockLogger with default expectations for all methods.
-// This helper reduces boilerplate when setting up logger mocks for tests that don't need
-// to verify specific logger interactions.
-func newMockLoggerWithDefaults(t *testing.T) *mockLogger.MockLogger {
-	t.Helper()
-
-	m := mockLogger.NewMockLogger(t)
-
-	// Create a nop logger and get event pointers to use as return values.
-	nopLog := zerolog.New(io.Discard)
-
-	// Use Maybe() for optional methods that may not be called during tests.
-	m.On("Debug").Return(nopLog.Debug()).Maybe()
-	m.On("Info").Return(nopLog.Info()).Maybe()
-	m.On("Warn").Return(nopLog.Warn()).Maybe()
-	m.On("Error").Return(nopLog.Error()).Maybe()
-	// Sync is only reached through Run, so it stays optional for tests that
-	// call RunTUI directly.
-	m.On("Sync").Return(nil).Maybe()
-	m.On("Level", mock.Anything).Return().Maybe()
-	m.On("SetCaptureFunc", mock.Anything).Return().Maybe()
-
-	return m
-}
 
 // captureStdout redirects os.Stdout and returns a function that restores stdout
 // and returns the captured output as a string.
@@ -97,40 +68,48 @@ func captureStdout(t *testing.T) func() string {
 
 // makeDeps creates Dependencies from the provided setup functions.
 type makeDepsConfig struct {
-	setupFS     func(t *testing.T) *mockFS.MockFS
-	setupLog    func(t *testing.T) *mockLogger.MockLogger
-	setupRunner func(t *testing.T) *mockRunner.MockProgramRunner
+	setupFS  func(t *testing.T) *mockFS.MockFS
+	setupLog func() logger.Logger
 }
 
 func makeDeps(
 	t *testing.T,
 	cfg makeDepsConfig,
-) (Dependencies, *mockFS.MockFS, *mockLogger.MockLogger, ProgramRunner) {
+) (Dependencies, *mockFS.MockFS, logger.Logger) {
 	t.Helper()
 
 	mockFSInstance := cfg.setupFS(t)
-	mockLog := cfg.setupLog(t)
+	mockLog := cfg.setupLog()
 
 	deps := Dependencies{
 		FS:     mockFSInstance,
 		Logger: mockLog,
 	}
 
-	var runner ProgramRunner = DefaultRunner{}
-	if cfg.setupRunner != nil {
-		runner = cfg.setupRunner(t)
-	}
+	return deps, mockFSInstance, mockLog
+}
 
-	return deps, mockFSInstance, mockLog, runner
+// interactiveProgramOptions starts a real Bubble Tea program that draws into a
+// discard sink and quits on the first key.
+//
+// The interactive path needs a terminal, which go test does not provide, and it
+// needs input to leave on, which a discard sink alone cannot supply.
+func interactiveProgramOptions() []tea.ProgramOption {
+	return []tea.ProgramOption{
+		tea.WithInput(strings.NewReader("q")),
+		tea.WithOutput(io.Discard),
+		tea.WithWindowSize(80, 24),
+		tea.WithoutSignals(),
+	}
 }
 
 // executeRun wraps the local run logic and returns the error.
-// It mirrors the behavior of the Run function but accepts a custom runner for testing.
+// It mirrors the behavior of the Run function but stands in for the terminal
+// check, which cannot be satisfied under go test.
 func executeRun(
 	ctx context.Context,
 	deps Dependencies,
 	config Config,
-	runner ProgramRunner,
 ) error {
 	log := deps.Logger
 
@@ -142,7 +121,18 @@ func executeRun(
 	}
 
 	if config.Binary == "" {
-		err = RunTUI(ctx, binDir, config, log, deps.FS, runner, nil)
+		err = tui.Run(ctx, tui.Options{
+			Dir: binDir,
+			Config: models.Config{
+				Verbose:     config.Verbose,
+				LogLevel:    config.LogLevel,
+				RestoreMode: config.RestoreMode,
+			},
+			Logger:          log,
+			FS:              deps.FS,
+			ProgramOptions:  interactiveProgramOptions(),
+			StdinIsTerminal: func() bool { return true },
+		})
 	} else {
 		binaryPath := deps.FS.AdjustBinaryPath(binDir, config.Binary)
 
@@ -165,13 +155,12 @@ func executeRun(
 
 // testCase defines the structure for TestRun test cases.
 type testCase struct {
-	name        string
-	config      Config
-	setupFS     func(t *testing.T) *mockFS.MockFS
-	setupLog    func(t *testing.T) *mockLogger.MockLogger
-	setupRunner func(t *testing.T) *mockRunner.MockProgramRunner
-	wantErr     bool
-	wantOutput  string // Expected stdout output for non-verbose success
+	name       string
+	config     Config
+	setupFS    func(t *testing.T) *mockFS.MockFS
+	setupLog   func() logger.Logger
+	wantErr    bool
+	wantOutput string // Expected stdout output for non-verbose success
 }
 
 // runTestCase executes a single test case with the provided configuration.
@@ -179,24 +168,17 @@ type testCase struct {
 func runTestCase(t *testing.T, tt *testCase) {
 	t.Helper()
 
-	// A case with no binary name exercises the interactive path, which needs a
-	// terminal that go test does not provide.
-	if tt.config.Binary == "" {
-		withTerminal(t)
-	}
-
 	// Capture stdout for output verification.
 	getOutput := captureStdout(t)
 
-	// Set up dependencies and runner.
-	deps, mockFSInstance, mockLog, runner := makeDeps(t, makeDepsConfig{
-		setupFS:     tt.setupFS,
-		setupLog:    tt.setupLog,
-		setupRunner: tt.setupRunner,
+	// Set up dependencies.
+	deps, mockFSInstance, mockLog := makeDeps(t, makeDepsConfig{
+		setupFS:  tt.setupFS,
+		setupLog: tt.setupLog,
 	})
 
 	// Execute the run function and capture any errors.
-	err := executeRun(t.Context(), deps, tt.config, runner)
+	err := executeRun(t.Context(), deps, tt.config)
 
 	// Capture stdout output after execution.
 	gotOutput := getOutput()
@@ -213,63 +195,12 @@ func runTestCase(t *testing.T, tt *testCase) {
 
 	// Assert that all mock expectations were met.
 	mockFSInstance.AssertExpectations(t)
-	mockLog.AssertExpectations(t)
 
-	// If using a mock runner, assert its expectations as well.
-	if mr, ok := runner.(*mockRunner.MockProgramRunner); ok {
-		mr.AssertExpectations(t)
+	// Only a generated mock has expectations to check; the nop logger is a real
+	// implementation and has nothing pending.
+	if ml, ok := mockLog.(*mockLogger.MockLogger); ok {
+		ml.AssertExpectations(t)
 	}
-}
-
-// withTerminal makes stdinIsTerminal report a terminal for the duration of a
-// test.
-//
-// go test attaches no terminal to stdin, so the interactive path would take
-// the no-terminal branch and the TUI cases would never run. The assignment is
-// safe because these tests are sequential.
-func withTerminal(t *testing.T) {
-	t.Helper()
-
-	original := stdinIsTerminal
-	stdinIsTerminal = func() bool { return true }
-
-	t.Cleanup(func() { stdinIsTerminal = original })
-}
-
-// TestRunTUI_NoTerminal verifies the interactive path refuses to start without
-// a terminal, and says so in terms the user can act on.
-func TestRunTUI_NoTerminal(t *testing.T) {
-	original := stdinIsTerminal
-	stdinIsTerminal = func() bool { return false }
-
-	t.Cleanup(func() { stdinIsTerminal = original })
-
-	mockFSInstance := mockFS.NewMockFS(t)
-	mockFSInstance.On("ListBinaries", "/bin").Return([]string{"vhs"}, nil).Maybe()
-
-	err := RunTUI(t.Context(), "/bin", Config{}, newMockLoggerWithDefaults(t), mockFSInstance,
-		mockRunner.NewMockProgramRunner(t), nil)
-
-	require.ErrorIs(t, err, ErrNotATerminal)
-	assert.Contains(t, err.Error(), "pass a binary name",
-		"the message should point at the non-interactive form")
-}
-
-// TestRunTUI_DirectoryReadFailure verifies a read failure is reported as itself
-// rather than as an empty directory.
-func TestRunTUI_DirectoryReadFailure(t *testing.T) {
-	withTerminal(t)
-
-	readErr := errors.New("permission denied")
-	mockFSInstance := mockFS.NewMockFS(t)
-	mockFSInstance.On("ListBinaries", "/bin").Return(nil, readErr)
-
-	err := RunTUI(t.Context(), "/bin", Config{}, newMockLoggerWithDefaults(t), mockFSInstance,
-		mockRunner.NewMockProgramRunner(t), nil)
-
-	require.ErrorIs(t, err, readErr)
-	require.NotErrorIs(t, err, ErrNoBinariesFound,
-		"an unreadable directory must not be reported as empty")
 }
 
 // TestRun verifies the Run function's behavior under various conditions.
@@ -286,7 +217,7 @@ func TestRun(t *testing.T) {
 
 				return m
 			},
-			setupLog:   newMockLoggerWithDefaults,
+			setupLog:   logger.NopLogger,
 			wantErr:    false,
 			wantOutput: "Successfully removed vhs\n",
 		},
@@ -302,7 +233,7 @@ func TestRun(t *testing.T) {
 
 				return m
 			},
-			setupLog: newMockLoggerWithDefaults,
+			setupLog: logger.NopLogger,
 			wantErr:  true,
 		},
 		{
@@ -315,14 +246,8 @@ func TestRun(t *testing.T) {
 
 				return m
 			},
-			setupLog: newMockLoggerWithDefaults,
-			setupRunner: func(t *testing.T) *mockRunner.MockProgramRunner { //nolint:thelper // Anonymous setup function, not a test helper
-				m := mockRunner.NewMockProgramRunner(t)
-				m.On("RunProgram", mock.Anything, mock.Anything).Return(nil, nil)
-
-				return m
-			},
-			wantErr: false,
+			setupLog: logger.NopLogger,
+			wantErr:  false,
 		},
 		{
 			name:   "tui mode no binaries",
@@ -334,15 +259,8 @@ func TestRun(t *testing.T) {
 
 				return m
 			},
-			setupLog: newMockLoggerWithDefaults,
-			setupRunner: func(t *testing.T) *mockRunner.MockProgramRunner { //nolint:thelper // Anonymous setup function, not a test helper
-				m := mockRunner.NewMockProgramRunner(t)
-				// RunProgram may not be called if RunTUI returns an error early
-				m.On("RunProgram", mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-
-				return m
-			},
-			wantErr: true,
+			setupLog: logger.NopLogger,
+			wantErr:  true,
 		},
 		{
 			name:   "bin dir error",
@@ -353,7 +271,7 @@ func TestRun(t *testing.T) {
 
 				return m
 			},
-			setupLog: newMockLoggerWithDefaults,
+			setupLog: logger.NopLogger,
 			wantErr:  true,
 		},
 		{
@@ -367,7 +285,7 @@ func TestRun(t *testing.T) {
 
 				return m
 			},
-			setupLog: func(t *testing.T) *mockLogger.MockLogger { //nolint:thelper // Anonymous setup function, not a test helper
+			setupLog: func() logger.Logger {
 				m := mockLogger.NewMockLogger(t)
 				nopLog := zerolog.New(io.Discard)
 				m.On("Debug").Return(nopLog.Debug()).Maybe()

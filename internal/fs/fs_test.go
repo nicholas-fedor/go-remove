@@ -89,8 +89,8 @@ func TestRealFS_DetermineBinDir(t *testing.T) {
 			name:    "useGoroot with GOROOT set",
 			r:       &RealFS{},
 			args:    args{useGoroot: true},
-			env:     map[string]string{"GOROOT": filepath.FromSlash("/go")},
-			want:    filepath.FromSlash("/go/bin"),
+			env:     map[string]string{"GOROOT": filepath.Join(os.TempDir(), "go")},
+			want:    filepath.Join(os.TempDir(), "go", "bin"),
 			wantErr: false,
 		},
 		{
@@ -105,16 +105,19 @@ func TestRealFS_DetermineBinDir(t *testing.T) {
 			name:    "use GOBIN",
 			r:       &RealFS{},
 			args:    args{useGoroot: false},
-			env:     map[string]string{"GOBIN": filepath.FromSlash("/custom/bin")},
-			want:    filepath.FromSlash("/custom/bin"),
+			env:     map[string]string{"GOBIN": filepath.Join(os.TempDir(), "custom", "bin")},
+			want:    filepath.Join(os.TempDir(), "custom", "bin"),
 			wantErr: false,
 		},
 		{
-			name:    "use GOPATH/bin when GOBIN unset",
-			r:       &RealFS{},
-			args:    args{useGoroot: false},
-			env:     map[string]string{"GOPATH": filepath.FromSlash("/gopath"), "GOBIN": ""},
-			want:    filepath.FromSlash("/gopath/bin"),
+			name: "use GOPATH/bin when GOBIN unset",
+			r:    &RealFS{},
+			args: args{useGoroot: false},
+			env: map[string]string{
+				"GOPATH": filepath.Join(os.TempDir(), "gopath"),
+				"GOBIN":  "",
+			},
+			want:    filepath.Join(os.TempDir(), "gopath", "bin"),
 			wantErr: false,
 		},
 		{
@@ -556,6 +559,41 @@ func TestRealFS_ListBinaries(t *testing.T) {
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("ListBinaries() = %v, want %v", got, tt.want)
 			}
+		})
+	}
+}
+
+// TestHasExecutableSuffix verifies the executable-extension rule ignores case.
+//
+// Windows treats "tool.exe" and "tool.EXE" as the same file, so discovery and
+// path construction must agree that both already carry the extension. A
+// case-sensitive test lists the binary and then names a path that does not
+// exist.
+func TestHasExecutableSuffix(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		arg  string
+		want bool
+	}{
+		{name: "lowercase", arg: "tool.exe", want: true},
+		{name: "uppercase", arg: "tool.EXE", want: true},
+		{name: "mixed case", arg: "tool.Exe", want: true},
+		{name: "no extension", arg: "tool", want: false},
+		{name: "other extension", arg: "tool.txt", want: false},
+		{name: "empty", arg: "", want: false},
+		{name: "extension is not only suffix", arg: "exe", want: false},
+		{name: "trailing dot", arg: "tool.", want: false},
+		{name: "path with uppercase suffix", arg: "/usr/bin/tool.EXE", want: true},
+		{name: "uppercase suffix not at end", arg: "tool.EXE.bak", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tt.want, hasExecutableSuffix(tt.arg))
 		})
 	}
 }

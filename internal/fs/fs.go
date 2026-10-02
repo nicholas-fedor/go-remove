@@ -16,6 +16,7 @@ import (
 
 	"github.com/nicholas-fedor/go-remove/internal/buildinfo"
 	"github.com/nicholas-fedor/go-remove/internal/logger"
+	"github.com/nicholas-fedor/go-remove/internal/paths"
 )
 
 // OS-specific constants for filesystem operations.
@@ -27,13 +28,58 @@ const (
 var goBinaryExtractor = &buildinfo.DefaultExtractor{}
 
 // ErrGorootNotSet indicates that GOROOT is not set when required.
-var ErrGorootNotSet = errors.New("GOROOT is not set")
+//
+// It is the same sentinel as paths.ErrGorootNotSet, so errors.Is matches either
+// name.
+var ErrGorootNotSet = paths.ErrGorootNotSet
 
 // ErrBinaryNotFound indicates that a binary does not exist at the specified path.
 var ErrBinaryNotFound = errors.New("binary not found")
 
+// Lister reports the Go binaries that may be removed from a directory.
+//
+// It is the read-only half of the filesystem contract, so a consumer that only
+// needs discovery does not have to satisfy the destructive half.
+type Lister interface {
+	// ListBinaries retrieves removable binaries from a directory.
+	//
+	// Directories, lock files, and non-executable files are omitted.
+	//
+	// Parameters:
+	//   - dir: Directory to scan.
+	//
+	// Returns:
+	//   - Names of Go binaries in the directory.
+	//   - An error if the directory cannot be read, so a permission or I/O failure
+	//     is not reported as an empty directory.
+	ListBinaries(dir string) ([]string, error)
+}
+
+// Remover deletes a binary from the filesystem.
+//
+// It is the destructive half of the filesystem contract.
+type Remover interface {
+	// RemoveBinary deletes a binary file from the filesystem.
+	//
+	// Parameters:
+	//   - binaryPath: Full path to the binary.
+	//   - name: Binary name used in log messages.
+	//   - verbose: When true, emit debug and info logs.
+	//   - logger: Logger used for verbose output.
+	//
+	// Returns:
+	//   - An error if the binary does not exist or cannot be removed.
+	RemoveBinary(binaryPath, name string, verbose bool, logger logger.Logger) error
+}
+
 // FS defines filesystem operations for go-remove.
+//
+// It is the union of the narrow Lister and Remover contracts with path
+// resolution, for consumers that need the whole surface.
 type FS interface {
+	Lister
+	Remover
+
 	// DetermineBinDir resolves the binary directory based on GOROOT or GOPATH/GOBIN.
 	//
 	// Parameters:
@@ -53,37 +99,16 @@ type FS interface {
 	// Returns:
 	//   - Absolute path to the binary.
 	AdjustBinaryPath(dir, binary string) string
-
-	// RemoveBinary deletes a binary file from the filesystem.
-	//
-	// Parameters:
-	//   - binaryPath: Full path to the binary.
-	//   - name: Binary name used in log messages.
-	//   - verbose: When true, emit debug and info logs.
-	//   - logger: Logger used for verbose output.
-	//
-	// Returns:
-	//   - An error if the binary does not exist or cannot be removed.
-	RemoveBinary(binaryPath, name string, verbose bool, logger logger.Logger) error
-
-	// ListBinaries retrieves removable binaries from a directory.
-	//
-	// Directories, lock files, and non-executable files are omitted.
-	//
-	// Parameters:
-	//   - dir: Directory to scan.
-	//
-	// Returns:
-	//   - Names of Go binaries in the directory.
-	//   - An error if the directory cannot be read, so a permission or I/O failure
-	//     is not reported as an empty directory.
-	ListBinaries(dir string) ([]string, error)
 }
 
 // RealFS implements the FS interface using real filesystem operations.
 type RealFS struct{}
 
-var _ FS = (*RealFS)(nil)
+var (
+	_ FS      = (*RealFS)(nil)
+	_ Lister  = (*RealFS)(nil)
+	_ Remover = (*RealFS)(nil)
+)
 
 // NewRealFS creates a RealFS instance.
 //
@@ -102,31 +127,8 @@ func NewRealFS() FS {
 //   - Absolute path to the binary directory.
 //   - An error if GOROOT is requested but not set.
 func (r *RealFS) DetermineBinDir(useGoroot bool) (string, error) {
-	if useGoroot {
-		gorootDir := os.Getenv("GOROOT")
-		if gorootDir == "" {
-			return "", ErrGorootNotSet
-		}
-
-		return filepath.Join(gorootDir, "bin"), nil
-	}
-
-	goBin := os.Getenv("GOBIN")
-	if goBin == "" {
-		gopath := os.Getenv("GOPATH")
-		if gopath == "" {
-			home := os.Getenv("HOME")
-			if runtime.GOOS == windowsOS && home == "" {
-				home = os.Getenv("USERPROFILE")
-			}
-
-			gopath = filepath.Join(home, "go")
-		}
-
-		goBin = filepath.Join(gopath, "bin")
-	}
-
-	return goBin, nil
+	//nolint:wrapcheck // paths.ErrGorootNotSet is the same sentinel as fs.ErrGorootNotSet, so wrapping it here would obscure the identity callers compare against.
+	return paths.BinDir(useGoroot)
 }
 
 // AdjustBinaryPath constructs a full binary path, adding .exe on Windows if needed.
@@ -156,11 +158,29 @@ func (r *RealFS) AdjustBinaryPath(dir, binary string) string {
 	}
 
 	path := filepath.Join(dir, name)
-	if binary != "" && runtime.GOOS == windowsOS && filepath.Ext(binary) != windowsExt {
+	if binary != "" && runtime.GOOS == windowsOS && !hasExecutableSuffix(binary) {
 		path += windowsExt
 	}
 
 	return path
+}
+
+// hasExecutableSuffix reports whether a name already ends in the Windows
+// executable extension.
+//
+// The comparison ignores case. Windows treats "tool.exe" and "tool.EXE" as the
+// same file, so a case-sensitive test would append a second extension and
+// point at a path that does not exist. Discovery and path construction must
+// agree on this rule: a binary listed by ListBinaries has to be the one
+// AdjustBinaryPath names.
+//
+// Parameters:
+//   - name: File name or path to inspect.
+//
+// Returns:
+//   - True when the extension matches .exe regardless of case.
+func hasExecutableSuffix(name string) bool {
+	return strings.EqualFold(filepath.Ext(name), windowsExt)
 }
 
 // RemoveBinary deletes a binary file from the filesystem.
@@ -237,7 +257,7 @@ func isRemovableBinary(dir string, file os.DirEntry) bool {
 	}
 
 	name := file.Name()
-	if runtime.GOOS == windowsOS && !strings.EqualFold(filepath.Ext(name), windowsExt) {
+	if runtime.GOOS == windowsOS && !hasExecutableSuffix(name) {
 		return false
 	}
 

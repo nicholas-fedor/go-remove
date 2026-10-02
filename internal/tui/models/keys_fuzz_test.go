@@ -3,13 +3,14 @@ Copyright © 2026 Nicholas Fedor <nick@nickfedor.com>
 SPDX-License-Identifier: AGPL-3.0-or-later
 */
 
-package cli
+package models
 
 import (
 	"testing"
 
 	"github.com/nicholas-fedor/go-remove/internal/history"
 	"github.com/nicholas-fedor/go-remove/internal/logger"
+	"github.com/nicholas-fedor/go-remove/internal/tui/render"
 )
 
 type fuzzFS struct{}
@@ -22,6 +23,26 @@ func (fuzzFS) RemoveBinary(string, string, bool, logger.Logger) error { return n
 
 func (fuzzFS) ListBinaries(string) ([]string, error) {
 	return []string{"test1", "test2", "test3"}, nil
+}
+
+// Fuzz_keyPressString verifies keyPressString accepts arbitrary key names.
+func Fuzz_keyPressString(f *testing.F) {
+	f.Add("enter")
+	f.Add("up")
+	f.Add("q")
+	f.Add("")
+	f.Add("ctrl+c")
+	f.Add("down")
+	f.Add("left")
+	f.Add("right")
+	f.Add(" ")
+	f.Add("\n")
+	f.Add("esc")
+
+	f.Fuzz(func(t *testing.T, key string) {
+		msg := keyPressString(key)
+		_ = msg.String()
+	})
 }
 
 // Fuzz_model_Update fuzz tests the Update() method with random key sequences.
@@ -52,7 +73,7 @@ func Fuzz_model_Update(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, key string) {
 		// Initialize a model with test data
-		m := &model{
+		m := &Model{
 			choices:       []string{"test1", "test2", "test3"},
 			cursorY:       0,
 			cursorX:       0,
@@ -66,13 +87,13 @@ func Fuzz_model_Update(f *testing.F) {
 			height:        24,
 			dir:           "/bin",
 			fs:            fuzzFS{},
-			logger:        &tuiMockLogger{},
-			styles:        defaultStyleConfig(),
+			logger:        logger.NopLogger(),
+			styles:        render.DefaultStyleConfig(),
 		}
 
 		msg := keyPressString(key)
 		result, _ := m.Update(msg)
-		resultModel := result.(*model)
+		resultModel := result.(*Model)
 
 		// Verify state consistency after Update()
 		// Cursor should never be negative
@@ -165,100 +186,6 @@ func Fuzz_keyMatches(f *testing.F) {
 	})
 }
 
-// Fuzz_addLogEntry fuzz tests log entry handling by verifying that addLogEntry()
-// handles any input gracefully and maintains the circular buffer behavior.
-func Fuzz_addLogEntry(f *testing.F) {
-	// Seed with typical log messages
-	f.Add("INF", "test message")
-	f.Add("DBG", "debug information")
-	f.Add("WRN", "warning message")
-	f.Add("ERR", "error occurred")
-	f.Add("", "")
-	f.Add("INF", "")
-	f.Add("", "message only")
-
-	f.Fuzz(func(t *testing.T, level string, message string) {
-		m := &model{
-			logs:     make([]string, 0, maxLogLines),
-			showLogs: true,
-		}
-
-		// Create log message with fuzzed inputs
-		logMsg := LogMsg{Level: level, Message: message}
-
-		// Should not panic with any input
-		m.addLogEntry(logMsg)
-
-		// Verify log was added
-		if len(m.logs) == 0 {
-			t.Error("log entry was not added")
-		}
-
-		// Verify the log entry contains expected format
-		lastEntry := m.logs[len(m.logs)-1]
-		if lastEntry == "" && (level != "" || message != "") {
-			t.Error("log entry format is incorrect")
-		}
-
-		// Test circular buffer by adding many entries
-		for range maxLogLines + 10 {
-			m.addLogEntry(LogMsg{Level: level, Message: message})
-		}
-
-		// Verify buffer size is capped at maxLogLines
-		if len(m.logs) > maxLogLines {
-			t.Errorf(
-				"log buffer exceeded maxLogLines: got %d, want <= %d",
-				len(m.logs),
-				maxLogLines,
-			)
-		}
-
-		// Verify buffer is not empty
-		if len(m.logs) == 0 {
-			t.Error("log buffer should not be empty after adding entries")
-		}
-	})
-}
-
-// Fuzz_pollLogChannel fuzz tests log polling with random log channel states
-// to ensure pollLogChannel() handles various channel conditions without panicking.
-func Fuzz_pollLogChannel(f *testing.F) {
-	// Seed with flags indicating channel state
-	// First bool: whether to send a message
-	// Second bool: whether to close the channel after sending
-	f.Add(true, false)
-	f.Add(false, false)
-	f.Add(true, true)
-
-	f.Fuzz(func(t *testing.T, hasMessage bool, closeChannel bool) {
-		logChan := make(chan LogMsg, 10)
-		m := &model{logChan: logChan}
-
-		if hasMessage {
-			// Send a message to the channel
-			select {
-			case logChan <- LogMsg{Level: "INF", Message: "test"}:
-			default:
-			}
-		}
-
-		if closeChannel {
-			close(logChan)
-		}
-
-		cmd := m.pollLogChannel()
-		if cmd != nil {
-			_ = cmd()
-		}
-
-		// Clean up if not already closed
-		if !closeChannel {
-			close(logChan)
-		}
-	})
-}
-
 // Fuzz_model_stateConsistency fuzz tests state transitions and consistency
 // across multiple Update() calls with various inputs.
 func Fuzz_model_stateConsistency(f *testing.F) {
@@ -269,7 +196,7 @@ func Fuzz_model_stateConsistency(f *testing.F) {
 	f.Add("q")       // Quit
 
 	f.Fuzz(func(t *testing.T, keySequence string) {
-		m := &model{
+		m := &Model{
 			choices:        []string{"bin1", "bin2", "bin3", "bin4"},
 			cursorY:        0,
 			cursorX:        0,
@@ -283,8 +210,8 @@ func Fuzz_model_stateConsistency(f *testing.F) {
 			height:         24,
 			dir:            "/bin",
 			fs:             fuzzFS{},
-			logger:         &tuiMockLogger{},
-			styles:         defaultStyleConfig(),
+			logger:         logger.NopLogger(),
+			styles:         render.DefaultStyleConfig(),
 			historyEntries: make([]*history.HistoryEntry, 0),
 			historyCursor:  0,
 			confirmation:   confirmNone,
@@ -294,7 +221,7 @@ func Fuzz_model_stateConsistency(f *testing.F) {
 		for _, key := range keys {
 			msg := keyPressString(key)
 			result, _ := m.Update(msg)
-			m = result.(*model)
+			m = result.(*Model)
 
 			// State consistency checks
 			if m.cursorX < 0 {
