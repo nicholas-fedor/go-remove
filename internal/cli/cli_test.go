@@ -7,24 +7,19 @@ package cli
 
 import (
 	"bytes"
-	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/rs/zerolog"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-
-	tea "charm.land/bubbletea/v2"
 
 	mockFS "github.com/nicholas-fedor/go-remove/internal/fs/mocks"
 	"github.com/nicholas-fedor/go-remove/internal/logger"
 	mockLogger "github.com/nicholas-fedor/go-remove/internal/logger/mocks"
 	"github.com/nicholas-fedor/go-remove/internal/tui"
-	"github.com/nicholas-fedor/go-remove/internal/tui/models"
 )
 
 // captureStdout redirects os.Stdout and returns a function that restores stdout
@@ -66,93 +61,6 @@ func captureStdout(t *testing.T) func() string {
 	}
 }
 
-// makeDeps creates Dependencies from the provided setup functions.
-type makeDepsConfig struct {
-	setupFS  func(t *testing.T) *mockFS.MockFS
-	setupLog func() logger.Logger
-}
-
-func makeDeps(
-	t *testing.T,
-	cfg makeDepsConfig,
-) (Dependencies, *mockFS.MockFS, logger.Logger) {
-	t.Helper()
-
-	mockFSInstance := cfg.setupFS(t)
-	mockLog := cfg.setupLog()
-
-	deps := Dependencies{
-		FS:     mockFSInstance,
-		Logger: mockLog,
-	}
-
-	return deps, mockFSInstance, mockLog
-}
-
-// interactiveProgramOptions starts a real Bubble Tea program that draws into a
-// discard sink and quits on the first key.
-//
-// The interactive path needs a terminal, which go test does not provide, and it
-// needs input to leave on, which a discard sink alone cannot supply.
-func interactiveProgramOptions() []tea.ProgramOption {
-	return []tea.ProgramOption{
-		tea.WithInput(strings.NewReader("q")),
-		tea.WithOutput(io.Discard),
-		tea.WithWindowSize(80, 24),
-		tea.WithoutSignals(),
-	}
-}
-
-// executeRun wraps the local run logic and returns the error.
-// It mirrors the behavior of the Run function but stands in for the terminal
-// check, which cannot be satisfied under go test.
-func executeRun(
-	ctx context.Context,
-	deps Dependencies,
-	config Config,
-) error {
-	log := deps.Logger
-
-	binDir, err := deps.FS.DetermineBinDir(config.Goroot)
-	if err != nil {
-		_ = log.Sync() // Flush logs; errors are ignored
-
-		return err
-	}
-
-	if config.Binary == "" {
-		err = tui.Run(ctx, tui.Options{
-			Dir: binDir,
-			Config: models.Config{
-				Verbose:     config.Verbose,
-				LogLevel:    config.LogLevel,
-				RestoreMode: config.RestoreMode,
-			},
-			Logger:          log,
-			FS:              deps.FS,
-			ProgramOptions:  interactiveProgramOptions(),
-			StdinIsTerminal: func() bool { return true },
-		})
-	} else {
-		binaryPath := deps.FS.AdjustBinaryPath(binDir, config.Binary)
-
-		err = deps.FS.RemoveBinary(binaryPath, config.Binary, config.Verbose, log)
-		if err == nil && !config.Verbose {
-			fmt.Fprintf(os.Stdout, "Successfully removed %s\n", config.Binary)
-		}
-	}
-
-	if err != nil {
-		_ = log.Sync() // Flush logs; errors are ignored
-
-		return err
-	}
-
-	_ = log.Sync() // Errors are ignored
-
-	return nil
-}
-
 // testCase defines the structure for TestRun test cases.
 type testCase struct {
 	name       string
@@ -160,7 +68,9 @@ type testCase struct {
 	setupFS    func(t *testing.T) *mockFS.MockFS
 	setupLog   func() logger.Logger
 	wantErr    bool
-	wantOutput string // Expected stdout output for non-verbose success
+	wantErrIs  error       // Sentinel the error must match, when set
+	isTerminal func() bool // Terminal check for the interactive branch, when set
+	wantOutput string      // Expected stdout output for non-verbose success
 }
 
 // runTestCase executes a single test case with the provided configuration.
@@ -172,13 +82,17 @@ func runTestCase(t *testing.T, tt *testCase) {
 	getOutput := captureStdout(t)
 
 	// Set up dependencies.
-	deps, mockFSInstance, mockLog := makeDeps(t, makeDepsConfig{
-		setupFS:  tt.setupFS,
-		setupLog: tt.setupLog,
-	})
+	mockFSInstance := tt.setupFS(t)
+	mockLog := tt.setupLog()
+
+	deps := Dependencies{
+		FS:         mockFSInstance,
+		Logger:     mockLog,
+		IsTerminal: tt.isTerminal,
+	}
 
 	// Execute the run function and capture any errors.
-	err := executeRun(t.Context(), deps, tt.config)
+	err := Run(t.Context(), deps, tt.config)
 
 	// Capture stdout output after execution.
 	gotOutput := getOutput()
@@ -186,6 +100,11 @@ func runTestCase(t *testing.T, tt *testCase) {
 	// Verify error behavior matches expectations.
 	if (err != nil) != tt.wantErr {
 		t.Errorf("Run() error = %v, wantErr %v", err, tt.wantErr)
+	}
+
+	if tt.wantErrIs != nil {
+		//nolint:testifylint // assert keeps going so the mock expectations below still report
+		assert.ErrorIs(t, err, tt.wantErrIs, "Run() must surface the branch's own error")
 	}
 
 	// Verify stdout output for non-verbose success cases.
@@ -237,30 +156,22 @@ func TestRun(t *testing.T) {
 			wantErr:  true,
 		},
 		{
-			name:   "tui mode success",
+			name:   "tui mode surfaces the terminal guard",
 			config: Config{Binary: "", Verbose: false, Goroot: false},
 			setupFS: func(t *testing.T) *mockFS.MockFS { //nolint:thelper // Anonymous setup function, not a test helper
 				m := mockFS.NewMockFS(t)
+				// The terminal guard runs before the binary listing, so
+				// ListBinaries is never reached.
 				m.On("DetermineBinDir", false).Return("/bin", nil)
-				m.On("ListBinaries", "/bin").Return([]string{"vhs"}, nil)
 
 				return m
 			},
-			setupLog: logger.NopLogger,
-			wantErr:  false,
-		},
-		{
-			name:   "tui mode no binaries",
-			config: Config{Binary: "", Verbose: false, Goroot: false},
-			setupFS: func(t *testing.T) *mockFS.MockFS { //nolint:thelper // Anonymous setup function, not a test helper
-				m := mockFS.NewMockFS(t)
-				m.On("DetermineBinDir", false).Return("/bin", nil)
-				m.On("ListBinaries", "/bin").Return([]string{}, nil)
-
-				return m
-			},
-			setupLog: logger.NopLogger,
-			wantErr:  true,
+			setupLog:  logger.NopLogger,
+			wantErr:   true,
+			wantErrIs: tui.ErrNotATerminal,
+			// Without this the guard falls back to the real terminal check,
+			// which passes when the test binary inherits a shell's stdin.
+			isTerminal: func() bool { return false },
 		},
 		{
 			name:   "bin dir error",
@@ -274,139 +185,11 @@ func TestRun(t *testing.T) {
 			setupLog: logger.NopLogger,
 			wantErr:  true,
 		},
-		{
-			name:   "logger sync error",
-			config: Config{Binary: "vhs", Verbose: false, Goroot: false},
-			setupFS: func(t *testing.T) *mockFS.MockFS { //nolint:thelper // Anonymous setup function, not a test helper
-				m := mockFS.NewMockFS(t)
-				m.On("DetermineBinDir", false).Return("/bin", nil)
-				m.On("AdjustBinaryPath", "/bin", "vhs").Return("/bin/vhs")
-				m.On("RemoveBinary", "/bin/vhs", "vhs", false, mock.Anything).Return(nil)
-
-				return m
-			},
-			setupLog: func() logger.Logger {
-				m := mockLogger.NewMockLogger(t)
-				nopLog := zerolog.New(io.Discard)
-				m.On("Debug").Return(nopLog.Debug()).Maybe()
-				m.On("Info").Return(nopLog.Info()).Maybe()
-				m.On("Warn").Return(nopLog.Warn()).Maybe()
-				m.On("Error").Return(nopLog.Error()).Maybe()
-				m.On("Sync").Return(errors.New("sync failed"))
-				m.On("Level", mock.Anything).Return().Maybe()
-				m.On("SetCaptureFunc", mock.Anything).Return().Maybe()
-
-				return m
-			},
-			wantErr:    false, // Sync errors are ignored on all platforms
-			wantOutput: "Successfully removed vhs\n",
-		},
 	}
 
 	for i := range tests {
 		t.Run(tests[i].name, func(t *testing.T) {
 			runTestCase(t, &tests[i])
-		})
-	}
-}
-
-// TestRun_WithLoggerSync verifies that Sync is called appropriately.
-//
-//nolint:thelper // Subtest functions in table-driven tests require *testing.T parameter for mock constructors
-func TestRun_WithLoggerSync(t *testing.T) {
-	tests := []struct {
-		name       string
-		config     Config
-		setupFS    func(t *testing.T) *mockFS.MockFS
-		setupLog   func(t *testing.T) *mockLogger.MockLogger
-		wantErr    bool
-		wantOutput string
-	}{
-		{
-			name:   "sync called on success",
-			config: Config{Binary: "tool", Verbose: false, Goroot: false},
-			setupFS: func(t *testing.T) *mockFS.MockFS {
-				m := mockFS.NewMockFS(t)
-				m.On("DetermineBinDir", false).Return("/bin", nil)
-				m.On("AdjustBinaryPath", "/bin", "tool").Return("/bin/tool")
-				m.On("RemoveBinary", "/bin/tool", "tool", false, mock.Anything).Return(nil)
-
-				return m
-			},
-			setupLog: func(t *testing.T) *mockLogger.MockLogger {
-				m := mockLogger.NewMockLogger(t)
-				nopLog := zerolog.New(io.Discard)
-				m.On("Debug").Return(nopLog.Debug()).Maybe()
-				m.On("Info").Return(nopLog.Info()).Maybe()
-				m.On("Warn").Return(nopLog.Warn()).Maybe()
-				m.On("Error").Return(nopLog.Error()).Maybe()
-				m.On("Sync").Return(nil)
-
-				return m
-			},
-			wantErr:    false,
-			wantOutput: "Successfully removed tool\n",
-		},
-		{
-			name:   "sync called on error",
-			config: Config{Binary: "tool", Verbose: false, Goroot: false},
-			setupFS: func(t *testing.T) *mockFS.MockFS {
-				m := mockFS.NewMockFS(t)
-				m.On("DetermineBinDir", false).Return("", errors.New("bin dir error"))
-
-				return m
-			},
-			setupLog: func(t *testing.T) *mockLogger.MockLogger {
-				m := mockLogger.NewMockLogger(t)
-				nopLog := zerolog.New(io.Discard)
-				m.On("Debug").Return(nopLog.Debug()).Maybe()
-				m.On("Info").Return(nopLog.Info()).Maybe()
-				m.On("Warn").Return(nopLog.Warn()).Maybe()
-				m.On("Error").Return(nopLog.Error()).Maybe()
-				m.On("Sync").Return(nil)
-
-				return m
-			},
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Capture stdout for output verification.
-			getOutput := captureStdout(t)
-
-			// Set up dependencies.
-			mockFSInstance := tt.setupFS(t)
-			mockLog := tt.setupLog(t)
-
-			deps := Dependencies{
-				FS:     mockFSInstance,
-				Logger: mockLog,
-			}
-
-			// Execute the Run function and capture any errors.
-			err := Run(t.Context(), deps, tt.config)
-
-			// Capture stdout output after execution.
-			gotOutput := getOutput()
-
-			// Verify error behavior matches expectations.
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Run() error = %v, wantErr %v", err, tt.wantErr)
-			}
-
-			// Verify stdout output for success cases.
-			if tt.wantOutput != "" && gotOutput != tt.wantOutput {
-				t.Errorf("Run() output = %q, want %q", gotOutput, tt.wantOutput)
-			}
-
-			// Assert that Sync was called on the mock logger.
-			mockLog.AssertCalled(t, "Sync")
-
-			// Assert that all mock expectations were met.
-			mockFSInstance.AssertExpectations(t)
-			mockLog.AssertExpectations(t)
 		})
 	}
 }
@@ -425,7 +208,6 @@ func TestRun_VerboseMode(t *testing.T) {
 	mockLog.On("Warn").Return(nopLog.Warn()).Maybe()
 	mockLog.On("Error").Return(nopLog.Error()).Maybe()
 	mockLog.On("Level", mock.Anything).Return().Maybe()
-	mockLog.On("Sync").Return(nil)
 
 	deps := Dependencies{
 		FS:     m,

@@ -3,7 +3,6 @@ Copyright © 2026 Nicholas Fedor <nick@nickfedor.com>
 SPDX-License-Identifier: AGPL-3.0-or-later
 */
 
-// Package cli provides core logic for the go-remove command-line interface.
 package cli
 
 import (
@@ -23,7 +22,6 @@ type Config struct {
 	Binary      string
 	Verbose     bool
 	Goroot      bool
-	Help        bool
 	LogLevel    string
 	RestoreMode bool
 }
@@ -33,6 +31,9 @@ type Dependencies struct {
 	FS             fs.FS
 	Logger         logger.Logger
 	HistoryManager history.Manager
+
+	// IsTerminal reports whether standard input is an interactive terminal.
+	IsTerminal func() bool
 }
 
 // Run executes the CLI logic with the provided dependencies and configuration.
@@ -46,7 +47,6 @@ type Dependencies struct {
 //   - An error if directory resolution, deletion, or TUI execution fails.
 func Run(ctx context.Context, deps Dependencies, config Config) error {
 	log := deps.Logger
-	defer func() { _ = log.Sync() }()
 
 	binDir, err := deps.FS.DetermineBinDir(config.Goroot)
 	if err != nil {
@@ -54,7 +54,7 @@ func Run(ctx context.Context, deps Dependencies, config Config) error {
 	}
 
 	if config.Binary == "" {
-		if err := tui.Run(ctx, tui.Options{
+		opts := tui.Options{
 			Dir: binDir,
 			Config: models.Config{
 				Verbose:     config.Verbose,
@@ -64,7 +64,13 @@ func Run(ctx context.Context, deps Dependencies, config Config) error {
 			Logger:         log,
 			FS:             deps.FS,
 			HistoryManager: deps.HistoryManager,
-		}); err != nil {
+		}
+
+		if deps.IsTerminal != nil {
+			opts.StdinIsTerminal = deps.IsTerminal
+		}
+
+		if err := tui.Run(ctx, opts); err != nil {
 			return fmt.Errorf("running TUI: %w", err)
 		}
 

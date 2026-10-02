@@ -155,8 +155,6 @@ func (s *CLIIntegrationTestSuite) TestRunDirectRemovalSuccess() {
 		RemoveBinary(testBinaryPath, testBinaryName, false, s.loggerMock).
 		Return(nil)
 
-	s.loggerMock.EXPECT().Sync().Return(nil)
-
 	// Execute
 	deps := cli.Dependencies{
 		FS:     s.fsMock,
@@ -212,8 +210,6 @@ func (s *CLIIntegrationTestSuite) TestRunDirectRemovalWithHistory() {
 	// RemoveBinary is NOT called when HistoryManager is available
 	// because RecordDeletion already moves the binary to trash
 
-	s.loggerMock.EXPECT().Sync().Return(nil)
-
 	// Execute
 	deps := cli.Dependencies{
 		FS:             s.fsMock,
@@ -257,8 +253,6 @@ func (s *CLIIntegrationTestSuite) TestRunDirectRemovalVerboseMode() {
 	s.fsMock.EXPECT().
 		RemoveBinary(testBinaryPath, testBinaryName, true, s.loggerMock).
 		Return(nil)
-
-	s.loggerMock.EXPECT().Sync().Return(nil)
 
 	// Execute
 	deps := cli.Dependencies{
@@ -305,8 +299,6 @@ func (s *CLIIntegrationTestSuite) TestRunDirectRemovalWithGoroot() {
 		RemoveBinary(gorootBinaryPath, testBinaryName, false, s.loggerMock).
 		Return(nil)
 
-	s.loggerMock.EXPECT().Sync().Return(nil)
-
 	// Execute
 	deps := cli.Dependencies{
 		FS:     s.fsMock,
@@ -331,8 +323,7 @@ func (s *CLIIntegrationTestSuite) TestRunDirectRemovalWithGoroot() {
 // TestRunBinDirError verifies error handling when DetermineBinDir fails.
 //
 // When the binary directory cannot be determined, Run should:
-// 1. Sync the logger
-// 2. Return an error wrapping the original failure.
+// 1. Return an error wrapping the original failure.
 func (s *CLIIntegrationTestSuite) TestRunBinDirError() {
 	binDirError := errors.New("cannot determine binary directory: GOBIN and GOPATH not set")
 
@@ -340,8 +331,6 @@ func (s *CLIIntegrationTestSuite) TestRunBinDirError() {
 	s.fsMock.EXPECT().
 		DetermineBinDir(false).
 		Return("", binDirError)
-
-	s.loggerMock.EXPECT().Sync().Return(nil)
 
 	// Execute
 	deps := cli.Dependencies{
@@ -366,8 +355,7 @@ func (s *CLIIntegrationTestSuite) TestRunBinDirError() {
 // TestRunRemoveBinaryError verifies error handling when RemoveBinary fails.
 //
 // When binary removal fails, Run should:
-// 1. Sync the logger
-// 2. Return an error wrapping the original failure.
+// 1. Return an error wrapping the original failure.
 func (s *CLIIntegrationTestSuite) TestRunRemoveBinaryError() {
 	removeError := errors.New("permission denied")
 
@@ -383,8 +371,6 @@ func (s *CLIIntegrationTestSuite) TestRunRemoveBinaryError() {
 	s.fsMock.EXPECT().
 		RemoveBinary(testBinaryPath, testBinaryName, false, s.loggerMock).
 		Return(removeError)
-
-	s.loggerMock.EXPECT().Sync().Return(nil)
 
 	// Execute
 	deps := cli.Dependencies{
@@ -410,9 +396,8 @@ func (s *CLIIntegrationTestSuite) TestRunRemoveBinaryError() {
 // TestRunHistoryRecordError verifies error handling when history recording fails.
 //
 // When history recording fails, Run should:
-// 1. Sync the logger
-// 2. Return an error wrapping the original failure
-// 3. Not attempt to remove the binary.
+// 1. Return an error wrapping the original failure
+// 2. Not attempt to remove the binary.
 func (s *CLIIntegrationTestSuite) TestRunHistoryRecordError() {
 	recordError := errors.New("database connection failed")
 
@@ -428,8 +413,6 @@ func (s *CLIIntegrationTestSuite) TestRunHistoryRecordError() {
 	s.historyMock.EXPECT().
 		RecordDeletion(mock.Anything, testBinaryPath).
 		Return(nil, recordError)
-
-	s.loggerMock.EXPECT().Sync().Return(nil)
 
 	// Execute
 	deps := cli.Dependencies{
@@ -538,8 +521,6 @@ func (s *CLIIntegrationTestSuite) TestRunConfigPropagation() {
 				RemoveBinary(testBinaryPath, testBinaryName, tt.expectVerbose, loggerMock).
 				Return(nil)
 
-			loggerMock.EXPECT().Sync().Return(nil)
-
 			// Execute
 			deps := cli.Dependencies{
 				FS:     fsMock,
@@ -594,8 +575,6 @@ func (s *CLIIntegrationTestSuite) TestRunDependenciesIntegration() {
 	// RemoveBinary is NOT called when HistoryManager is available
 	// because RecordDeletion already moves the binary to trash
 
-	s.loggerMock.EXPECT().Sync().Return(nil)
-
 	// Execute
 	deps := cli.Dependencies{
 		FS:             s.fsMock,
@@ -638,8 +617,6 @@ func (s *CLIIntegrationTestSuite) TestRunDirectRemovalWithoutHistoryManager() {
 		RemoveBinary(testBinaryPath, testBinaryName, false, s.loggerMock).
 		Return(nil)
 
-	s.loggerMock.EXPECT().Sync().Return(nil)
-
 	// Execute
 	deps := cli.Dependencies{
 		FS:             s.fsMock,
@@ -681,8 +658,6 @@ func (s *CLIIntegrationTestSuite) TestRunBinaryNotFoundError() {
 		RemoveBinary(testBinaryPath, testBinaryName, false, s.loggerMock).
 		Return(removeError)
 
-	s.loggerMock.EXPECT().Sync().Return(nil)
-
 	// Execute
 	deps := cli.Dependencies{
 		FS:     s.fsMock,
@@ -720,20 +695,6 @@ func TestRunWithLogLevelConfig(t *testing.T) {
 	assert.Equal(t, "debug", config.LogLevel)
 }
 
-// TestRunWithHelpConfig verifies Help field in Config.
-//
-// The Help field is managed by Cobra but should be accessible.
-func TestRunWithHelpConfig(t *testing.T) {
-	t.Parallel()
-
-	config := cli.Config{
-		Binary: testBinaryName,
-		Help:   true,
-	}
-
-	assert.True(t, config.Help)
-}
-
 // TestConfigStruct verifies all Config fields can be set.
 func TestConfigStruct(t *testing.T) {
 	t.Parallel()
@@ -754,7 +715,6 @@ func TestConfigStruct(t *testing.T) {
 				Binary:      testBinaryName,
 				Verbose:     true,
 				Goroot:      true,
-				Help:        true,
 				LogLevel:    "debug",
 				RestoreMode: true,
 			},
@@ -842,8 +802,6 @@ func TestErrorWrapping(t *testing.T) {
 		DetermineBinDir(false).
 		Return("", originalErr)
 
-	loggerMock.EXPECT().Sync().Return(nil)
-
 	// Execute cli.Run with mocks that return the error
 	deps := cli.Dependencies{
 		FS:     fsMock,
@@ -887,8 +845,6 @@ func (s *CLIIntegrationTestSuite) TestMultipleBinaryRemovals() {
 		s.fsMock.EXPECT().
 			RemoveBinary(binaryPath, binary, false, s.loggerMock).
 			Return(nil)
-
-		s.loggerMock.EXPECT().Sync().Return(nil)
 
 		// Execute
 		deps := cli.Dependencies{
