@@ -49,14 +49,6 @@ type Logger interface {
 	//   - Zerolog event for an error message.
 	Error() *zerolog.Event
 
-	// Sync flushes any buffered log entries.
-	//
-	// This is a no-op for zerolog and exists for interface compatibility.
-	//
-	// Returns:
-	//   - Always nil.
-	Sync() error
-
 	// Level sets the minimum log level dynamically.
 	//
 	// Parameters:
@@ -323,19 +315,6 @@ func (z *ZerologLogger) Error() *zerolog.Event {
 
 	//nolint:zerologlint // Factory method returns event for chaining by design
 	return z.logger.Error()
-}
-
-// Sync flushes any buffered log entries.
-//
-// This is a no-op for zerolog and exists for interface compatibility.
-//
-// Returns:
-//   - Always nil.
-func (z *ZerologLogger) Sync() error {
-	z.mu.RLock()
-	defer z.mu.RUnlock()
-
-	return nil
 }
 
 // Level sets the minimum log level dynamically.

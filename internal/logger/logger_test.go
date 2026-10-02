@@ -142,33 +142,6 @@ func TestZerologLogger_LogLevelMethods(t *testing.T) {
 	}
 }
 
-// TestZerologLogger_Sync verifies the Sync method's behavior.
-func TestZerologLogger_Sync(t *testing.T) {
-	tests := []struct {
-		name    string
-		setup   func() *ZerologLogger
-		wantErr bool
-	}{
-		{
-			name: "sync with valid logger",
-			setup: func() *ZerologLogger {
-				zl := zerolog.New(io.Discard).With().Logger()
-
-				return &ZerologLogger{logger: zl}
-			},
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			z := tt.setup()
-			err := z.Sync()
-			assert.NoError(t, err)
-		})
-	}
-}
-
 // TestZerologLogger_Level verifies the Level method changes log level dynamically.
 func TestZerologLogger_Level(t *testing.T) {
 	tests := []struct {

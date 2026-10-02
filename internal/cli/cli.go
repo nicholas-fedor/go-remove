@@ -3,7 +3,6 @@ Copyright © 2026 Nicholas Fedor <nick@nickfedor.com>
 SPDX-License-Identifier: AGPL-3.0-or-later
 */
 
-// Package cli provides core logic for the go-remove command-line interface.
 package cli
 
 import (
@@ -23,7 +22,6 @@ type Config struct {
 	Binary      string
 	Verbose     bool
 	Goroot      bool
-	Help        bool
 	LogLevel    string
 	RestoreMode bool
 }
@@ -46,7 +44,6 @@ type Dependencies struct {
 //   - An error if directory resolution, deletion, or TUI execution fails.
 func Run(ctx context.Context, deps Dependencies, config Config) error {
 	log := deps.Logger
-	defer func() { _ = log.Sync() }()
 
 	binDir, err := deps.FS.DetermineBinDir(config.Goroot)
 	if err != nil {

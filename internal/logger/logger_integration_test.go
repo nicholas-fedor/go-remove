@@ -8,7 +8,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 // These tests verify the Logger interface behavior through the MockLogger mock
 // implementation. All tests use Mockery-generated mocks to ensure no real logging
 // output is produced. The tests cover the complete logging lifecycle including
-// all log level methods, sync operations, level management, and capture functionality.
+// all log level methods, level management, and capture functionality.
 //
 // Test Organization:
 //   - LoggerIntegrationTestSuite: Main test suite using testify suite
@@ -17,12 +17,10 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // Coverage Areas:
 //   - All log level methods (Debug, Info, Warn, Error)
-//   - Sync operations and error handling
 //   - Dynamic log level setting and filtering
 //   - CaptureFunc functionality for TUI integration
 //   - Log event chaining patterns
 //   - Concurrent logging operations
-//   - Error handling for sync failures
 package logger_test
 
 import (
@@ -159,27 +157,6 @@ func (s *LoggerIntegrationTestSuite) TestLogEventChaining() {
 	s.Contains(output, "test")
 	s.Contains(output, "count")
 	s.Contains(output, "42")
-}
-
-// TestSyncOperation verifies the Sync method behavior.
-//
-// This test ensures that Sync properly flushes buffered log entries
-// and returns appropriate errors when sync fails.
-func (s *LoggerIntegrationTestSuite) TestSyncOperation() {
-	s.Run("successful sync", func() {
-		s.mockLogger.EXPECT().Sync().Return(nil).Once()
-
-		err := s.mockLogger.Sync()
-		s.NoError(err)
-	})
-
-	s.Run("sync with error", func() {
-		syncErr := errors.New("sync failed: buffer full")
-		s.mockLogger.EXPECT().Sync().Return(syncErr).Once()
-
-		err := s.mockLogger.Sync()
-		s.ErrorIs(err, syncErr)
-	})
 }
 
 // TestLevelSetting verifies dynamic log level changes.
@@ -442,102 +419,20 @@ func (s *LoggerIntegrationTestSuite) TestConcurrentLevelChanges() {
 	wg.Wait()
 }
 
-// TestSyncFailureHandling verifies error handling when sync fails.
-//
-// This test ensures that sync errors are properly propagated and can be
-// handled by the caller.
-func (s *LoggerIntegrationTestSuite) TestSyncFailureHandling() {
-	tests := []struct {
-		name     string
-		errSetup error
-		wantErr  bool
-	}{
-		{
-			name:     "no error on sync",
-			errSetup: nil,
-			wantErr:  false,
-		},
-		{
-			name:     "io error on sync",
-			errSetup: errors.New("io error: device not ready"),
-			wantErr:  true,
-		},
-		{
-			name:     "buffer error on sync",
-			errSetup: errors.New("buffer flush failed"),
-			wantErr:  true,
-		},
-	}
-
-	for _, tt := range tests {
-		s.Run(tt.name, func() {
-			s.mockLogger.EXPECT().Sync().Return(tt.errSetup).Once()
-
-			err := s.mockLogger.Sync()
-			if tt.wantErr {
-				s.Error(err)
-			} else {
-				s.NoError(err)
-			}
-		})
-	}
-}
-
-// TestMultipleSyncCalls verifies behavior of multiple consecutive sync calls.
-//
-// This test ensures that calling sync multiple times works correctly
-// and doesn't cause issues.
-func (s *LoggerIntegrationTestSuite) TestMultipleSyncCalls() {
-	// Expect multiple sync calls
-	s.mockLogger.EXPECT().Sync().Return(nil).Times(3)
-
-	// Call sync multiple times
-	for range 3 {
-		err := s.mockLogger.Sync()
-		s.Require().NoError(err)
-	}
-}
-
 // TestLoggerMethodOrdering verifies that logger methods can be called in any order.
 //
 // This test ensures that the logger interface supports flexible usage patterns.
 func (s *LoggerIntegrationTestSuite) TestLoggerMethodOrdering() {
 	discardLogger := zerolog.New(io.Discard)
 
-	s.Run("sync then log", func() {
-		s.mockLogger.EXPECT().Sync().Return(nil).Once()
-		s.mockLogger.EXPECT().Info().Return(discardLogger.Info()).Once()
-
-		err := s.mockLogger.Sync()
-		s.Require().NoError(err)
-
-		event := s.mockLogger.Info()
-		s.NotNil(event)
-	})
-
-	s.Run("log then sync", func() {
-		s.mockLogger.EXPECT().Error().Return(discardLogger.Error()).Once()
-		s.mockLogger.EXPECT().Sync().Return(nil).Once()
-
-		event := s.mockLogger.Error()
-		s.NotNil(event)
-
-		err := s.mockLogger.Sync()
-		s.NoError(err)
-	})
-
-	s.Run("level then log then sync", func() {
+	s.Run("level then log", func() {
 		s.mockLogger.EXPECT().Level(zerolog.WarnLevel).Return().Once()
 		s.mockLogger.EXPECT().Warn().Return(discardLogger.Warn()).Once()
-		s.mockLogger.EXPECT().Sync().Return(nil).Once()
 
 		s.mockLogger.Level(zerolog.WarnLevel)
 
 		event := s.mockLogger.Warn()
 		s.NotNil(event)
-
-		err := s.mockLogger.Sync()
-		s.NoError(err)
 	})
 }
 
@@ -764,9 +659,6 @@ func TestNewLoggerIntegration(t *testing.T) {
 	_ = loggerInstance.Warn()
 	_ = loggerInstance.Error()
 
-	err = loggerInstance.Sync()
-	require.NoError(t, err)
-
 	// Test level setting (should not panic)
 	loggerInstance.Level(zerolog.DebugLevel)
 
@@ -904,11 +796,6 @@ func (t *testLoggerWrapper) Error() *zerolog.Event {
 	return t.logger.Error()
 }
 
-// Sync is a no-op for this wrapper.
-func (t *testLoggerWrapper) Sync() error {
-	return nil
-}
-
 // Level sets the log level dynamically.
 func (t *testLoggerWrapper) Level(level zerolog.Level) {
 	t.mu.Lock()
@@ -951,16 +838,6 @@ func BenchmarkLogLevelMethods(b *testing.B) {
 			loggerInstance.Error().Msg("benchmark error")
 		}
 	})
-}
-
-// BenchmarkSync benchmarks the Sync operation.
-func BenchmarkSync(b *testing.B) {
-	loggerInstance, err := logger.NewLogger()
-	require.NoError(b, err)
-
-	for b.Loop() {
-		_ = loggerInstance.Sync()
-	}
 }
 
 // BenchmarkLevelChange benchmarks level changes.
