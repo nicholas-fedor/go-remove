@@ -69,7 +69,6 @@ func TestDefaultExtractor_Extract(t *testing.T) {
 
 				// Verify basic fields are populated
 				assert.NotEmpty(t, data.GoVersion, "GoVersion should not be empty")
-				assert.NotEmpty(t, data.RawJSON, "RawJSON should not be empty")
 				assert.NotNil(t, data.Settings, "Settings should not be nil")
 
 				// The test binary should have valid build info
@@ -455,7 +454,6 @@ func TestBuildInfoData(t *testing.T) {
 			"vcs":          "git",
 			"vcs.revision": "abc123def456789",
 		},
-		RawJSON: []byte(`{"GoVersion":"go1.26"}`),
 	}
 
 	assert.Equal(t, "github.com/test/module", data.ModulePath)
@@ -464,7 +462,6 @@ func TestBuildInfoData(t *testing.T) {
 	assert.Equal(t, "2026-03-01T12:00:00Z", data.VCSTime)
 	assert.Equal(t, "go1.26", data.GoVersion)
 	assert.NotNil(t, data.Settings)
-	assert.NotEmpty(t, data.RawJSON)
 }
 
 // TestIsSupportedPlatform tests the platform support check.
@@ -496,10 +493,6 @@ func TestDefaultExtractor_Extract_WithBuildSettings(t *testing.T) {
 	// Verify that the data has the expected structure
 	assert.NotEmpty(t, data.GoVersion, "should have Go version")
 	assert.NotNil(t, data.Settings, "should have settings map")
-
-	// RawJSON should be valid JSON
-	assert.NotEmpty(t, data.RawJSON, "should have raw JSON")
-	assert.NotEmpty(t, data.RawJSON, "raw JSON should not be empty")
 }
 
 // BenchmarkCalculateChecksum benchmarks checksum calculation.

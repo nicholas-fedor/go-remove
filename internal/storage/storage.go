@@ -105,10 +105,6 @@ type HistoryRecord struct {
 	// GoVersion is the Go version used to build the binary.
 	GoVersion string `json:"go_version"`
 
-	// BuildInfo contains the complete debug.BuildInfo as JSON.
-	// Stored for future-proofing and complete reconstruction capability.
-	BuildInfo string `json:"build_info"`
-
 	// Checksum is the SHA256 hash of the binary at deletion time.
 	Checksum string `json:"checksum"`
 
