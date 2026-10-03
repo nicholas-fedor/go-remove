@@ -199,8 +199,8 @@ func (r *RealFS) RemoveBinary(binaryPath, name string, verbose bool, log logger.
 	}
 
 	if verbose {
-		log.Debug().Msgf("Constructed binary path: %s", binaryPath)
-		log.Info().Msgf("Removing binary: %s", binaryPath)
+		log.Debug("Constructed binary path: " + binaryPath)
+		log.Info("Removing binary: " + binaryPath)
 	}
 
 	if err := os.Remove(binaryPath); err != nil {
@@ -208,7 +208,7 @@ func (r *RealFS) RemoveBinary(binaryPath, name string, verbose bool, log logger.
 	}
 
 	if verbose {
-		log.Info().Msgf("Successfully removed binary: %s", name)
+		log.Info("Successfully removed binary: " + name)
 	}
 
 	return nil

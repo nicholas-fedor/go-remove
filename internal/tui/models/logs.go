@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rs/zerolog"
-
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/nicholas-fedor/go-remove/internal/logger"
@@ -58,7 +56,7 @@ func (m *Model) toggleVerboseLogging() {
 	// for verbose at startup: that request is independent of the panel, so
 	// hiding the panel must not quietly reduce verbosity below what was asked.
 	if m.showLogs || m.config.Verbose {
-		m.logger.Level(zerolog.DebugLevel)
+		m.logger.Level(logger.DebugLevel)
 	} else {
 		m.logger.Level(logger.ParseLevel(m.config.LogLevel))
 	}

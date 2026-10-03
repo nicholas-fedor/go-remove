@@ -3,34 +3,6 @@ Copyright © 2026 Nicholas Fedor <nick@nickfedor.com>
 SPDX-License-Identifier: AGPL-3.0-or-later
 */
 
-// Package trash provides XDG-compliant trash operations for Linux and Windows.
-//
-// This package implements the FreeDesktop.org Trash Specification for Linux
-// and uses the Windows Shell API (SHFileOperation) for Windows. It supports
-// moving files to trash, restoring files from trash, and permanent deletion.
-//
-// The package follows the XDG Base Directory Specification:
-//   - Linux: $XDG_DATA_HOME/Trash (fallback: ~/.local/share/Trash).
-//   - Windows: Uses system Recycle Bin via SHFileOperationW.
-//
-// Usage:
-//
-//	trasher, err := trash.NewTrasher()
-//	if err != nil {
-//	    return err
-//	}
-//
-//	// Move file to trash
-//	trashPath, err := trasher.MoveToTrash(ctx, "/path/to/file")
-//
-//	// Restore file from trash
-//	err = trasher.RestoreFromTrash(ctx, trashPath, "/original/path")
-//
-//	// Check if file is in trash
-//	exists := trasher.IsInTrash(trashPath)
-//
-//	// Delete permanently
-//	err = trasher.DeletePermanently(ctx, trashPath)
 package trash
 
 import (

@@ -23,43 +23,167 @@ import (
 // The msg parameter contains the formatted log message.
 type LogCaptureFunc func(level, msg string)
 
+// Level is a log severity.
+//
+// Levels are ordered by increasing severity, so a logger set to a level emits
+// every message logged at that level or above.
+type Level int8
+
+// Supported log levels, ordered by increasing severity.
+const (
+	// DebugLevel reports detail that is only useful while diagnosing a problem.
+	DebugLevel Level = iota
+
+	// InfoLevel reports ordinary operational progress.
+	InfoLevel
+
+	// WarnLevel reports a condition the caller needs to know about.
+	WarnLevel
+
+	// ErrorLevel reports a failed operation.
+	ErrorLevel
+)
+
+// errorFieldKey is the field name an error recorded through Err is written under.
+const errorFieldKey = "error"
+
 // Logger defines the logging operations required by the application.
 type Logger interface {
-	// Debug returns a debug-level event for logging.
+	// Debug logs a message at debug level.
 	//
-	// Returns:
-	//   - Zerolog event for a debug message.
-	Debug() *zerolog.Event
+	// Parameters:
+	//   - msg: Message to record.
+	//   - fields: Structured pairs to attach to the message.
+	Debug(msg string, fields ...Field)
 
-	// Info returns an info-level event for logging.
+	// Info logs a message at info level.
 	//
-	// Returns:
-	//   - Zerolog event for an info message.
-	Info() *zerolog.Event
+	// Parameters:
+	//   - msg: Message to record.
+	//   - fields: Structured pairs to attach to the message.
+	Info(msg string, fields ...Field)
 
-	// Warn returns a warn-level event for logging.
+	// Warn logs a message at warn level.
 	//
-	// Returns:
-	//   - Zerolog event for a warning message.
-	Warn() *zerolog.Event
+	// Parameters:
+	//   - msg: Message to record.
+	//   - fields: Structured pairs to attach to the message.
+	Warn(msg string, fields ...Field)
 
-	// Error returns an error-level event for logging.
+	// Error logs a message at error level.
 	//
-	// Returns:
-	//   - Zerolog event for an error message.
-	Error() *zerolog.Event
+	// Parameters:
+	//   - msg: Message to record.
+	//   - fields: Structured pairs to attach to the message.
+	Error(msg string, fields ...Field)
 
 	// Level sets the minimum log level dynamically.
 	//
 	// Parameters:
-	//   - level: Minimum zerolog level to emit.
-	Level(level zerolog.Level)
+	//   - level: Minimum level to emit.
+	Level(level Level)
 
 	// SetCaptureFunc sets a callback that receives log messages for TUI display.
 	//
 	// Parameters:
 	//   - captureFunc: Callback invoked with level and message, or nil to disable capture.
 	SetCaptureFunc(captureFunc LogCaptureFunc)
+}
+
+// fieldKind identifies the kind of value a Field carries.
+type fieldKind uint8
+
+// Field kinds, one for each value type a Field can carry.
+const (
+	fieldString fieldKind = iota
+	fieldInt
+	fieldBool
+	fieldError
+)
+
+// Field is a structured pair attached to a log message.
+//
+// A Field is built with Str, Int, Bool, or Err and passed to one of the level
+// methods. The zero Field carries no value and writes nothing.
+type Field struct {
+	kind  fieldKind
+	key   string
+	value any
+}
+
+// Str returns a Field holding a string value.
+//
+// Parameters:
+//   - key: Field name.
+//   - value: Field value.
+//
+// Returns:
+//   - A Field for a log message.
+func Str(key, value string) Field {
+	return Field{kind: fieldString, key: key, value: value}
+}
+
+// Int returns a Field holding an integer value.
+//
+// Parameters:
+//   - key: Field name.
+//   - value: Field value.
+//
+// Returns:
+//   - A Field for a log message.
+func Int(key string, value int) Field {
+	return Field{kind: fieldInt, key: key, value: value}
+}
+
+// Bool returns a Field holding a boolean value.
+//
+// Parameters:
+//   - key: Field name.
+//   - value: Field value.
+//
+// Returns:
+//   - A Field for a log message.
+func Bool(key string, value bool) Field {
+	return Field{kind: fieldBool, key: key, value: value}
+}
+
+// Err returns a Field holding an error value.
+//
+// A nil error writes nothing, so a caller with nothing to report can pass it
+// straight through.
+//
+// Parameters:
+//   - err: Error to record.
+//
+// Returns:
+//   - A Field for a log message.
+func Err(err error) Field {
+	return Field{kind: fieldError, key: errorFieldKey, value: err}
+}
+
+// apply writes the field onto a zerolog event.
+//
+// Parameters:
+//   - event: Event the field is written to.
+func (f Field) apply(event *zerolog.Event) {
+	switch f.kind {
+	case fieldString:
+		if value, ok := f.value.(string); ok {
+			event.Str(f.key, value)
+		}
+	case fieldInt:
+		if value, ok := f.value.(int); ok {
+			event.Int(f.key, value)
+		}
+	case fieldBool:
+		if value, ok := f.value.(bool); ok {
+			event.Bool(f.key, value)
+		}
+	case fieldError:
+		if value, ok := f.value.(error); ok {
+			event.Err(value)
+		}
+	}
 }
 
 // ZerologLogger wraps zerolog.Logger to implement the Logger interface.
@@ -249,10 +373,8 @@ func NewLoggerWithCapture() (Logger, *captureWriter, error) {
 
 // NopLogger returns a logger that discards everything written to it.
 //
-// It wraps zerolog's disabled logger, so no event is ever formatted or
-// serialised. Every level method still returns a usable event, which keeps
-// chained calls such as Debug().Str("k", v).Msgf(...) working exactly as they do
-// against a real logger, rather than short-circuiting on a nil receiver.
+// It wraps zerolog's disabled logger, so no message is ever formatted or
+// serialised, whatever level it is logged at.
 //
 // Use it where logging is not the subject: tests, and any caller that wants a
 // logger it can pass along without producing output.
@@ -269,64 +391,78 @@ func NopLogger() Logger {
 	}
 }
 
-// Debug returns a debug-level event for logging.
+// Debug logs a message at debug level.
 //
-// Returns:
-//   - Zerolog event for a debug message.
-func (z *ZerologLogger) Debug() *zerolog.Event {
-	z.mu.RLock()
-	defer z.mu.RUnlock()
-
-	//nolint:zerologlint // Factory method returns event for chaining by design
-	return z.logger.Debug()
+// Parameters:
+//   - msg: Message to record.
+//   - fields: Structured pairs to attach to the message.
+func (z *ZerologLogger) Debug(msg string, fields ...Field) {
+	z.log(DebugLevel, msg, fields)
 }
 
-// Info returns an info-level event for logging.
+// Info logs a message at info level.
 //
-// Returns:
-//   - Zerolog event for an info message.
-func (z *ZerologLogger) Info() *zerolog.Event {
-	z.mu.RLock()
-	defer z.mu.RUnlock()
-
-	//nolint:zerologlint // Factory method returns event for chaining by design
-	return z.logger.Info()
+// Parameters:
+//   - msg: Message to record.
+//   - fields: Structured pairs to attach to the message.
+func (z *ZerologLogger) Info(msg string, fields ...Field) {
+	z.log(InfoLevel, msg, fields)
 }
 
-// Warn returns a warn-level event for logging.
+// Warn logs a message at warn level.
 //
-// Returns:
-//   - Zerolog event for a warning message.
-func (z *ZerologLogger) Warn() *zerolog.Event {
-	z.mu.RLock()
-	defer z.mu.RUnlock()
-
-	//nolint:zerologlint // Factory method returns event for chaining by design
-	return z.logger.Warn()
+// Parameters:
+//   - msg: Message to record.
+//   - fields: Structured pairs to attach to the message.
+func (z *ZerologLogger) Warn(msg string, fields ...Field) {
+	z.log(WarnLevel, msg, fields)
 }
 
-// Error returns an error-level event for logging.
+// Error logs a message at error level.
 //
-// Returns:
-//   - Zerolog event for an error message.
-func (z *ZerologLogger) Error() *zerolog.Event {
+// Parameters:
+//   - msg: Message to record.
+//   - fields: Structured pairs to attach to the message.
+func (z *ZerologLogger) Error(msg string, fields ...Field) {
+	z.log(ErrorLevel, msg, fields)
+}
+
+// log writes a message and its fields at the given level.
+//
+// The read lock is held across the whole write, so a concurrent Level change
+// cannot swap the underlying logger out from under a message being emitted.
+//
+// Parameters:
+//   - level: Severity to record the message at.
+//   - msg: Message to record.
+//   - fields: Structured pairs to attach to the message.
+func (z *ZerologLogger) log(level Level, msg string, fields []Field) {
 	z.mu.RLock()
 	defer z.mu.RUnlock()
 
-	//nolint:zerologlint // Factory method returns event for chaining by design
-	return z.logger.Error()
+	event := z.logger.WithLevel(level.zerologLevel())
+	if event == nil {
+		// The level is filtered out, so there is nothing to attach fields to.
+		return
+	}
+
+	for _, field := range fields {
+		field.apply(event)
+	}
+
+	event.Msg(msg)
 }
 
 // Level sets the minimum log level dynamically.
 //
 // Parameters:
-//   - level: Minimum zerolog level to emit.
-func (z *ZerologLogger) Level(level zerolog.Level) {
+//   - level: Minimum level to emit.
+func (z *ZerologLogger) Level(level Level) {
 	z.mu.Lock()
 	defer z.mu.Unlock()
 
 	// Create a new logger with the specified level.
-	z.logger = z.logger.Level(level)
+	z.logger = z.logger.Level(level.zerologLevel())
 }
 
 // SetCaptureFunc sets a callback that receives log messages for TUI display.
@@ -336,6 +472,31 @@ func (z *ZerologLogger) Level(level zerolog.Level) {
 func (z *ZerologLogger) SetCaptureFunc(captureFunc LogCaptureFunc) {
 	if z.captureWriter != nil {
 		z.captureWriter.SetCaptureFunc(captureFunc)
+	}
+}
+
+// zerologLevel maps a Level onto the matching zerolog severity.
+//
+// An unrecognised value resolves to info, so a level outside the supported set
+// cannot silence a logger.
+//
+// Parameters:
+//   - level: Level to translate.
+//
+// Returns:
+//   - Matching zerolog level.
+func (l Level) zerologLevel() zerolog.Level {
+	switch l {
+	case DebugLevel:
+		return zerolog.DebugLevel
+	case InfoLevel:
+		return zerolog.InfoLevel
+	case WarnLevel:
+		return zerolog.WarnLevel
+	case ErrorLevel:
+		return zerolog.ErrorLevel
+	default:
+		return zerolog.InfoLevel
 	}
 }
 
@@ -350,20 +511,20 @@ var ErrInvalidLogLevel = errors.New("invalid log level")
 //   - level: Case-insensitive level name.
 //
 // Returns:
-//   - Matching zerolog level.
+//   - Matching level.
 //   - An error wrapping ErrInvalidLogLevel for an unrecognised name.
-func ParseLogLevel(level string) (zerolog.Level, error) {
+func ParseLogLevel(level string) (Level, error) {
 	switch strings.ToLower(level) {
 	case "debug":
-		return zerolog.DebugLevel, nil
+		return DebugLevel, nil
 	case "info":
-		return zerolog.InfoLevel, nil
+		return InfoLevel, nil
 	case "warn":
-		return zerolog.WarnLevel, nil
+		return WarnLevel, nil
 	case "error":
-		return zerolog.ErrorLevel, nil
+		return ErrorLevel, nil
 	default:
-		return zerolog.InfoLevel, fmt.Errorf(
+		return InfoLevel, fmt.Errorf(
 			"%w: %q, expected one of debug, info, warn, error",
 			ErrInvalidLogLevel,
 			level,
@@ -371,7 +532,7 @@ func ParseLogLevel(level string) (zerolog.Level, error) {
 	}
 }
 
-// ParseLevel parses a string log level into a zerolog.Level.
+// ParseLevel parses a string log level into a Level.
 //
 // Supported levels are debug, info, warn, and error. Unrecognized values default to info.
 //
@@ -379,8 +540,8 @@ func ParseLogLevel(level string) (zerolog.Level, error) {
 //   - level: Case-insensitive level name.
 //
 // Returns:
-//   - Matching zerolog level, or InfoLevel when unrecognized.
-func ParseLevel(level string) zerolog.Level {
+//   - Matching level, or InfoLevel when unrecognized.
+func ParseLevel(level string) Level {
 	parsed, _ := ParseLogLevel(level)
 
 	return parsed

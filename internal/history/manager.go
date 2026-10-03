@@ -265,9 +265,10 @@ func (m *HistoryManager) RecordDeletion(
 		return nil, ErrInvalidBinaryPath
 	}
 
-	m.logger.Debug().
-		Str(logFieldPath, binaryPath).
-		Msg("Recording binary deletion")
+	m.logger.Debug(
+		"Recording binary deletion",
+		logger.Str(logFieldPath, binaryPath),
+	)
 
 	// Extract build info from binary
 	buildData, err := m.extractor.Extract(ctx, binaryPath)
@@ -331,10 +332,11 @@ func (m *HistoryManager) RecordDeletion(
 			return nil, moveFailure
 		}
 
-		m.logger.Warn().
-			Err(delErr).
-			Str(logFieldPath, binaryPath).
-			Msg("Failed to remove history record for a deletion that did not occur")
+		m.logger.Warn(
+			"Failed to remove history record for a deletion that did not occur",
+			logger.Err(delErr),
+			logger.Str(logFieldPath, binaryPath),
+		)
 
 		// A leftover record is indistinguishable from an interrupted deletion,
 		// so the cleanup failure is reported. Otherwise the caller is told only
@@ -350,11 +352,12 @@ func (m *HistoryManager) RecordDeletion(
 	record.TrashAvailable = true
 
 	if err := m.storer.UpdateRecord(ctx, &record); err != nil {
-		m.logger.Warn().
-			Err(err).
-			Str(logFieldPath, binaryPath).
-			Str(logFieldTrash, trashPath).
-			Msg("Failed to record trash location, attempting to restore from trash")
+		m.logger.Warn(
+			"Failed to record trash location, attempting to restore from trash",
+			logger.Err(err),
+			logger.Str(logFieldPath, binaryPath),
+			logger.Str(logFieldTrash, trashPath),
+		)
 
 		// Recovery must not inherit the cancellation that caused the failure, or
 		// the binary would be left in trash purely because the user interrupted
@@ -372,10 +375,11 @@ func (m *HistoryManager) RecordDeletion(
 			// The binary is back where it started, so the record no longer
 			// describes reality and should not remain in the history.
 			if delErr := m.storer.DeleteRecord(recoverCtx, record.RecordKey()); delErr != nil {
-				m.logger.Warn().
-					Err(delErr).
-					Str(logFieldPath, binaryPath).
-					Msg("Failed to remove history record after recovery")
+				m.logger.Warn(
+					"Failed to remove history record after recovery",
+					logger.Err(delErr),
+					logger.Str(logFieldPath, binaryPath),
+				)
 			}
 
 			return nil, fmt.Errorf("recording trash location: %w", err)
@@ -394,11 +398,12 @@ func (m *HistoryManager) RecordDeletion(
 		)
 	}
 
-	m.logger.Info().
-		Str(logFieldBinary, record.BinaryName).
-		Str(logFieldPath, binaryPath).
-		Str(logFieldTrash, trashPath).
-		Msg("Binary deletion recorded")
+	m.logger.Info(
+		"Binary deletion recorded",
+		logger.Str(logFieldBinary, record.BinaryName),
+		logger.Str(logFieldPath, binaryPath),
+		logger.Str(logFieldTrash, trashPath),
+	)
 
 	return entryFromRecord(&record), nil
 }
@@ -436,7 +441,7 @@ func (m *HistoryManager) RecordDeletion(
 //   - ErrNoRestorableHistory if no record can be restored.
 //   - An error if the operation fails.
 func (m *HistoryManager) UndoMostRecent(ctx context.Context) (*RestoreResult, error) {
-	m.logger.Debug().Msg("Undoing most recent deletion")
+	m.logger.Debug("Undoing most recent deletion")
 
 	for offset := 0; ; offset += undoPageSize {
 		records, err := m.storer.ListRecords(ctx, storage.ListOptions{
@@ -479,10 +484,11 @@ func (m *HistoryManager) UndoMostRecent(ctx context.Context) (*RestoreResult, er
 				return nil, restoreErr
 			}
 
-			m.logger.Debug().
-				Str(logFieldBinary, record.BinaryName).
-				Err(restoreErr).
-				Msg("Skipping unrestorable history entry during undo")
+			m.logger.Debug(
+				"Skipping unrestorable history entry during undo",
+				logger.Str(logFieldBinary, record.BinaryName),
+				logger.Err(restoreErr),
+			)
 		}
 	}
 }
@@ -516,10 +522,11 @@ func (m *HistoryManager) reconcileTrashState(
 	defer cancelUpdate()
 
 	if err := m.storer.UpdateRecord(updateCtx, record); err != nil {
-		m.logger.Warn().
-			Err(err).
-			Str(logFieldBinary, record.BinaryName).
-			Msg("Failed to persist reconciled trash state")
+		m.logger.Warn(
+			"Failed to persist reconciled trash state",
+			logger.Err(err),
+			logger.Str(logFieldBinary, record.BinaryName),
+		)
 	}
 
 	return false
@@ -542,9 +549,10 @@ func (m *HistoryManager) reconcileTrashState(
 //   - The result of the restore operation.
 //   - An error if the operation fails.
 func (m *HistoryManager) Restore(ctx context.Context, entryID string) (*RestoreResult, error) {
-	m.logger.Debug().
-		Str(logFieldEntryID, entryID).
-		Msg("Restoring binary by entry ID")
+	m.logger.Debug(
+		"Restoring binary by entry ID",
+		logger.Str(logFieldEntryID, entryID),
+	)
 
 	// Get specific record
 	record, err := m.storer.GetRecord(ctx, entryID)
@@ -628,9 +636,10 @@ func (m *HistoryManager) restoreRecord(
 		record.TrashAvailable = false
 
 		if updateErr := m.storer.UpdateRecord(ctx, record); updateErr != nil {
-			m.logger.Warn().
-				Err(updateErr).
-				Msg("Failed to update record after detecting already restored file")
+			m.logger.Warn(
+				"Failed to update record after detecting already restored file",
+				logger.Err(updateErr),
+			)
 		}
 
 		return nil, fmt.Errorf("%w: %s", ErrAlreadyRestored, record.BinaryName)
@@ -655,12 +664,13 @@ func (m *HistoryManager) restoreRecord(
 		}
 
 		if actual != record.Checksum {
-			m.logger.Error().
-				Str(logFieldBinary, record.BinaryName).
-				Str(logFieldTrash, record.TrashPath).
-				Str("expected_checksum", record.Checksum).
-				Str("actual_checksum", actual).
-				Msg("Trashed copy does not match the checksum recorded at deletion")
+			m.logger.Error(
+				"Trashed copy does not match the checksum recorded at deletion",
+				logger.Str(logFieldBinary, record.BinaryName),
+				logger.Str(logFieldTrash, record.TrashPath),
+				logger.Str("expected_checksum", record.Checksum),
+				logger.Str("actual_checksum", actual),
+			)
 
 			return nil, fmt.Errorf(
 				"%w: trashed copy of %s is left in place and must be recovered by hand",
@@ -683,15 +693,17 @@ func (m *HistoryManager) restoreRecord(
 	record.TrashAvailable = false
 
 	if err := m.storer.UpdateRecord(ctx, record); err != nil {
-		m.logger.Warn().
-			Err(err).
-			Msg("Failed to update record after restore")
+		m.logger.Warn(
+			"Failed to update record after restore",
+			logger.Err(err),
+		)
 	}
 
-	m.logger.Info().
-		Str(logFieldBinary, record.BinaryName).
-		Str(logFieldPath, record.OriginalPath).
-		Msg("Binary restored from trash")
+	m.logger.Info(
+		"Binary restored from trash",
+		logger.Str(logFieldBinary, record.BinaryName),
+		logger.Str(logFieldPath, record.OriginalPath),
+	)
 
 	return &RestoreResult{
 		EntryID:    record.RecordKey(),
@@ -713,9 +725,10 @@ func (m *HistoryManager) restoreRecord(
 //   - A slice of history entries.
 //   - An error if the operation fails.
 func (m *HistoryManager) GetHistory(ctx context.Context, limit int) ([]*HistoryEntry, error) {
-	m.logger.Debug().
-		Int("limit", limit).
-		Msg("Getting deletion history")
+	m.logger.Debug(
+		"Getting deletion history",
+		logger.Int("limit", limit),
+	)
 
 	opts := storage.ListOptions{
 		Limit: limit,
@@ -746,9 +759,10 @@ func (m *HistoryManager) GetHistory(ctx context.Context, limit int) ([]*HistoryE
 		entries[i].InTrash = inTrash
 	}
 
-	m.logger.Debug().
-		Int("count", len(entries)).
-		Msg("Retrieved deletion history")
+	m.logger.Debug(
+		"Retrieved deletion history",
+		logger.Int("count", len(entries)),
+	)
 
 	return entries, nil
 }
@@ -762,9 +776,10 @@ func (m *HistoryManager) GetHistory(ctx context.Context, limit int) ([]*HistoryE
 // Returns:
 //   - An error if the operation fails.
 func (m *HistoryManager) DeletePermanently(ctx context.Context, entryID string) error {
-	m.logger.Debug().
-		Str(logFieldEntryID, entryID).
-		Msg("Permanently deleting binary")
+	m.logger.Debug(
+		"Permanently deleting binary",
+		logger.Str(logFieldEntryID, entryID),
+	)
 
 	// Get the record
 	record, err := m.storer.GetRecord(ctx, entryID)
@@ -790,10 +805,11 @@ func (m *HistoryManager) DeletePermanently(ctx context.Context, entryID string) 
 		return fmt.Errorf("deleting history entry: %w", err)
 	}
 
-	m.logger.Info().
-		Str(logFieldBinary, record.BinaryName).
-		Str(logFieldEntryID, entryID).
-		Msg("Binary permanently deleted")
+	m.logger.Info(
+		"Binary permanently deleted",
+		logger.Str(logFieldBinary, record.BinaryName),
+		logger.Str(logFieldEntryID, entryID),
+	)
 
 	return nil
 }
@@ -807,9 +823,10 @@ func (m *HistoryManager) DeletePermanently(ctx context.Context, entryID string) 
 // Returns:
 //   - An error if the operation fails.
 func (m *HistoryManager) ClearHistory(ctx context.Context, clearTrash bool) error {
-	m.logger.Debug().
-		Bool("clear_trash", clearTrash).
-		Msg("Clearing history")
+	m.logger.Debug(
+		"Clearing history",
+		logger.Bool("clear_trash", clearTrash),
+	)
 
 	if clearTrash {
 		// Get all records to clear from trash
@@ -822,10 +839,11 @@ func (m *HistoryManager) ClearHistory(ctx context.Context, clearTrash bool) erro
 		for i := range records {
 			if records[i].TrashAvailable && m.trasher.IsInTrash(records[i].TrashPath) {
 				if err := m.trasher.DeletePermanently(ctx, records[i].TrashPath); err != nil {
-					m.logger.Warn().
-						Err(err).
-						Str(logFieldBinary, records[i].BinaryName).
-						Msg("Failed to delete binary from trash")
+					m.logger.Warn(
+						"Failed to delete binary from trash",
+						logger.Err(err),
+						logger.Str(logFieldBinary, records[i].BinaryName),
+					)
 				}
 			}
 		}
@@ -836,9 +854,10 @@ func (m *HistoryManager) ClearHistory(ctx context.Context, clearTrash bool) erro
 		return fmt.Errorf("deleting all records: %w", err)
 	}
 
-	m.logger.Info().
-		Bool("cleared_trash", clearTrash).
-		Msg("History cleared")
+	m.logger.Info(
+		"History cleared",
+		logger.Bool("cleared_trash", clearTrash),
+	)
 
 	return nil
 }
@@ -857,10 +876,11 @@ func (m *HistoryManager) ClearEntry(
 	entryID string,
 	deleteFromTrash bool,
 ) error {
-	m.logger.Debug().
-		Str(logFieldEntryID, entryID).
-		Bool("delete_from_trash", deleteFromTrash).
-		Msg("Clearing history entry")
+	m.logger.Debug(
+		"Clearing history entry",
+		logger.Str(logFieldEntryID, entryID),
+		logger.Bool("delete_from_trash", deleteFromTrash),
+	)
 
 	// Get the record
 	record, err := m.storer.GetRecord(ctx, entryID)
@@ -886,10 +906,11 @@ func (m *HistoryManager) ClearEntry(
 		return fmt.Errorf("deleting history entry: %w", err)
 	}
 
-	m.logger.Info().
-		Str(logFieldBinary, record.BinaryName).
-		Str(logFieldEntryID, entryID).
-		Msg("History entry cleared")
+	m.logger.Info(
+		"History entry cleared",
+		logger.Str(logFieldBinary, record.BinaryName),
+		logger.Str(logFieldEntryID, entryID),
+	)
 
 	return nil
 }
@@ -899,13 +920,13 @@ func (m *HistoryManager) ClearEntry(
 // Returns:
 //   - An error if closing fails.
 func (m *HistoryManager) Close() error {
-	m.logger.Debug().Msg("Closing history manager")
+	m.logger.Debug("Closing history manager")
 
 	if err := m.storer.Close(); err != nil {
 		return fmt.Errorf("closing storage: %w", err)
 	}
 
-	m.logger.Info().Msg("History manager closed")
+	m.logger.Info("History manager closed")
 
 	return nil
 }

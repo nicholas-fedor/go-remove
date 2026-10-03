@@ -36,9 +36,9 @@ const (
 // managedTrasher implements Trasher against a trash directory go-remove owns.
 //
 // The layout follows the XDG Trash specification on every platform, with the
-// files and info subdirectories and a .trashinfo file per entry. Owning the
-// directory is what makes restore, listing and permanent deletion possible,
-// which the platform trash cannot offer on Windows.
+// files and info subdirectories and a .trashinfo file per entry. Restore,
+// listing and permanent deletion are carried out against that directory,
+// because the platform trash offers no interface to drive them through.
 type managedTrasher struct {
 	trashPath string
 	filesDir  string

@@ -8,8 +8,6 @@ package logger
 import (
 	"strings"
 	"testing"
-
-	"github.com/rs/zerolog"
 )
 
 // FuzzCaptureLogMessage verifies log-line parsing does not panic.
@@ -47,23 +45,23 @@ func FuzzParseLevel(f *testing.F) {
 
 		switch strings.ToLower(level) {
 		case "debug":
-			if got != zerolog.DebugLevel {
+			if got != DebugLevel {
 				t.Errorf("ParseLevel(%q) = %v, want debug", level, got)
 			}
 		case "info":
-			if got != zerolog.InfoLevel {
+			if got != InfoLevel {
 				t.Errorf("ParseLevel(%q) = %v, want info", level, got)
 			}
 		case "warn":
-			if got != zerolog.WarnLevel {
+			if got != WarnLevel {
 				t.Errorf("ParseLevel(%q) = %v, want warn", level, got)
 			}
 		case "error":
-			if got != zerolog.ErrorLevel {
+			if got != ErrorLevel {
 				t.Errorf("ParseLevel(%q) = %v, want error", level, got)
 			}
 		default:
-			if got != zerolog.InfoLevel {
+			if got != InfoLevel {
 				t.Errorf("ParseLevel(%q) = %v, want info default", level, got)
 			}
 		}

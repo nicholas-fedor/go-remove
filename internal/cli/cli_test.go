@@ -8,11 +8,9 @@ package cli
 import (
 	"bytes"
 	"errors"
-	"io"
 	"os"
 	"testing"
 
-	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -202,12 +200,15 @@ func TestRun_VerboseMode(t *testing.T) {
 	m.On("RemoveBinary", "/bin/vhs", "vhs", true, mock.Anything).Return(nil)
 
 	mockLog := mockLogger.NewMockLogger(t)
-	nopLog := zerolog.New(io.Discard)
-	mockLog.On("Debug").Return(nopLog.Debug()).Maybe()
-	mockLog.On("Info").Return(nopLog.Info()).Maybe()
-	mockLog.On("Warn").Return(nopLog.Warn()).Maybe()
-	mockLog.On("Error").Return(nopLog.Error()).Maybe()
-	mockLog.On("Level", mock.Anything).Return().Maybe()
+	mockLog.EXPECT().Debug(mock.Anything).Maybe()
+	mockLog.EXPECT().Debug(mock.Anything, mock.Anything).Maybe()
+	mockLog.EXPECT().Info(mock.Anything).Maybe()
+	mockLog.EXPECT().Info(mock.Anything, mock.Anything).Maybe()
+	mockLog.EXPECT().Warn(mock.Anything).Maybe()
+	mockLog.EXPECT().Warn(mock.Anything, mock.Anything).Maybe()
+	mockLog.EXPECT().Error(mock.Anything).Maybe()
+	mockLog.EXPECT().Error(mock.Anything, mock.Anything).Maybe()
+	mockLog.EXPECT().Level(mock.Anything).Return().Maybe()
 
 	deps := Dependencies{
 		FS:     m,

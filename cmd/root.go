@@ -16,7 +16,6 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
 	"github.com/nicholas-fedor/go-remove/internal/buildinfo"
@@ -100,7 +99,10 @@ func initHistoryManager(log logger.Logger) (history.Manager, error) {
 	defer func() {
 		if err != nil {
 			if closeErr := storer.Close(); closeErr != nil {
-				log.Warn().Err(closeErr).Msg("Failed to close storage after initialization error")
+				log.Warn(
+					"Failed to close storage after initialization error",
+					logger.Err(closeErr),
+				)
 			}
 		}
 	}()
@@ -139,7 +141,7 @@ func runUndo(ctx context.Context, verbose bool, logLevel string) error {
 	}
 
 	if verbose {
-		level = zerolog.DebugLevel
+		level = logger.DebugLevel
 	}
 
 	log.Level(level)
@@ -152,7 +154,7 @@ func runUndo(ctx context.Context, verbose bool, logLevel string) error {
 
 	defer func() {
 		if closeErr := manager.Close(); closeErr != nil {
-			log.Warn().Err(closeErr).Msg("Failed to close history manager")
+			log.Warn("Failed to close history manager", logger.Err(closeErr))
 		}
 	}()
 
@@ -227,19 +229,19 @@ func runRemove(ctx context.Context, config cli.Config) error {
 	}
 
 	if config.Verbose {
-		level = zerolog.DebugLevel
+		level = logger.DebugLevel
 	}
 
 	log.Level(level)
 
 	manager, err := initHistoryManager(log)
 	if err != nil {
-		return fmt.Errorf("initializing history manager: %w", err)
+		return fmt.Errorf("failed to initialize history manager: %w", err)
 	}
 
 	defer func() {
 		if closeErr := manager.Close(); closeErr != nil {
-			log.Warn().Err(closeErr).Msg("failed to close history manager")
+			log.Warn("failed to close history manager", logger.Err(closeErr))
 		}
 	}()
 
