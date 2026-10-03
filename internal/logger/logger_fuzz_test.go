@@ -6,24 +6,59 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 package logger
 
 import (
+	"io"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/rs/zerolog"
 )
 
-// FuzzCaptureLogMessage verifies log-line parsing does not panic.
-func FuzzCaptureLogMessage(f *testing.F) {
-	f.Add("2026-01-01T00:00:00Z INF hello")
-	f.Add("DBG only")
-	f.Add("")
-	f.Add("2026-01-01T00:00:00Z WRN path=/tmp/file")
-	f.Add("not a log line")
+// captureLevelNames lists every level name the capture hook can report.
+var captureLevelNames = []string{
+	captureDebugLevel,
+	captureInfoLevel,
+	captureWarnLevel,
+	captureErrorLevel,
+	captureFatalLevel,
+	captureOtherLevel,
+}
 
-	f.Fuzz(func(t *testing.T, line string) {
+// FuzzCaptureWriterRun verifies the capture hook reports a known level name and the
+// message unchanged, for any severity and message.
+func FuzzCaptureWriterRun(f *testing.F) {
+	f.Add(int8(0), "hello")
+	f.Add(int8(1), "")
+	f.Add(int8(2), "  spaced message  ")
+	f.Add(int8(3), "DBG INF ERR")
+	f.Add(int8(4), "line\nbreak")
+	f.Add(int8(5), "not a log line")
+	f.Add(int8(6), "no level")
+	f.Add(int8(7), "disabled")
+	f.Add(int8(-1), "trace")
+	f.Add(int8(99), "out of range")
+
+	f.Fuzz(func(t *testing.T, raw int8, msg string) {
+		var captured []capturedEntry
+
 		w := &captureWriter{
-			captureEnabled: true,
-			captureFunc:    func(string, string) {},
+			output:      io.Discard,
+			captureFunc: func(level, message string) { captured = append(captured, capturedEntry{level: level, msg: message}) },
 		}
-		w.captureLogMessage(line)
+
+		w.Run(nil, zerolog.Level(raw), msg)
+
+		if len(captured) != 1 {
+			t.Fatalf("capture recorded %d entries, want 1", len(captured))
+		}
+
+		if !slices.Contains(captureLevelNames, captured[0].level) {
+			t.Errorf("capture level %q is not a known level name", captured[0].level)
+		}
+
+		if captured[0].msg != msg {
+			t.Errorf("capture message %q, want %q", captured[0].msg, msg)
+		}
 	})
 }
 
