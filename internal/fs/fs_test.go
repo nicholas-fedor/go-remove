@@ -275,8 +275,8 @@ func TestRealFS_RemoveBinary(t *testing.T) {
 
 					// Create mock with expectations for verbose logging.
 					log := mocks.NewMockLogger(t)
-					log.EXPECT().Debug(mock.Anything).Maybe()
-					log.EXPECT().Info(mock.Anything).Maybe()
+					log.EXPECT().Debug(mock.Anything, mock.Anything).Maybe()
+					log.EXPECT().Info(mock.Anything, mock.Anything).Maybe()
 
 					return log
 				},
@@ -319,9 +319,18 @@ func TestRealFS_RemoveBinary_VerboseLogging(t *testing.T) {
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "testbin")
 
-	log.EXPECT().Debug("Constructed binary path: " + tmpFile).Once()
-	log.EXPECT().Info("Removing binary: " + tmpFile).Once()
-	log.EXPECT().Info("Successfully removed binary: testbin").Once()
+	// Mockery records the variadic tail as a single slice argument, so a call that
+	// carries fields expects the message plus that slice rather than the fields
+	// spread out.
+	log.EXPECT().
+		Debug("Constructed binary path", []logger.Field{logger.Str("path", tmpFile)}).
+		Once()
+	log.EXPECT().
+		Info("Removing binary", []logger.Field{logger.Str("path", tmpFile)}).
+		Once()
+	log.EXPECT().
+		Info("Successfully removed binary", []logger.Field{logger.Str("binary", "testbin")}).
+		Once()
 
 	err := os.WriteFile(tmpFile, []byte("test"), 0o600)
 	if err != nil {
