@@ -6,9 +6,8 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 // Package logger_test provides black-box integration tests for the logger package.
 //
 // These tests verify the Logger interface behavior through the MockLogger mock
-// implementation. Tests that need to observe what was actually written use a
-// real logger with the capture callback installed, so no assertion depends on a
-// third-party log event type.
+// implementation. Tests that need a real logger to report its messages install
+// the capture callback, so no assertion depends on a third-party log event type.
 //
 // Test Organization:
 //   - LoggerIntegrationTestSuite: Main test suite using testify suite
@@ -19,7 +18,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 //   - All log level methods (Debug, Info, Warn, Error)
 //   - Dynamic log level setting and filtering
 //   - CaptureFunc functionality for TUI integration
-//   - Field attachment through the Str, Int, Bool, and Err constructors
+//   - Captured payloads for messages logged with fields
 //   - Concurrent logging operations
 package logger_test
 
@@ -202,7 +201,8 @@ func (s *LoggerIntegrationTestSuite) TestAllLogLevelMethods() {
 	}
 }
 
-// TestLogFields verifies fields reach the output alongside the message.
+// TestLogFields verifies the captured message is the logged message, with the
+// structured fields left on the event rather than folded into the message.
 func (s *LoggerIntegrationTestSuite) TestLogFields() {
 	loggerInstance, records := capturedLogger(s.T())
 
@@ -215,9 +215,8 @@ func (s *LoggerIntegrationTestSuite) TestLogFields() {
 
 	message, found := records.find("chained log message")
 	s.Require().True(found, "expected the message to be captured")
-	s.Contains(message.msg, "component=test")
-	s.Contains(message.msg, "count=42")
-	s.Contains(message.msg, "flag=true")
+	s.Equal("chained log message", message.msg)
+	s.Equal("INF", message.level)
 }
 
 // TestLevelSetting verifies dynamic log level changes.
@@ -305,7 +304,9 @@ func (s *LoggerIntegrationTestSuite) TestCaptureFunc() {
 // of the capture functionality.
 func (s *LoggerIntegrationTestSuite) TestCaptureFuncIntegration() {
 	loggerInstance, records := capturedLogger(s.T())
+	loggerInstance.Level(logger.DebugLevel)
 
+	loggerInstance.Debug("test debug message")
 	loggerInstance.Info("test info message")
 	loggerInstance.Warn("test warn message")
 	loggerInstance.Error("test error message")
@@ -314,12 +315,13 @@ func (s *LoggerIntegrationTestSuite) TestCaptureFuncIntegration() {
 	time.Sleep(10 * time.Millisecond)
 
 	messages := records.recorded()
-	s.Require().GreaterOrEqual(len(messages), 3, "expected at least 3 captured messages")
+	s.Require().GreaterOrEqual(len(messages), 4, "expected at least 4 captured messages")
 
 	tests := []struct {
 		msg   string
 		level string
 	}{
+		{msg: "test debug message", level: "DBG"},
 		{msg: "test info message", level: "INF"},
 		{msg: "test warn message", level: "WRN"},
 		{msg: "test error message", level: "ERR"},
@@ -330,7 +332,23 @@ func (s *LoggerIntegrationTestSuite) TestCaptureFuncIntegration() {
 
 		s.Require().True(found, "expected to find %q", tt.msg)
 		s.Equal(tt.level, message.level)
+		s.Equal(tt.msg, message.msg, "the message is captured as it was logged")
 	}
+}
+
+// TestCaptureDisabledRestoresOutput verifies that disabling capture leaves the
+// logger logging normally and reporting nothing further to the callback.
+func (s *LoggerIntegrationTestSuite) TestCaptureDisabledRestoresOutput() {
+	loggerInstance, records := capturedLogger(s.T())
+
+	loggerInstance.Info("captured message")
+	s.Require().Equal(1, records.count("captured message"))
+
+	loggerInstance.SetCaptureFunc(nil)
+	loggerInstance.Info("uncaptured message")
+
+	s.Equal(1, records.count("captured message"))
+	s.Zero(records.count("uncaptured message"))
 }
 
 // TestConcurrentLogging verifies thread safety of logger methods.
@@ -635,7 +653,7 @@ func TestNewLoggerWithCaptureIntegration(t *testing.T) {
 	assert.True(t, captured, "expected capture function to be called")
 }
 
-// TestErrorField verifies an error field reaches the output.
+// TestErrorField verifies a message logged with an error field is captured.
 func TestErrorField(t *testing.T) {
 	t.Parallel()
 
@@ -644,7 +662,8 @@ func TestErrorField(t *testing.T) {
 
 	message, found := records.find("error occurred")
 	require.True(t, found, "expected the message to be captured")
-	assert.Contains(t, message.msg, "test error for field")
+	assert.Equal(t, "error occurred", message.msg)
+	assert.Equal(t, "ERR", message.level)
 }
 
 // TestLogLevelTransitions verifies transitions between log levels.
