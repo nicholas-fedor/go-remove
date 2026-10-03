@@ -11,7 +11,6 @@ package mocks
 
 import (
 	"github.com/nicholas-fedor/go-remove/internal/logger"
-	"github.com/rs/zerolog"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -52,22 +51,14 @@ func (_m *MockLogger) EXPECT() *MockLogger_Expecter {
 }
 
 // Debug provides a mock function for the type MockLogger
-func (_mock *MockLogger) Debug() *zerolog.Event {
-	ret := _mock.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for Debug")
-	}
-
-	var r0 *zerolog.Event
-	if returnFunc, ok := ret.Get(0).(func() *zerolog.Event); ok {
-		r0 = returnFunc()
+func (_mock *MockLogger) Debug(msg string, fields ...logger.Field) {
+	if len(fields) > 0 {
+		_mock.Called(msg, fields)
 	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*zerolog.Event)
-		}
+		_mock.Called(msg)
 	}
-	return r0
+
+	return
 }
 
 // MockLogger_Debug_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Debug'
@@ -76,44 +67,52 @@ type MockLogger_Debug_Call struct {
 }
 
 // Debug is a helper method to define mock.On call
-func (_e *MockLogger_Expecter) Debug() *MockLogger_Debug_Call {
-	return &MockLogger_Debug_Call{Call: _e.mock.On("Debug")}
+//   - msg string
+//   - fields ...logger.Field
+func (_e *MockLogger_Expecter) Debug(msg any, fields ...any) *MockLogger_Debug_Call {
+	return &MockLogger_Debug_Call{Call: _e.mock.On("Debug",
+		append([]any{msg}, fields...)...)}
 }
 
-func (_c *MockLogger_Debug_Call) Run(run func()) *MockLogger_Debug_Call {
+func (_c *MockLogger_Debug_Call) Run(run func(msg string, fields ...logger.Field)) *MockLogger_Debug_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		var arg1 []logger.Field
+		var variadicArgs []logger.Field
+		if len(args) > 1 {
+			variadicArgs = args[1].([]logger.Field)
+		}
+		arg1 = variadicArgs
+		run(
+			arg0,
+			arg1...,
+		)
 	})
 	return _c
 }
 
-func (_c *MockLogger_Debug_Call) Return(event *zerolog.Event) *MockLogger_Debug_Call {
-	_c.Call.Return(event)
+func (_c *MockLogger_Debug_Call) Return() *MockLogger_Debug_Call {
+	_c.Call.Return()
 	return _c
 }
 
-func (_c *MockLogger_Debug_Call) RunAndReturn(run func() *zerolog.Event) *MockLogger_Debug_Call {
-	_c.Call.Return(run)
+func (_c *MockLogger_Debug_Call) RunAndReturn(run func(msg string, fields ...logger.Field)) *MockLogger_Debug_Call {
+	_c.Run(run)
 	return _c
 }
 
 // Error provides a mock function for the type MockLogger
-func (_mock *MockLogger) Error() *zerolog.Event {
-	ret := _mock.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for Error")
-	}
-
-	var r0 *zerolog.Event
-	if returnFunc, ok := ret.Get(0).(func() *zerolog.Event); ok {
-		r0 = returnFunc()
+func (_mock *MockLogger) Error(msg string, fields ...logger.Field) {
+	if len(fields) > 0 {
+		_mock.Called(msg, fields)
 	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*zerolog.Event)
-		}
+		_mock.Called(msg)
 	}
-	return r0
+
+	return
 }
 
 // MockLogger_Error_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Error'
@@ -122,44 +121,52 @@ type MockLogger_Error_Call struct {
 }
 
 // Error is a helper method to define mock.On call
-func (_e *MockLogger_Expecter) Error() *MockLogger_Error_Call {
-	return &MockLogger_Error_Call{Call: _e.mock.On("Error")}
+//   - msg string
+//   - fields ...logger.Field
+func (_e *MockLogger_Expecter) Error(msg any, fields ...any) *MockLogger_Error_Call {
+	return &MockLogger_Error_Call{Call: _e.mock.On("Error",
+		append([]any{msg}, fields...)...)}
 }
 
-func (_c *MockLogger_Error_Call) Run(run func()) *MockLogger_Error_Call {
+func (_c *MockLogger_Error_Call) Run(run func(msg string, fields ...logger.Field)) *MockLogger_Error_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		var arg1 []logger.Field
+		var variadicArgs []logger.Field
+		if len(args) > 1 {
+			variadicArgs = args[1].([]logger.Field)
+		}
+		arg1 = variadicArgs
+		run(
+			arg0,
+			arg1...,
+		)
 	})
 	return _c
 }
 
-func (_c *MockLogger_Error_Call) Return(event *zerolog.Event) *MockLogger_Error_Call {
-	_c.Call.Return(event)
+func (_c *MockLogger_Error_Call) Return() *MockLogger_Error_Call {
+	_c.Call.Return()
 	return _c
 }
 
-func (_c *MockLogger_Error_Call) RunAndReturn(run func() *zerolog.Event) *MockLogger_Error_Call {
-	_c.Call.Return(run)
+func (_c *MockLogger_Error_Call) RunAndReturn(run func(msg string, fields ...logger.Field)) *MockLogger_Error_Call {
+	_c.Run(run)
 	return _c
 }
 
 // Info provides a mock function for the type MockLogger
-func (_mock *MockLogger) Info() *zerolog.Event {
-	ret := _mock.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for Info")
-	}
-
-	var r0 *zerolog.Event
-	if returnFunc, ok := ret.Get(0).(func() *zerolog.Event); ok {
-		r0 = returnFunc()
+func (_mock *MockLogger) Info(msg string, fields ...logger.Field) {
+	if len(fields) > 0 {
+		_mock.Called(msg, fields)
 	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*zerolog.Event)
-		}
+		_mock.Called(msg)
 	}
-	return r0
+
+	return
 }
 
 // MockLogger_Info_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Info'
@@ -168,29 +175,45 @@ type MockLogger_Info_Call struct {
 }
 
 // Info is a helper method to define mock.On call
-func (_e *MockLogger_Expecter) Info() *MockLogger_Info_Call {
-	return &MockLogger_Info_Call{Call: _e.mock.On("Info")}
+//   - msg string
+//   - fields ...logger.Field
+func (_e *MockLogger_Expecter) Info(msg any, fields ...any) *MockLogger_Info_Call {
+	return &MockLogger_Info_Call{Call: _e.mock.On("Info",
+		append([]any{msg}, fields...)...)}
 }
 
-func (_c *MockLogger_Info_Call) Run(run func()) *MockLogger_Info_Call {
+func (_c *MockLogger_Info_Call) Run(run func(msg string, fields ...logger.Field)) *MockLogger_Info_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		var arg1 []logger.Field
+		var variadicArgs []logger.Field
+		if len(args) > 1 {
+			variadicArgs = args[1].([]logger.Field)
+		}
+		arg1 = variadicArgs
+		run(
+			arg0,
+			arg1...,
+		)
 	})
 	return _c
 }
 
-func (_c *MockLogger_Info_Call) Return(event *zerolog.Event) *MockLogger_Info_Call {
-	_c.Call.Return(event)
+func (_c *MockLogger_Info_Call) Return() *MockLogger_Info_Call {
+	_c.Call.Return()
 	return _c
 }
 
-func (_c *MockLogger_Info_Call) RunAndReturn(run func() *zerolog.Event) *MockLogger_Info_Call {
-	_c.Call.Return(run)
+func (_c *MockLogger_Info_Call) RunAndReturn(run func(msg string, fields ...logger.Field)) *MockLogger_Info_Call {
+	_c.Run(run)
 	return _c
 }
 
 // Level provides a mock function for the type MockLogger
-func (_mock *MockLogger) Level(level zerolog.Level) {
+func (_mock *MockLogger) Level(level logger.Level) {
 	_mock.Called(level)
 	return
 }
@@ -201,16 +224,16 @@ type MockLogger_Level_Call struct {
 }
 
 // Level is a helper method to define mock.On call
-//   - level zerolog.Level
+//   - level logger.Level
 func (_e *MockLogger_Expecter) Level(level any) *MockLogger_Level_Call {
 	return &MockLogger_Level_Call{Call: _e.mock.On("Level", level)}
 }
 
-func (_c *MockLogger_Level_Call) Run(run func(level zerolog.Level)) *MockLogger_Level_Call {
+func (_c *MockLogger_Level_Call) Run(run func(level logger.Level)) *MockLogger_Level_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 zerolog.Level
+		var arg0 logger.Level
 		if args[0] != nil {
-			arg0 = args[0].(zerolog.Level)
+			arg0 = args[0].(logger.Level)
 		}
 		run(
 			arg0,
@@ -224,7 +247,7 @@ func (_c *MockLogger_Level_Call) Return() *MockLogger_Level_Call {
 	return _c
 }
 
-func (_c *MockLogger_Level_Call) RunAndReturn(run func(level zerolog.Level)) *MockLogger_Level_Call {
+func (_c *MockLogger_Level_Call) RunAndReturn(run func(level logger.Level)) *MockLogger_Level_Call {
 	_c.Run(run)
 	return _c
 }
@@ -270,22 +293,14 @@ func (_c *MockLogger_SetCaptureFunc_Call) RunAndReturn(run func(captureFunc logg
 }
 
 // Warn provides a mock function for the type MockLogger
-func (_mock *MockLogger) Warn() *zerolog.Event {
-	ret := _mock.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for Warn")
-	}
-
-	var r0 *zerolog.Event
-	if returnFunc, ok := ret.Get(0).(func() *zerolog.Event); ok {
-		r0 = returnFunc()
+func (_mock *MockLogger) Warn(msg string, fields ...logger.Field) {
+	if len(fields) > 0 {
+		_mock.Called(msg, fields)
 	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*zerolog.Event)
-		}
+		_mock.Called(msg)
 	}
-	return r0
+
+	return
 }
 
 // MockLogger_Warn_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Warn'
@@ -294,23 +309,39 @@ type MockLogger_Warn_Call struct {
 }
 
 // Warn is a helper method to define mock.On call
-func (_e *MockLogger_Expecter) Warn() *MockLogger_Warn_Call {
-	return &MockLogger_Warn_Call{Call: _e.mock.On("Warn")}
+//   - msg string
+//   - fields ...logger.Field
+func (_e *MockLogger_Expecter) Warn(msg any, fields ...any) *MockLogger_Warn_Call {
+	return &MockLogger_Warn_Call{Call: _e.mock.On("Warn",
+		append([]any{msg}, fields...)...)}
 }
 
-func (_c *MockLogger_Warn_Call) Run(run func()) *MockLogger_Warn_Call {
+func (_c *MockLogger_Warn_Call) Run(run func(msg string, fields ...logger.Field)) *MockLogger_Warn_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		var arg1 []logger.Field
+		var variadicArgs []logger.Field
+		if len(args) > 1 {
+			variadicArgs = args[1].([]logger.Field)
+		}
+		arg1 = variadicArgs
+		run(
+			arg0,
+			arg1...,
+		)
 	})
 	return _c
 }
 
-func (_c *MockLogger_Warn_Call) Return(event *zerolog.Event) *MockLogger_Warn_Call {
-	_c.Call.Return(event)
+func (_c *MockLogger_Warn_Call) Return() *MockLogger_Warn_Call {
+	_c.Call.Return()
 	return _c
 }
 
-func (_c *MockLogger_Warn_Call) RunAndReturn(run func() *zerolog.Event) *MockLogger_Warn_Call {
-	_c.Call.Return(run)
+func (_c *MockLogger_Warn_Call) RunAndReturn(run func(msg string, fields ...logger.Field)) *MockLogger_Warn_Call {
+	_c.Run(run)
 	return _c
 }

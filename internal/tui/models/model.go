@@ -207,10 +207,11 @@ func (m *Model) context() context.Context {
 func (m *Model) refreshChoices() {
 	choices, err := m.fs.ListBinaries(m.dir)
 	if err != nil {
-		m.logger.Warn().
-			Err(err).
-			Str("dir", m.dir).
-			Msg("Could not rescan the binary directory")
+		m.logger.Warn(
+			"Could not rescan the binary directory",
+			logger.Err(err),
+			logger.Str("dir", m.dir),
+		)
 
 		// Surface it rather than only logging, so a stale list is not passed off
 		// as current.

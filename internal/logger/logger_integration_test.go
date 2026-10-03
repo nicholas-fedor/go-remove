@@ -6,9 +6,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 // Package logger_test provides black-box integration tests for the logger package.
 //
 // These tests verify the Logger interface behavior through the MockLogger mock
-// implementation. All tests use Mockery-generated mocks to ensure no real logging
-// output is produced. The tests cover the complete logging lifecycle including
-// all log level methods, level management, and capture functionality.
+// implementation. Tests that need to observe what was actually written use a
+// real logger with the capture callback installed, so no assertion depends on a
+// third-party log event type.
 //
 // Test Organization:
 //   - LoggerIntegrationTestSuite: Main test suite using testify suite
@@ -19,20 +19,17 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 //   - All log level methods (Debug, Info, Warn, Error)
 //   - Dynamic log level setting and filtering
 //   - CaptureFunc functionality for TUI integration
-//   - Log event chaining patterns
+//   - Field attachment through the Str, Int, Bool, and Err constructors
 //   - Concurrent logging operations
 package logger_test
 
 import (
-	"bytes"
 	"errors"
-	"io"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -41,6 +38,98 @@ import (
 	"github.com/nicholas-fedor/go-remove/internal/logger"
 	"github.com/nicholas-fedor/go-remove/internal/logger/mocks"
 )
+
+// capturedMessage is one log line recorded through the capture callback.
+type capturedMessage struct {
+	level string
+	msg   string
+}
+
+// recorder collects the log lines a capture callback receives.
+type recorder struct {
+	mu       sync.Mutex
+	messages []capturedMessage
+}
+
+// capture returns a LogCaptureFunc that records every line it is given.
+//
+// Returns:
+//   - A LogCaptureFunc recording into the receiver.
+func (r *recorder) capture() logger.LogCaptureFunc {
+	return func(level, msg string) {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+
+		r.messages = append(r.messages, capturedMessage{level: level, msg: msg})
+	}
+}
+
+// recorded returns a copy of the messages recorded so far.
+//
+// Returns:
+//   - Every message recorded, in arrival order.
+func (r *recorder) recorded() []capturedMessage {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return append([]capturedMessage(nil), r.messages...)
+}
+
+// count reports how many recorded messages contain substr.
+//
+// Parameters:
+//   - substr: Text to look for.
+//
+// Returns:
+//   - The number of recorded messages containing substr.
+func (r *recorder) count(substr string) int {
+	total := 0
+
+	for _, message := range r.recorded() {
+		if strings.Contains(message.msg, substr) {
+			total++
+		}
+	}
+
+	return total
+}
+
+// find returns the first recorded message containing substr.
+//
+// Parameters:
+//   - substr: Text to look for.
+//
+// Returns:
+//   - The matching message, and true when one was found.
+func (r *recorder) find(substr string) (capturedMessage, bool) {
+	for _, message := range r.recorded() {
+		if strings.Contains(message.msg, substr) {
+			return message, true
+		}
+	}
+
+	return capturedMessage{}, false
+}
+
+// capturedLogger returns a real logger whose output is routed to a recorder.
+//
+// Parameters:
+//   - t: Test the logger is created for.
+//
+// Returns:
+//   - A logger with the capture callback already installed.
+//   - The recorder receiving its output.
+func capturedLogger(t *testing.T) (logger.Logger, *recorder) {
+	t.Helper()
+
+	loggerInstance, _, err := logger.NewLoggerWithCapture()
+	require.NoError(t, err)
+
+	records := &recorder{}
+	loggerInstance.SetCaptureFunc(records.capture())
+
+	return loggerInstance, records
+}
 
 // LoggerIntegrationTestSuite provides integration tests for the logger Logger interface.
 //
@@ -70,124 +159,88 @@ func TestLoggerIntegrationTestSuite(t *testing.T) {
 	suite.Run(t, new(LoggerIntegrationTestSuite))
 }
 
-// TestAllLogLevelMethods verifies all log level methods work correctly.
-//
-// This test ensures that Debug, Info, Warn, and Error methods all return
-// valid zerolog events that can be used for logging.
+// TestAllLogLevelMethods verifies all log level methods record their message.
 func (s *LoggerIntegrationTestSuite) TestAllLogLevelMethods() {
-	// Create a discard writer to prevent actual output
-	discardLogger := zerolog.New(io.Discard)
-
 	tests := []struct {
-		name     string
-		logFunc  func()
-		expected string
+		name string
+		call func(msg string)
 	}{
 		{
 			name: "debug level logging",
-			logFunc: func() {
-				s.mockLogger.EXPECT().Debug().Return(discardLogger.Debug()).Once()
-				event := s.mockLogger.Debug()
-				s.NotNil(event)
+			call: func(msg string) {
+				s.mockLogger.EXPECT().Debug(msg).Return().Once()
+				s.mockLogger.Debug(msg)
 			},
-			expected: "debug",
 		},
 		{
 			name: "info level logging",
-			logFunc: func() {
-				s.mockLogger.EXPECT().Info().Return(discardLogger.Info()).Once()
-				event := s.mockLogger.Info()
-				s.NotNil(event)
+			call: func(msg string) {
+				s.mockLogger.EXPECT().Info(msg).Return().Once()
+				s.mockLogger.Info(msg)
 			},
-			expected: "info",
 		},
 		{
 			name: "warn level logging",
-			logFunc: func() {
-				s.mockLogger.EXPECT().Warn().Return(discardLogger.Warn()).Once()
-				event := s.mockLogger.Warn()
-				s.NotNil(event)
+			call: func(msg string) {
+				s.mockLogger.EXPECT().Warn(msg).Return().Once()
+				s.mockLogger.Warn(msg)
 			},
-			expected: "warn",
 		},
 		{
 			name: "error level logging",
-			logFunc: func() {
-				s.mockLogger.EXPECT().Error().Return(discardLogger.Error()).Once()
-				event := s.mockLogger.Error()
-				s.NotNil(event)
+			call: func(msg string) {
+				s.mockLogger.EXPECT().Error(msg).Return().Once()
+				s.mockLogger.Error(msg)
 			},
-			expected: "error",
 		},
 	}
 
 	for _, tt := range tests {
 		s.Run(tt.name, func() {
-			tt.logFunc()
+			tt.call(tt.name)
 		})
 	}
 }
 
-// TestLogEventChaining verifies that log events can be properly chained.
-//
-// This test ensures that zerolog events returned by log methods support
-// the full chain of operations including Str, Int, Err, and Msg.
-func (s *LoggerIntegrationTestSuite) TestLogEventChaining() {
-	var buf bytes.Buffer
+// TestLogFields verifies fields reach the output alongside the message.
+func (s *LoggerIntegrationTestSuite) TestLogFields() {
+	loggerInstance, records := capturedLogger(s.T())
 
-	consoleWriter := zerolog.ConsoleWriter{
-		Out:        &buf,
-		TimeFormat: "2006-01-02",
-		NoColor:    true,
-	}
+	loggerInstance.Info(
+		"chained log message",
+		logger.Str("component", "test"),
+		logger.Int("count", 42),
+		logger.Bool("flag", true),
+	)
 
-	zl := zerolog.New(consoleWriter).With().Timestamp().Logger()
-
-	s.mockLogger.EXPECT().Info().Return(zl.Info()).Once()
-
-	// Chain multiple fields and send the message
-	s.mockLogger.Info().
-		Str("component", "test").
-		Int("count", 42).
-		Msg("chained log message")
-
-	output := buf.String()
-	s.Contains(output, "chained log message")
-	s.Contains(output, "component")
-	s.Contains(output, "test")
-	s.Contains(output, "count")
-	s.Contains(output, "42")
+	message, found := records.find("chained log message")
+	s.Require().True(found, "expected the message to be captured")
+	s.Contains(message.msg, "component=test")
+	s.Contains(message.msg, "count=42")
+	s.Contains(message.msg, "flag=true")
 }
 
 // TestLevelSetting verifies dynamic log level changes.
-//
-// This test ensures that the Level method properly changes the minimum
-// log level and that filtering works correctly.
 func (s *LoggerIntegrationTestSuite) TestLevelSetting() {
 	tests := []struct {
-		name       string
-		level      zerolog.Level
-		shouldCall bool
+		name  string
+		level logger.Level
 	}{
 		{
-			name:       "set to debug level",
-			level:      zerolog.DebugLevel,
-			shouldCall: true,
+			name:  "set to debug level",
+			level: logger.DebugLevel,
 		},
 		{
-			name:       "set to info level",
-			level:      zerolog.InfoLevel,
-			shouldCall: true,
+			name:  "set to info level",
+			level: logger.InfoLevel,
 		},
 		{
-			name:       "set to warn level",
-			level:      zerolog.WarnLevel,
-			shouldCall: true,
+			name:  "set to warn level",
+			level: logger.WarnLevel,
 		},
 		{
-			name:       "set to error level",
-			level:      zerolog.ErrorLevel,
-			shouldCall: true,
+			name:  "set to error level",
+			level: logger.ErrorLevel,
 		},
 	}
 
@@ -204,39 +257,22 @@ func (s *LoggerIntegrationTestSuite) TestLevelSetting() {
 // This test ensures that messages below the current log level are filtered out
 // and messages at or above the level are processed.
 func (s *LoggerIntegrationTestSuite) TestLevelFiltering() {
-	var buf bytes.Buffer
-
-	consoleWriter := zerolog.ConsoleWriter{
-		Out:        &buf,
-		TimeFormat: "2006-01-02",
-		NoColor:    true,
-	}
-
-	// Create logger at info level
-	zl := zerolog.New(consoleWriter).With().Timestamp().Logger().Level(zerolog.InfoLevel)
+	loggerInstance, records := capturedLogger(s.T())
+	loggerInstance.Level(logger.InfoLevel)
 
 	s.Run("debug filtered at info level", func() {
-		buf.Reset()
-		s.mockLogger.EXPECT().Debug().Return(zl.Debug()).Once()
-
-		s.mockLogger.Debug().Msg("debug message")
-		s.Empty(buf.String())
+		loggerInstance.Debug("debug message")
+		s.Zero(records.count("debug message"))
 	})
 
 	s.Run("info allowed at info level", func() {
-		buf.Reset()
-		s.mockLogger.EXPECT().Info().Return(zl.Info()).Once()
-
-		s.mockLogger.Info().Msg("info message")
-		s.Contains(buf.String(), "info message")
+		loggerInstance.Info("info message")
+		s.Equal(1, records.count("info message"))
 	})
 
 	s.Run("error allowed at info level", func() {
-		buf.Reset()
-		s.mockLogger.EXPECT().Error().Return(zl.Error()).Once()
-
-		s.mockLogger.Error().Msg("error message")
-		s.Contains(buf.String(), "error message")
+		loggerInstance.Error("error message")
+		s.Equal(1, records.count("error message"))
 	})
 }
 
@@ -268,77 +304,33 @@ func (s *LoggerIntegrationTestSuite) TestCaptureFunc() {
 // This test creates a real logger with capture to verify the full integration
 // of the capture functionality.
 func (s *LoggerIntegrationTestSuite) TestCaptureFuncIntegration() {
-	// Create a real logger to test capture functionality
-	loggerInstance, captureWriter, err := logger.NewLoggerWithCapture()
-	s.Require().NoError(err)
-	s.Require().NotNil(loggerInstance)
-	s.Require().NotNil(captureWriter)
+	loggerInstance, records := capturedLogger(s.T())
 
-	// Set up capture tracking
-	var (
-		capturedMessages []struct {
-			level string
-			msg   string
-		}
-		mu sync.Mutex
-	)
+	loggerInstance.Info("test info message")
+	loggerInstance.Warn("test warn message")
+	loggerInstance.Error("test error message")
 
-	captureFunc := func(level, msg string) {
-		mu.Lock()
-		defer mu.Unlock()
-
-		capturedMessages = append(capturedMessages, struct {
-			level string
-			msg   string
-		}{level: level, msg: msg})
-	}
-
-	// Enable capture
-	loggerInstance.SetCaptureFunc(captureFunc)
-
-	// Generate log messages
-	loggerInstance.Info().Msg("test info message")
-	loggerInstance.Warn().Msg("test warn message")
-	loggerInstance.Error().Msg("test error message")
-
-	// Give some time for capture to process
+	// Give some time for capture to process.
 	time.Sleep(10 * time.Millisecond)
 
-	// Verify captured messages
-	mu.Lock()
-	defer mu.Unlock()
+	messages := records.recorded()
+	s.Require().GreaterOrEqual(len(messages), 3, "expected at least 3 captured messages")
 
-	s.Require().GreaterOrEqual(len(capturedMessages), 3, "expected at least 3 captured messages")
-
-	// Find and verify each message type
-	var foundInfo, foundWarn, foundError bool
-
-	for _, cm := range capturedMessages {
-		if strings.Contains(cm.msg, "test info message") {
-			foundInfo = true
-
-			// Level could be "INF" or "LOG" depending on format parsing
-			s.NotEmpty(cm.level)
-		}
-
-		if strings.Contains(cm.msg, "test warn message") {
-			foundWarn = true
-
-			// Level could be "WRN" or "LOG" depending on format parsing
-			s.NotEmpty(cm.level)
-		}
-
-		if strings.Contains(cm.msg, "test error message") {
-			foundError = true
-
-			// Level could be "ERR" or "LOG" depending on format parsing
-			s.NotEmpty(cm.level)
-		}
+	tests := []struct {
+		msg   string
+		level string
+	}{
+		{msg: "test info message", level: "INF"},
+		{msg: "test warn message", level: "WRN"},
+		{msg: "test error message", level: "ERR"},
 	}
 
-	s.True(foundInfo, "expected to find info message")
-	s.True(foundWarn, "expected to find warn message")
-	s.True(foundError, "expected to find error message")
+	for _, tt := range tests {
+		message, found := records.find(tt.msg)
+
+		s.Require().True(found, "expected to find %q", tt.msg)
+		s.Equal(tt.level, message.level)
+	}
 }
 
 // TestConcurrentLogging verifies thread safety of logger methods.
@@ -346,43 +338,39 @@ func (s *LoggerIntegrationTestSuite) TestCaptureFuncIntegration() {
 // This test ensures that all logger methods can be called concurrently
 // without race conditions or data corruption.
 func (s *LoggerIntegrationTestSuite) TestConcurrentLogging() {
-	discardLogger := zerolog.New(io.Discard)
+	const iterations = 50
 
-	// Set up expectations for concurrent calls
-	// We use Once() for each call, so we need to set up multiple expectations
-	for range 50 {
-		s.mockLogger.EXPECT().Debug().Return(discardLogger.Debug()).Once()
-		s.mockLogger.EXPECT().Info().Return(discardLogger.Info()).Once()
-		s.mockLogger.EXPECT().Warn().Return(discardLogger.Warn()).Once()
-		s.mockLogger.EXPECT().Error().Return(discardLogger.Error()).Once()
+	// Set up expectations for concurrent calls.
+	// We use Once() for each call, so we need to set up multiple expectations.
+	for range iterations {
+		s.mockLogger.EXPECT().Debug("debug message").Return().Once()
+		s.mockLogger.EXPECT().Info("info message").Return().Once()
+		s.mockLogger.EXPECT().Warn("warn message").Return().Once()
+		s.mockLogger.EXPECT().Error("error message").Return().Once()
 	}
 
 	var wg sync.WaitGroup
 
-	// Launch concurrent goroutines for each log level
-	for range 50 {
+	// Launch concurrent goroutines for each log level.
+	for range iterations {
 		wg.Go(func() {
-			event := s.mockLogger.Debug()
-			s.NotNil(event)
+			s.mockLogger.Debug("debug message")
 		})
 
 		wg.Go(func() {
-			event := s.mockLogger.Info()
-			s.NotNil(event)
+			s.mockLogger.Info("info message")
 		})
 
 		wg.Go(func() {
-			event := s.mockLogger.Warn()
-			s.NotNil(event)
+			s.mockLogger.Warn("warn message")
 		})
 
 		wg.Go(func() {
-			event := s.mockLogger.Error()
-			s.NotNil(event)
+			s.mockLogger.Error("error message")
 		})
 	}
 
-	// Wait for all goroutines to complete
+	// Wait for all goroutines to complete.
 	wg.Wait()
 }
 
@@ -391,28 +379,27 @@ func (s *LoggerIntegrationTestSuite) TestConcurrentLogging() {
 // This test ensures that changing log levels concurrently with logging
 // operations does not cause race conditions.
 func (s *LoggerIntegrationTestSuite) TestConcurrentLevelChanges() {
-	discardLogger := zerolog.New(io.Discard)
+	const iterations = 50
 
-	// Set up expectations
-	for range 50 {
-		s.mockLogger.EXPECT().Info().Return(discardLogger.Info()).Once()
+	// Set up expectations.
+	for range iterations {
+		s.mockLogger.EXPECT().Info("info message").Return().Once()
 		s.mockLogger.EXPECT().Level(mock.Anything).Return().Once()
 	}
 
 	var wg sync.WaitGroup
 
-	// Concurrent logging
-	for range 50 {
+	// Concurrent logging.
+	for range iterations {
 		wg.Go(func() {
-			event := s.mockLogger.Info()
-			s.NotNil(event)
+			s.mockLogger.Info("info message")
 		})
 	}
 
-	// Concurrent level changes
-	for range 50 {
+	// Concurrent level changes.
+	for range iterations {
 		wg.Go(func() {
-			s.mockLogger.Level(zerolog.DebugLevel)
+			s.mockLogger.Level(logger.DebugLevel)
 		})
 	}
 
@@ -423,16 +410,12 @@ func (s *LoggerIntegrationTestSuite) TestConcurrentLevelChanges() {
 //
 // This test ensures that the logger interface supports flexible usage patterns.
 func (s *LoggerIntegrationTestSuite) TestLoggerMethodOrdering() {
-	discardLogger := zerolog.New(io.Discard)
-
 	s.Run("level then log", func() {
-		s.mockLogger.EXPECT().Level(zerolog.WarnLevel).Return().Once()
-		s.mockLogger.EXPECT().Warn().Return(discardLogger.Warn()).Once()
+		s.mockLogger.EXPECT().Level(logger.WarnLevel).Return().Once()
+		s.mockLogger.EXPECT().Warn("warn message").Return().Once()
 
-		s.mockLogger.Level(zerolog.WarnLevel)
-
-		event := s.mockLogger.Warn()
-		s.NotNil(event)
+		s.mockLogger.Level(logger.WarnLevel)
+		s.mockLogger.Warn("warn message")
 	})
 }
 
@@ -441,44 +424,21 @@ func (s *LoggerIntegrationTestSuite) TestLoggerMethodOrdering() {
 // This test ensures that the capture function is called for each log message
 // and properly handles high-frequency logging.
 func (s *LoggerIntegrationTestSuite) TestCaptureFuncCalledMultipleTimes() {
-	// Create a real logger to test capture functionality
-	loggerInstance, captureWriter, err := logger.NewLoggerWithCapture()
-	s.Require().NoError(err)
-	s.Require().NotNil(loggerInstance)
-	s.Require().NotNil(captureWriter)
+	loggerInstance, records := capturedLogger(s.T())
 
-	// Set up capture counter
-	var (
-		callCount int
-		mu        sync.Mutex
-	)
-
-	captureFunc := func(level, msg string) {
-		mu.Lock()
-		defer mu.Unlock()
-
-		callCount++
-	}
-
-	// Enable capture
-	loggerInstance.SetCaptureFunc(captureFunc)
-
-	// Generate multiple log messages rapidly
+	// Generate multiple log messages rapidly.
 	const numMessages = 100
 
 	for i := range numMessages {
-		loggerInstance.Info().Int("index", i).Msg("rapid log message")
+		loggerInstance.Info("rapid log message", logger.Int("index", i))
 	}
 
-	// Give time for capture to process
+	// Give time for capture to process.
 	time.Sleep(50 * time.Millisecond)
 
-	// Verify capture was called for each message
-	mu.Lock()
-	defer mu.Unlock()
-
+	// Verify capture was called for each message.
 	s.GreaterOrEqual(
-		callCount,
+		records.count("rapid log message"),
 		numMessages*9/10,
 		"expected capture to be called for at least 90% of messages",
 	)
@@ -488,46 +448,33 @@ func (s *LoggerIntegrationTestSuite) TestCaptureFuncCalledMultipleTimes() {
 //
 // This test ensures that capture can be properly disabled by setting a nil function.
 func (s *LoggerIntegrationTestSuite) TestNilCaptureFuncDisablesCapture() {
-	// Create a real logger to test capture functionality
-	loggerInstance, captureWriter, err := logger.NewLoggerWithCapture()
-	s.Require().NoError(err)
-	s.Require().NotNil(loggerInstance)
-	s.Require().NotNil(captureWriter)
+	loggerInstance, records := capturedLogger(s.T())
 
-	// First enable capture
-	var capturedBefore int
-
-	captureFunc := func(level, msg string) {
-		capturedBefore++
-	}
-
-	loggerInstance.SetCaptureFunc(captureFunc)
-	loggerInstance.Info().Msg("message with capture")
+	// Log once while capture is still installed.
+	loggerInstance.Info("message with capture")
 
 	time.Sleep(10 * time.Millisecond)
 
-	// Now disable capture
-	loggerInstance.SetCaptureFunc(nil)
-
-	// Set up a new capture function that increments capturedAfter
 	var capturedAfter int
 
-	captureFuncAfter := func(level, msg string) {
+	captureFuncAfter := func(_, _ string) {
 		capturedAfter++
 	}
 
-	// Verify the new capture function is NOT called since we set nil
+	// Verify the new capture function is NOT called since we set nil.
 	loggerInstance.SetCaptureFunc(captureFuncAfter)
-	loggerInstance.SetCaptureFunc(nil) // Disable again
+	loggerInstance.SetCaptureFunc(nil) // Disable again.
 
 	for range 10 {
-		loggerInstance.Info().Msg("message without capture")
+		loggerInstance.Info("message without capture")
 	}
 
 	time.Sleep(10 * time.Millisecond)
 
-	// Capture before should have been called, after should not increase
-	s.Positive(capturedBefore, "expected capture to be called before disabling")
+	s.Positive(
+		records.count("message with capture"),
+		"expected capture to be called before disabling",
+	)
 	s.Equal(0, capturedAfter, "expected no capture after disabling")
 }
 
@@ -537,7 +484,7 @@ func (s *LoggerIntegrationTestSuite) TestNilCaptureFuncDisablesCapture() {
 func TestLogCaptureFuncType(t *testing.T) {
 	t.Parallel()
 
-	// Verify LogCaptureFunc can be assigned and called
+	// Verify LogCaptureFunc can be assigned and called.
 	var (
 		called                     bool
 		capturedLevel, capturedMsg string
@@ -549,7 +496,7 @@ func TestLogCaptureFuncType(t *testing.T) {
 		capturedMsg = msg
 	})
 
-	// Call the function
+	// Call the function.
 	captureFunc("INF", "test message")
 
 	assert.True(t, called)
@@ -561,11 +508,8 @@ func TestLogCaptureFuncType(t *testing.T) {
 func TestLoggerInterfaceCompliance(t *testing.T) {
 	t.Parallel()
 
-	// Test that *mocks.MockLogger implements logger.Logger
+	// Test that *mocks.MockLogger implements logger.Logger.
 	var _ logger.Logger = (*mocks.MockLogger)(nil)
-
-	// Verify the interface has all expected methods
-	// This is a compile-time check
 }
 
 // TestParseLevelIntegration verifies ParseLevel with various inputs.
@@ -575,62 +519,62 @@ func TestParseLevelIntegration(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
-		expected zerolog.Level
+		expected logger.Level
 	}{
 		{
 			name:     "debug lowercase",
 			input:    "debug",
-			expected: zerolog.DebugLevel,
+			expected: logger.DebugLevel,
 		},
 		{
 			name:     "info lowercase",
 			input:    "info",
-			expected: zerolog.InfoLevel,
+			expected: logger.InfoLevel,
 		},
 		{
 			name:     "warn lowercase",
 			input:    "warn",
-			expected: zerolog.WarnLevel,
+			expected: logger.WarnLevel,
 		},
 		{
 			name:     "error lowercase",
 			input:    "error",
-			expected: zerolog.ErrorLevel,
+			expected: logger.ErrorLevel,
 		},
 		{
 			name:     "debug uppercase",
 			input:    "DEBUG",
-			expected: zerolog.DebugLevel,
+			expected: logger.DebugLevel,
 		},
 		{
 			name:     "info mixed case",
 			input:    "Info",
-			expected: zerolog.InfoLevel,
+			expected: logger.InfoLevel,
 		},
 		{
 			name:     "unknown defaults to info",
 			input:    "unknown",
-			expected: zerolog.InfoLevel,
+			expected: logger.InfoLevel,
 		},
 		{
 			name:     "empty defaults to info",
 			input:    "",
-			expected: zerolog.InfoLevel,
+			expected: logger.InfoLevel,
 		},
 		{
 			name:     "trace maps to debug",
 			input:    "trace",
-			expected: zerolog.InfoLevel, // trace is not supported, defaults to info
+			expected: logger.InfoLevel, // trace is not supported, defaults to info
 		},
 		{
 			name:     "fatal maps to info",
 			input:    "fatal",
-			expected: zerolog.InfoLevel, // fatal is not supported, defaults to info
+			expected: logger.InfoLevel, // fatal is not supported, defaults to info
 		},
 		{
 			name:     "panic maps to info",
 			input:    "panic",
-			expected: zerolog.InfoLevel, // panic is not supported, defaults to info
+			expected: logger.InfoLevel, // panic is not supported, defaults to info
 		},
 	}
 
@@ -638,8 +582,7 @@ func TestParseLevelIntegration(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			result := logger.ParseLevel(tt.input)
-			assert.Equal(t, tt.expected, result)
+			assert.Equal(t, tt.expected, logger.ParseLevel(tt.input))
 		})
 	}
 }
@@ -652,17 +595,16 @@ func TestNewLoggerIntegration(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, loggerInstance)
 
-	// Test that all methods can be called without panicking
-	// Note: Some events may be nil if log level is higher than the event level
-	_ = loggerInstance.Debug()
-	_ = loggerInstance.Info()
-	_ = loggerInstance.Warn()
-	_ = loggerInstance.Error()
+	// Test that all methods can be called without panicking.
+	loggerInstance.Debug("integration debug")
+	loggerInstance.Info("integration info")
+	loggerInstance.Warn("integration warn")
+	loggerInstance.Error("integration error")
 
-	// Test level setting (should not panic)
-	loggerInstance.Level(zerolog.DebugLevel)
+	// Test level setting (should not panic).
+	loggerInstance.Level(logger.DebugLevel)
 
-	// Test capture func setting (should not panic)
+	// Test capture func setting (should not panic).
 	loggerInstance.SetCaptureFunc(nil)
 }
 
@@ -675,140 +617,65 @@ func TestNewLoggerWithCaptureIntegration(t *testing.T) {
 	require.NotNil(t, loggerInstance)
 	require.NotNil(t, captureWriter)
 
-	// Verify it implements the interface
+	// Verify it implements the interface.
 	iface := loggerInstance
 	assert.NotNil(t, iface)
 
-	// Test capture functionality
+	// Test capture functionality.
 	var captured bool
 
-	captureFunc := func(level, msg string) {
+	captureFunc := func(_, _ string) {
 		captured = true
 	}
 
 	loggerInstance.SetCaptureFunc(captureFunc)
-	loggerInstance.Info().Msg("test capture")
+	loggerInstance.Info("test capture")
 
 	time.Sleep(10 * time.Millisecond)
 	assert.True(t, captured, "expected capture function to be called")
 }
 
-// TestErrorFieldChaining verifies error fields can be chained in log events.
-func TestErrorFieldChaining(t *testing.T) {
+// TestErrorField verifies an error field reaches the output.
+func TestErrorField(t *testing.T) {
 	t.Parallel()
 
-	var buf bytes.Buffer
+	loggerInstance, records := capturedLogger(t)
+	loggerInstance.Error("error occurred", logger.Err(errors.New("test error for field")))
 
-	consoleWriter := zerolog.ConsoleWriter{
-		Out:        &buf,
-		TimeFormat: "2006-01-02",
-		NoColor:    true,
-	}
-
-	zl := zerolog.New(consoleWriter).With().Timestamp().Logger()
-	testError := errors.New("test error for chaining")
-
-	zl.Error().Err(testError).Msg("error occurred")
-
-	output := buf.String()
-	assert.Contains(t, output, "error occurred")
-	assert.Contains(t, output, "test error for chaining")
+	message, found := records.find("error occurred")
+	require.True(t, found, "expected the message to be captured")
+	assert.Contains(t, message.msg, "test error for field")
 }
 
 // TestLogLevelTransitions verifies transitions between log levels.
 func TestLogLevelTransitions(t *testing.T) {
 	t.Parallel()
 
-	var buf bytes.Buffer
+	loggerInstance, records := capturedLogger(t)
 
-	consoleWriter := zerolog.ConsoleWriter{
-		Out:        &buf,
-		TimeFormat: "2006-01-02",
-		NoColor:    true,
-	}
+	// At info level, debug should be filtered.
+	loggerInstance.Level(logger.InfoLevel)
+	loggerInstance.Debug("debug at info level")
+	assert.Zero(t, records.count("debug at info level"))
 
-	zl := zerolog.New(consoleWriter).With().Timestamp().Logger().Level(zerolog.InfoLevel)
+	// Change to debug level.
+	loggerInstance.Level(logger.DebugLevel)
 
-	loggerInstance := &testLoggerWrapper{logger: zl}
+	// Now debug should pass through.
+	loggerInstance.Debug("debug at debug level")
+	assert.Equal(t, 1, records.count("debug at debug level"))
 
-	// At info level, debug should be filtered
-	buf.Reset()
-	loggerInstance.Debug().Msg("debug at info level")
-	assert.Empty(t, buf.String())
+	// Change to error level.
+	loggerInstance.Level(logger.ErrorLevel)
 
-	// Change to debug level
-	loggerInstance.Level(zerolog.DebugLevel)
+	// Now info should be filtered.
+	loggerInstance.Info("info at error level")
+	assert.Zero(t, records.count("info at error level"))
 
-	// Now debug should pass through
-	buf.Reset()
-	loggerInstance.Debug().Msg("debug at debug level")
-	assert.Contains(t, buf.String(), "debug at debug level")
-
-	// Change to error level
-	loggerInstance.Level(zerolog.ErrorLevel)
-
-	// Now info should be filtered
-	buf.Reset()
-	loggerInstance.Info().Msg("info at error level")
-	assert.Empty(t, buf.String())
-
-	// But error should pass
-	buf.Reset()
-	loggerInstance.Error().Msg("error at error level")
-	assert.Contains(t, buf.String(), "error at error level")
+	// But error should pass.
+	loggerInstance.Error("error at error level")
+	assert.Equal(t, 1, records.count("error at error level"))
 }
-
-// testLoggerWrapper wraps zerolog.Logger to implement logger.Logger for testing.
-type testLoggerWrapper struct {
-	logger zerolog.Logger
-	mu     sync.RWMutex
-}
-
-// Debug returns a debug-level event.
-func (t *testLoggerWrapper) Debug() *zerolog.Event {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	return t.logger.Debug()
-}
-
-// Info returns an info-level event.
-func (t *testLoggerWrapper) Info() *zerolog.Event {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	return t.logger.Info()
-}
-
-// Warn returns a warn-level event.
-func (t *testLoggerWrapper) Warn() *zerolog.Event {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	return t.logger.Warn()
-}
-
-// Error returns an error-level event.
-func (t *testLoggerWrapper) Error() *zerolog.Event {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	return t.logger.Error()
-}
-
-// Level sets the log level dynamically.
-func (t *testLoggerWrapper) Level(level zerolog.Level) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	t.logger = t.logger.Level(level)
-}
-
-// SetCaptureFunc is a no-op for this wrapper.
-func (t *testLoggerWrapper) SetCaptureFunc(_ logger.LogCaptureFunc) {}
-
-// Verify testLoggerWrapper implements logger.Logger.
-var _ logger.Logger = (*testLoggerWrapper)(nil)
 
 // BenchmarkLogLevelMethods benchmarks the log level methods.
 func BenchmarkLogLevelMethods(b *testing.B) {
@@ -817,25 +684,25 @@ func BenchmarkLogLevelMethods(b *testing.B) {
 
 	b.Run("Debug", func(b *testing.B) {
 		for b.Loop() {
-			loggerInstance.Debug().Msg("benchmark debug")
+			loggerInstance.Debug("benchmark debug")
 		}
 	})
 
 	b.Run("Info", func(b *testing.B) {
 		for b.Loop() {
-			loggerInstance.Info().Msg("benchmark info")
+			loggerInstance.Info("benchmark info")
 		}
 	})
 
 	b.Run("Warn", func(b *testing.B) {
 		for b.Loop() {
-			loggerInstance.Warn().Msg("benchmark warn")
+			loggerInstance.Warn("benchmark warn")
 		}
 	})
 
 	b.Run("Error", func(b *testing.B) {
 		for b.Loop() {
-			loggerInstance.Error().Msg("benchmark error")
+			loggerInstance.Error("benchmark error")
 		}
 	})
 }
@@ -845,11 +712,11 @@ func BenchmarkLevelChange(b *testing.B) {
 	loggerInstance, err := logger.NewLogger()
 	require.NoError(b, err)
 
-	levels := []zerolog.Level{
-		zerolog.DebugLevel,
-		zerolog.InfoLevel,
-		zerolog.WarnLevel,
-		zerolog.ErrorLevel,
+	levels := []logger.Level{
+		logger.DebugLevel,
+		logger.InfoLevel,
+		logger.WarnLevel,
+		logger.ErrorLevel,
 	}
 
 	for b.Loop() {

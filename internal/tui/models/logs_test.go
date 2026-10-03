@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -111,12 +110,12 @@ func TestToggleVerboseLogging_PreservesStartupVerbose(t *testing.T) {
 
 		m.toggleVerboseLogging()
 		require.False(t, m.showLogs, "the panel is hidden")
-		assert.Equal(t, zerolog.DebugLevel, recorder.level,
+		assert.Equal(t, logger.DebugLevel, recorder.level,
 			"a startup --verbose request is independent of the panel")
 
 		m.toggleVerboseLogging()
 		require.True(t, m.showLogs)
-		assert.Equal(t, zerolog.DebugLevel, recorder.level)
+		assert.Equal(t, logger.DebugLevel, recorder.level)
 	})
 
 	t.Run("returns to the configured level otherwise", func(t *testing.T) {
@@ -135,11 +134,11 @@ func TestToggleVerboseLogging_PreservesStartupVerbose(t *testing.T) {
 
 		m.toggleVerboseLogging()
 		require.True(t, m.showLogs)
-		assert.Equal(t, zerolog.DebugLevel, recorder.level, "opening the panel raises the level")
+		assert.Equal(t, logger.DebugLevel, recorder.level, "opening the panel raises the level")
 
 		m.toggleVerboseLogging()
 		require.False(t, m.showLogs)
-		assert.Equal(t, zerolog.WarnLevel, recorder.level,
+		assert.Equal(t, logger.WarnLevel, recorder.level,
 			"closing the panel returns to the configured level")
 	})
 }
@@ -148,10 +147,10 @@ func TestToggleVerboseLogging_PreservesStartupVerbose(t *testing.T) {
 type levelRecordingLogger struct {
 	logger.Logger
 
-	level zerolog.Level
+	level logger.Level
 }
 
-func (l *levelRecordingLogger) Level(level zerolog.Level) { l.level = level }
+func (l *levelRecordingLogger) Level(level logger.Level) { l.level = level }
 
 // Test_pollLogChannel_ReturnsLogMsg verifies log message is returned when available.
 func Test_pollLogChannel_ReturnsLogMsg(t *testing.T) {

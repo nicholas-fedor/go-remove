@@ -733,7 +733,7 @@ func TestMoveToTrash_SameNameRepeatedly(t *testing.T) {
 	for i := range copies {
 		filePath := filepath.Join(sourceDir, "duplicate.txt")
 
-		err := os.WriteFile(filePath, []byte(fmt.Sprintf("copy %d", i)), 0o600)
+		err := os.WriteFile(filePath, fmt.Appendf(nil, "copy %d", i), 0o600)
 		require.NoError(t, err)
 
 		trashPath, err := trasher.MoveToTrash(ctx, filePath)
@@ -790,7 +790,7 @@ func TestMoveToTrash_ConcurrentSameName(t *testing.T) {
 		waitGroup.Go(func() {
 			filePath := filepath.Join(callerDir, "racer.txt")
 
-			err := os.WriteFile(filePath, []byte(fmt.Sprintf("racer %d", i)), 0o600)
+			err := os.WriteFile(filePath, fmt.Appendf(nil, "racer %d", i), 0o600)
 			if err != nil {
 				mu.Lock()
 				defer mu.Unlock()

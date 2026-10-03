@@ -13,11 +13,9 @@ package cli_test
 import (
 	"bytes"
 	"errors"
-	"io"
 	"os"
 	"testing"
 
-	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -38,6 +36,25 @@ const (
 	testEntryID    = "1709321234:test-binary"
 )
 
+// acceptAnyLogCall lets a mocked logger be called at any level, with or without
+// attached fields, without the call itself failing the test.
+//
+// Each level method is registered for both the bare message form and the
+// message-plus-fields form, since a variadic field list is optional.
+//
+// Parameters:
+//   - log: Mocked logger to relax.
+func acceptAnyLogCall(log *loggermocks.MockLogger) {
+	log.EXPECT().Debug(mock.Anything).Maybe()
+	log.EXPECT().Debug(mock.Anything, mock.Anything).Maybe()
+	log.EXPECT().Info(mock.Anything).Maybe()
+	log.EXPECT().Info(mock.Anything, mock.Anything).Maybe()
+	log.EXPECT().Warn(mock.Anything).Maybe()
+	log.EXPECT().Warn(mock.Anything, mock.Anything).Maybe()
+	log.EXPECT().Error(mock.Anything).Maybe()
+	log.EXPECT().Error(mock.Anything, mock.Anything).Maybe()
+}
+
 // CLIIntegrationTestSuite provides integration tests for the CLI package.
 //
 // This suite tests the orchestration between multiple components:
@@ -53,9 +70,6 @@ type CLIIntegrationTestSuite struct {
 	fsMock      *fsmocks.MockFS
 	loggerMock  *loggermocks.MockLogger
 	historyMock *historymocks.MockManager
-
-	// Test helpers
-	nopLogger zerolog.Logger
 }
 
 // SetupTest initializes the test suite before each test.
@@ -69,9 +83,6 @@ func (s *CLIIntegrationTestSuite) SetupTest() {
 
 	// Setup logger expectations
 	s.setupLoggerExpectations()
-
-	// Initialize nop logger for mock returns
-	s.nopLogger = zerolog.New(io.Discard)
 }
 
 // setupLoggerExpectations configures the logger mock to accept any log calls.
@@ -79,10 +90,7 @@ func (s *CLIIntegrationTestSuite) SetupTest() {
 // This allows the CLI to log as needed without requiring explicit expectations
 // in every test case.
 func (s *CLIIntegrationTestSuite) setupLoggerExpectations() {
-	s.loggerMock.EXPECT().Debug().Return(s.nopLogger.Debug()).Maybe()
-	s.loggerMock.EXPECT().Info().Return(s.nopLogger.Info()).Maybe()
-	s.loggerMock.EXPECT().Warn().Return(s.nopLogger.Warn()).Maybe()
-	s.loggerMock.EXPECT().Error().Return(s.nopLogger.Error()).Maybe()
+	acceptAnyLogCall(s.loggerMock)
 }
 
 // captureStdout redirects os.Stdout and returns a function that restores stdout
@@ -502,11 +510,7 @@ func (s *CLIIntegrationTestSuite) TestRunConfigPropagation() {
 			loggerMock := loggermocks.NewMockLogger(s.T())
 
 			// Setup logger expectations
-			nopLogger := zerolog.New(io.Discard)
-			loggerMock.EXPECT().Debug().Return(nopLogger.Debug()).Maybe()
-			loggerMock.EXPECT().Info().Return(nopLogger.Info()).Maybe()
-			loggerMock.EXPECT().Warn().Return(nopLogger.Warn()).Maybe()
-			loggerMock.EXPECT().Error().Return(nopLogger.Error()).Maybe()
+			acceptAnyLogCall(loggerMock)
 
 			// Setup expectations based on config
 			fsMock.EXPECT().
@@ -791,11 +795,7 @@ func TestErrorWrapping(t *testing.T) {
 	loggerMock := loggermocks.NewMockLogger(t)
 
 	// Setup logger expectations
-	nopLogger := zerolog.New(io.Discard)
-	loggerMock.EXPECT().Debug().Return(nopLogger.Debug()).Maybe()
-	loggerMock.EXPECT().Info().Return(nopLogger.Info()).Maybe()
-	loggerMock.EXPECT().Warn().Return(nopLogger.Warn()).Maybe()
-	loggerMock.EXPECT().Error().Return(nopLogger.Error()).Maybe()
+	acceptAnyLogCall(loggerMock)
 
 	// Setup mock expectations - fsMock returns the original error
 	fsMock.EXPECT().

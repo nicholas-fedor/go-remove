@@ -43,6 +43,25 @@ const (
 // testEntryID is the expected entry ID with 20-digit zero-padded timestamp.
 var testEntryID = storage.GenerateKey(1709321234, testBinaryName)
 
+// acceptAnyLogCall lets a mocked logger be called at any level, with or without
+// attached fields, without the call itself failing the test.
+//
+// Each level method is registered for both the bare message form and the
+// message-plus-fields form, since a variadic field list is optional.
+//
+// Parameters:
+//   - log: Mocked logger to relax.
+func acceptAnyLogCall(log *loggermocks.MockLogger) {
+	log.EXPECT().Debug(mock.Anything).Maybe()
+	log.EXPECT().Debug(mock.Anything, mock.Anything).Maybe()
+	log.EXPECT().Info(mock.Anything).Maybe()
+	log.EXPECT().Info(mock.Anything, mock.Anything).Maybe()
+	log.EXPECT().Warn(mock.Anything).Maybe()
+	log.EXPECT().Warn(mock.Anything, mock.Anything).Maybe()
+	log.EXPECT().Error(mock.Anything).Maybe()
+	log.EXPECT().Error(mock.Anything, mock.Anything).Maybe()
+}
+
 // setupManagerTest creates a new HistoryManager with mock dependencies for testing.
 func setupManagerTest(
 	t *testing.T,
@@ -55,10 +74,7 @@ func setupManagerTest(
 	mockLogger := loggermocks.NewMockLogger(t)
 
 	// Setup logger mock to accept any calls
-	mockLogger.EXPECT().Debug().Return(nil).Maybe()
-	mockLogger.EXPECT().Info().Return(nil).Maybe()
-	mockLogger.EXPECT().Warn().Return(nil).Maybe()
-	mockLogger.EXPECT().Error().Return(nil).Maybe()
+	acceptAnyLogCall(mockLogger)
 
 	manager := NewManager(mockTrasher, mockStorer, mockExtractor, mockLogger)
 

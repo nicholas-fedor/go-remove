@@ -6,7 +6,6 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 package fs
 
 import (
-	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,8 +14,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/nicholas-fedor/go-remove/internal/logger"
@@ -275,13 +274,9 @@ func TestRealFS_RemoveBinary(t *testing.T) {
 					t.Helper()
 
 					// Create mock with expectations for verbose logging.
-					// Use RunAndReturn to create a new event on each call, since
-					// zerolog events are consumed after Msg/Msgf and cannot be reused.
 					log := mocks.NewMockLogger(t)
-					zl := zerolog.New(io.Discard).With().Logger()
-
-					log.EXPECT().Debug().RunAndReturn(zl.Debug).Maybe()
-					log.EXPECT().Info().RunAndReturn(zl.Info).Maybe()
+					log.EXPECT().Debug(mock.Anything, mock.Anything).Maybe()
+					log.EXPECT().Info(mock.Anything, mock.Anything).Maybe()
 
 					return log
 				},
@@ -321,15 +316,21 @@ func TestRealFS_RemoveBinary(t *testing.T) {
 func TestRealFS_RemoveBinary_VerboseLogging(t *testing.T) {
 	log := mocks.NewMockLogger(t)
 
-	// Use RunAndReturn to create a new event on each call, since
-	// zerolog events are consumed after Msg/Msgf and cannot be reused.
-	zl := zerolog.New(io.Discard).With().Logger()
-
-	log.EXPECT().Debug().RunAndReturn(zl.Debug).Maybe()
-	log.EXPECT().Info().RunAndReturn(zl.Info).Maybe()
-
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "testbin")
+
+	// Mockery records the variadic tail as a single slice argument, so a call that
+	// carries fields expects the message plus that slice rather than the fields
+	// spread out.
+	log.EXPECT().
+		Debug("Constructed binary path", []logger.Field{logger.Str("path", tmpFile)}).
+		Once()
+	log.EXPECT().
+		Info("Removing binary", []logger.Field{logger.Str("path", tmpFile)}).
+		Once()
+	log.EXPECT().
+		Info("Successfully removed binary", []logger.Field{logger.Str("binary", "testbin")}).
+		Once()
 
 	err := os.WriteFile(tmpFile, []byte("test"), 0o600)
 	if err != nil {
@@ -343,9 +344,8 @@ func TestRealFS_RemoveBinary_VerboseLogging(t *testing.T) {
 		t.Errorf("RemoveBinary() unexpected error = %v", err)
 	}
 
-	// Verify that Debug and Info were called.
-	log.AssertCalled(t, "Debug")
-	log.AssertCalled(t, "Info")
+	// The expectations above are asserted on cleanup, so reaching this point
+	// without a mock failure means every message was recorded as expected.
 }
 
 // TestRealFS_AdjustBinaryPath_StaysInDirectory verifies a positional argument

@@ -7,6 +7,7 @@ package logger
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"strings"
 	"sync"
@@ -40,261 +41,309 @@ func (sb *syncBuffer) String() string {
 	return sb.buf.String()
 }
 
-// TestNewLogger verifies the NewLogger function creates a valid logger.
-func TestNewLogger(t *testing.T) {
-	tests := []struct {
-		name    string
-		wantErr bool
-	}{
-		{
-			name:    "successful creation",
-			wantErr: false,
-		},
+// newTestLogger builds a ZerologLogger writing console output into out.
+//
+// Parameters:
+//   - out: Destination for the console output.
+//   - level: Minimum level the logger emits.
+//
+// Returns:
+//   - A logger ready to log into out.
+func newTestLogger(out io.Writer, level Level) *ZerologLogger {
+	output := zerolog.ConsoleWriter{
+		Out:        out,
+		TimeFormat: "2006-01-02",
+		NoColor:    true,
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := NewLogger()
-			if tt.wantErr {
-				require.Error(t, err)
 
-				return
-			}
+	zerologLogger := zerolog.New(output).
+		With().
+		Timestamp().
+		Logger().
+		Level(level.zerologLevel())
 
-			require.NoError(t, err)
-			assert.NotNil(t, got)
-
-			// Verify the returned logger is a *ZerologLogger.
-			_, ok := got.(*ZerologLogger)
-			assert.True(t, ok, "expected *ZerologLogger, got %T", got)
-		})
-	}
+	return &ZerologLogger{logger: zerologLogger, output: output}
 }
 
-// TestZerologLogger_LogLevelMethods verifies all log level methods work correctly.
+// TestNewLogger verifies the NewLogger function creates a valid logger.
+func TestNewLogger(t *testing.T) {
+	t.Parallel()
+
+	got, err := NewLogger()
+	require.NoError(t, err)
+	assert.NotNil(t, got)
+
+	// Verify the returned logger is a *ZerologLogger.
+	_, ok := got.(*ZerologLogger)
+	assert.True(t, ok, "expected *ZerologLogger, got %T", got)
+}
+
+// TestZerologLogger_LogLevelMethods verifies all log level methods write correctly.
 func TestZerologLogger_LogLevelMethods(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name     string
-		level    zerolog.Level
-		logFunc  func(l Logger) *zerolog.Event
-		wantLog  bool
+		level    Level
+		logFunc  func(l Logger, msg string, fields ...Field)
 		contains string
 	}{
 		{
-			name:     "debug level with debug enabled",
-			level:    zerolog.DebugLevel,
-			logFunc:  func(l Logger) *zerolog.Event { return l.Debug() },
-			wantLog:  true,
+			name:     "debug level",
+			level:    DebugLevel,
+			logFunc:  func(l Logger, msg string, fields ...Field) { l.Debug(msg, fields...) },
 			contains: "DBG",
 		},
 		{
 			name:     "info level",
-			level:    zerolog.InfoLevel,
-			logFunc:  func(l Logger) *zerolog.Event { return l.Info() },
-			wantLog:  true,
+			level:    InfoLevel,
+			logFunc:  func(l Logger, msg string, fields ...Field) { l.Info(msg, fields...) },
 			contains: "INF",
 		},
 		{
 			name:     "warn level",
-			level:    zerolog.WarnLevel,
-			logFunc:  func(l Logger) *zerolog.Event { return l.Warn() },
-			wantLog:  true,
+			level:    WarnLevel,
+			logFunc:  func(l Logger, msg string, fields ...Field) { l.Warn(msg, fields...) },
 			contains: "WRN",
 		},
 		{
 			name:     "error level",
-			level:    zerolog.ErrorLevel,
-			logFunc:  func(l Logger) *zerolog.Event { return l.Error() },
-			wantLog:  true,
+			level:    ErrorLevel,
+			logFunc:  func(l Logger, msg string, fields ...Field) { l.Error(msg, fields...) },
 			contains: "ERR",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a buffer to capture log output.
+			t.Parallel()
+
 			var buf bytes.Buffer
 
-			output := zerolog.ConsoleWriter{
-				Out:        &buf,
-				TimeFormat: "2006-01-02",
-				NoColor:    true,
-			}
+			logger := newTestLogger(&buf, tt.level)
+			tt.logFunc(logger, "test message")
 
-			// Create logger with specific level.
-			zl := zerolog.New(output).
-				With().
-				Timestamp().
-				Logger().
-				Level(tt.level)
-
-			logger := &ZerologLogger{logger: zl, output: output}
-
-			// Call the log function with a test message.
-			tt.logFunc(logger).Msg("test message")
-
-			outputStr := buf.String()
-
-			if tt.wantLog {
-				assert.Contains(t, outputStr, tt.contains)
-				assert.Contains(t, outputStr, "test message")
-			}
+			assert.Contains(t, buf.String(), tt.contains)
+			assert.Contains(t, buf.String(), "test message")
 		})
 	}
 }
 
+// TestZerologLogger_Fields verifies every field constructor reaches the output.
+func TestZerologLogger_Fields(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+
+	logger := newTestLogger(&buf, DebugLevel)
+	logger.Info(
+		"field message",
+		Str("component", "test"),
+		Int("count", 42),
+		Bool("flag", true),
+		Err(errors.New("boom")),
+	)
+
+	output := buf.String()
+	assert.Contains(t, output, "field message")
+	assert.Contains(t, output, "component=test")
+	assert.Contains(t, output, "count=42")
+	assert.Contains(t, output, "flag=true")
+	assert.Contains(t, output, "error=boom")
+}
+
+// TestZerologLogger_NilErrField verifies a nil error writes no error field.
+func TestZerologLogger_NilErrField(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+
+	logger := newTestLogger(&buf, DebugLevel)
+	logger.Warn("no error attached", Err(nil))
+
+	output := buf.String()
+	assert.Contains(t, output, "no error attached")
+	assert.NotContains(t, output, "error=")
+}
+
 // TestZerologLogger_Level verifies the Level method changes log level dynamically.
 func TestZerologLogger_Level(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name         string
-		initialLevel zerolog.Level
-		newLevel     zerolog.Level
-		logLevel     zerolog.Level
+		initialLevel Level
+		newLevel     Level
+		logLevel     Level
 		shouldLog    bool
 	}{
 		{
 			name:         "change from info to debug",
-			initialLevel: zerolog.InfoLevel,
-			newLevel:     zerolog.DebugLevel,
-			logLevel:     zerolog.DebugLevel,
+			initialLevel: InfoLevel,
+			newLevel:     DebugLevel,
+			logLevel:     DebugLevel,
 			shouldLog:    true,
 		},
 		{
 			name:         "change from debug to error",
-			initialLevel: zerolog.DebugLevel,
-			newLevel:     zerolog.ErrorLevel,
-			logLevel:     zerolog.InfoLevel,
+			initialLevel: DebugLevel,
+			newLevel:     ErrorLevel,
+			logLevel:     InfoLevel,
 			shouldLog:    false,
 		},
 		{
 			name:         "no change in level",
-			initialLevel: zerolog.InfoLevel,
-			newLevel:     zerolog.InfoLevel,
-			logLevel:     zerolog.InfoLevel,
+			initialLevel: InfoLevel,
+			newLevel:     InfoLevel,
+			logLevel:     InfoLevel,
 			shouldLog:    true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			var buf bytes.Buffer
 
-			output := zerolog.ConsoleWriter{
-				Out:        &buf,
-				TimeFormat: "2006-01-02",
-				NoColor:    true,
-			}
-
-			// Create logger with initial level.
-			zl := zerolog.New(output).
-				With().
-				Timestamp().
-				Logger().
-				Level(tt.initialLevel)
-
-			logger := &ZerologLogger{logger: zl, output: output}
-
-			// Change the level.
+			logger := newTestLogger(&buf, tt.initialLevel)
 			logger.Level(tt.newLevel)
 
-			// Try to log at the specified level.
 			switch tt.logLevel {
-			case zerolog.DebugLevel:
-				logger.Debug().Msg("test debug")
-			case zerolog.InfoLevel:
-				logger.Info().Msg("test info")
-			case zerolog.ErrorLevel:
-				logger.Error().Msg("test error")
+			case DebugLevel:
+				logger.Debug("test debug")
+			case InfoLevel:
+				logger.Info("test info")
+			case ErrorLevel:
+				logger.Error("test error")
 			}
-
-			outputStr := buf.String()
 
 			if tt.shouldLog {
-				assert.NotEmpty(t, outputStr)
+				assert.NotEmpty(t, buf.String())
 			} else {
-				assert.Empty(t, outputStr)
+				assert.Empty(t, buf.String())
 			}
+		})
+	}
+}
+
+// TestLevel_zerologLevel verifies Level maps onto the matching zerolog severity.
+func TestLevel_zerologLevel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		level Level
+		want  zerolog.Level
+	}{
+		{name: "debug", level: DebugLevel, want: zerolog.DebugLevel},
+		{name: "info", level: InfoLevel, want: zerolog.InfoLevel},
+		{name: "warn", level: WarnLevel, want: zerolog.WarnLevel},
+		{name: "error", level: ErrorLevel, want: zerolog.ErrorLevel},
+		{name: "unknown value falls back to info", level: Level(99), want: zerolog.InfoLevel},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tt.want, tt.level.zerologLevel())
 		})
 	}
 }
 
 // TestParseLevel verifies the ParseLevel function's string parsing.
 func TestParseLevel(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name  string
 		level string
-		want  zerolog.Level
+		want  Level
 	}{
 		{
 			name:  "debug lowercase",
 			level: "debug",
-			want:  zerolog.DebugLevel,
+			want:  DebugLevel,
 		},
 		{
 			name:  "info lowercase",
 			level: "info",
-			want:  zerolog.InfoLevel,
+			want:  InfoLevel,
 		},
 		{
 			name:  "warn lowercase",
 			level: "warn",
-			want:  zerolog.WarnLevel,
+			want:  WarnLevel,
 		},
 		{
 			name:  "error lowercase",
 			level: "error",
-			want:  zerolog.ErrorLevel,
+			want:  ErrorLevel,
 		},
 		{
 			name:  "debug uppercase",
 			level: "DEBUG",
-			want:  zerolog.DebugLevel,
+			want:  DebugLevel,
 		},
 		{
 			name:  "info mixed case",
 			level: "Info",
-			want:  zerolog.InfoLevel,
+			want:  InfoLevel,
 		},
 		{
 			name:  "unknown level defaults to info",
 			level: "unknown",
-			want:  zerolog.InfoLevel,
+			want:  InfoLevel,
 		},
 		{
 			name:  "empty string defaults to info",
 			level: "",
-			want:  zerolog.InfoLevel,
+			want:  InfoLevel,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ParseLevel(tt.level)
-			assert.Equal(t, tt.want, got)
+			t.Parallel()
+
+			assert.Equal(t, tt.want, ParseLevel(tt.level))
 		})
 	}
 }
 
+// TestParseLogLevel verifies ParseLogLevel rejects unrecognised names.
+func TestParseLogLevel(t *testing.T) {
+	t.Parallel()
+
+	got, err := ParseLogLevel("warn")
+	require.NoError(t, err)
+	assert.Equal(t, WarnLevel, got)
+
+	got, err = ParseLogLevel("nonsense")
+	require.ErrorIs(t, err, ErrInvalidLogLevel)
+	assert.Equal(t, InfoLevel, got, "an unrecognised name reports info alongside the error")
+}
+
 // BenchmarkZerologLogger_Debug benchmarks the Debug method.
 func BenchmarkZerologLogger_Debug(b *testing.B) {
-	zl := zerolog.New(io.Discard).With().Logger()
-	logger := &ZerologLogger{logger: zl}
+	logger := newTestLogger(io.Discard, DebugLevel)
 
 	b.ResetTimer()
 
 	for b.Loop() {
-		logger.Debug().Msg("benchmark message")
+		logger.Debug("benchmark message")
 	}
 }
 
 // BenchmarkZerologLogger_Info benchmarks the Info method.
 func BenchmarkZerologLogger_Info(b *testing.B) {
-	zl := zerolog.New(io.Discard).With().Logger()
-	logger := &ZerologLogger{logger: zl}
+	logger := newTestLogger(io.Discard, DebugLevel)
 
 	b.ResetTimer()
 
 	for b.Loop() {
-		logger.Info().Msg("benchmark message")
+		logger.Info("benchmark message")
 	}
 }
 
@@ -313,45 +362,66 @@ func BenchmarkParseLevel(b *testing.B) {
 
 // TestZerologLogger_ConcurrentAccess verifies thread safety of logger methods.
 func TestZerologLogger_ConcurrentAccess(t *testing.T) {
+	t.Parallel()
+
 	buf := &syncBuffer{}
-
-	output := zerolog.ConsoleWriter{
-		Out:        buf,
-		TimeFormat: "2006-01-02",
-		NoColor:    true,
-	}
-
-	zl := zerolog.New(output).With().Timestamp().Logger().Level(zerolog.DebugLevel)
-	logger := &ZerologLogger{logger: zl, output: output}
+	logger := newTestLogger(buf, DebugLevel)
 
 	var wg sync.WaitGroup
 
 	wg.Go(func() {
 		for range 100 {
-			logger.Debug().Msg("debug message")
+			logger.Debug("debug message")
 		}
 	})
 	wg.Go(func() {
 		for range 100 {
-			logger.Info().Msg("info message")
+			logger.Info("info message")
 		}
 	})
 	wg.Go(func() {
 		for range 100 {
-			logger.Warn().Msg("warn message")
+			logger.Warn("warn message")
 		}
 	})
 	wg.Go(func() {
 		for range 100 {
-			logger.Error().Msg("error message")
+			logger.Error("error message")
 		}
 	})
 	wg.Wait()
 
 	// Verify output contains messages from all levels.
-	outputStr := buf.String()
-	assert.Positive(t, strings.Count(outputStr, "debug message"))
-	assert.Positive(t, strings.Count(outputStr, "info message"))
-	assert.Positive(t, strings.Count(outputStr, "warn message"))
-	assert.Positive(t, strings.Count(outputStr, "error message"))
+	output := buf.String()
+	assert.Positive(t, strings.Count(output, "debug message"))
+	assert.Positive(t, strings.Count(output, "info message"))
+	assert.Positive(t, strings.Count(output, "warn message"))
+	assert.Positive(t, strings.Count(output, "error message"))
+}
+
+// TestZerologLogger_ConcurrentLevelChanges verifies level changes are safe
+// while messages are being written.
+func TestZerologLogger_ConcurrentLevelChanges(t *testing.T) {
+	t.Parallel()
+
+	logger := newTestLogger(io.Discard, InfoLevel)
+
+	levels := []Level{DebugLevel, InfoLevel, WarnLevel, ErrorLevel}
+
+	var wg sync.WaitGroup
+
+	for range 50 {
+		wg.Go(func() {
+			for _, level := range levels {
+				logger.Level(level)
+			}
+		})
+		wg.Go(func() {
+			for _, level := range levels {
+				logger.log(level, "concurrent message", nil)
+			}
+		})
+	}
+
+	wg.Wait()
 }

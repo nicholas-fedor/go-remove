@@ -122,9 +122,8 @@ func TestManagedTrash_RoundTripsReservedCharacters(t *testing.T) {
 	}
 }
 
-// TestManagedTrash_FullLifecycle exercises the operations that the Windows
-// Recycle Bin could not support, because IsInTrash there always reported
-// false and so restore, listing and permanent deletion never ran.
+// TestManagedTrash_FullLifecycle exercises listing, restoring and permanent
+// deletion, which go-remove carries out itself against its own trash directory.
 //
 // This is the end-to-end guarantee: a binary can be trashed, listed, restored
 // and finally removed from the trash, on every supported platform.
