@@ -12,6 +12,8 @@ import (
 	"charm.land/lipgloss/v2"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/nicholas-fedor/go-remove/internal/history"
 )
 
 // Confirmation identifies a destructive action awaiting acknowledgement.
@@ -26,11 +28,9 @@ const (
 	ConfirmDeletePerm = "delete_permanent"
 )
 
-// History table layout constants. These must stay consistent with the rows the
-// table writes.
+// History table layout constants.
 const (
-	dateTimeFormat      = "2006-01-02 15:04" // Format for displaying timestamps
-	separatorAdjustment = 2                  // Extra width for the column separator
+	dateTimeFormat = "2006-01-02 15:04" // Format for displaying timestamps
 
 	historyDateHeading   = "Date/Time"
 	historyDateWidth     = 16    // Widest date the table shows before yielding space
@@ -60,34 +60,41 @@ type historyColumns struct {
 	content   int
 }
 
+// width returns the cells the table occupies, not counting the cursor prefix
+// that every row and the header both carry.
+func (c historyColumns) width() int {
+	total := c.date + historyColumnDivider + c.name
+	if c.showTrash {
+		total += historyColumnDivider + c.trash
+	}
+
+	return total
+}
+
 // sizeHistoryColumns derives the table widths from the terminal width.
-//
-// The trash column is dropped first because it is the least informative, and
-// neither remaining column is forced wider than the space available, so a
-// narrow window truncates rather than wrapping.
 //
 // Parameters:
 //   - width: Terminal width in cells.
+//   - entries: The history entries the table will show.
 //
 // Returns:
 //   - The column widths for this frame.
-func sizeHistoryColumns(width int) historyColumns {
-	// The frame sets Width(width-LeftPadding) and pads its content by
-	// LeftPadding, so the space left for the columns is the width less both.
-	// Sizing off a single subtraction over-allocates LeftPadding cells and wraps
-	// every row.
+func sizeHistoryColumns(width int, entries []*history.HistoryEntry) historyColumns {
 	content := max(width-2*LeftPadding, 1)
 
-	// Every row also carries a cursor prefix and a column divider, which come off
-	// next.
 	free := max(content-DisplayWidth(historyCursorPrefix)-historyColumnDivider, 1)
+
+	widest := historyMinNameWidth
+	for _, entry := range entries {
+		if width := DisplayWidth(entry.BinaryName); width > widest {
+			widest = width
+		}
+	}
 
 	trashWidth := len(HistoryTrashHeading)
 	dateWidth := min(historyDateWidth, max(free-historyMinNameWidth, 1))
-	nameWithoutTrash := max(free-dateWidth-historyColumnDivider, 1)
+	nameWithoutTrash := min(widest, max(free-dateWidth-historyColumnDivider, 1))
 
-	// The candidate is left unclamped so the comparison below sees the
-	// space that is really left rather than every candidate meeting the minimum.
 	nameWithTrashCandidate := max(
 		free-dateWidth-2*historyColumnDivider-trashWidth,
 		1,
@@ -97,7 +104,7 @@ func sizeHistoryColumns(width int) historyColumns {
 	nameWidth := nameWithoutTrash
 
 	if showTrash {
-		nameWidth = max(nameWithTrashCandidate, historyMinNameWidth)
+		nameWidth = min(widest, nameWithTrashCandidate)
 	}
 
 	return historyColumns{
@@ -145,7 +152,7 @@ func History(state *State) tea.View {
 	case len(state.HistoryEntries) == 0:
 		s.WriteString("No deletion history found.\n")
 	default:
-		columns := sizeHistoryColumns(state.Width)
+		columns := sizeHistoryColumns(state.Width, state.HistoryEntries)
 
 		dateHeading := TruncateToWidth(historyDateHeading, columns.date)
 
@@ -158,23 +165,22 @@ func History(state *State) tea.View {
 				PadToWidth(HistoryTrashHeading, columns.trash)
 		}
 
+		s.WriteString(historyCursorPrefix)
 		s.WriteString(headerStyle.Render(header))
 		s.WriteString("\n")
-		s.WriteString(strings.Repeat("─", min(
-			columns.date+columns.name+separatorAdjustment,
-			columns.content,
+
+		s.WriteString(historyCursorPrefix)
+		s.WriteString(strings.Repeat("─", max(
+			min(columns.width(), columns.content-DisplayWidth(historyCursorPrefix)),
+			0,
 		)))
 		s.WriteString("\n")
 
-		// Title(2) + header(2) + footer(1) + status(1) + padding(2), which
-		// totals minAvailHeightAdjustment so the two views budget alike.
 		reservedHeight := 8
 
 		if state.ShowLogs {
 			visibleLogCount := min(len(state.Logs), MaxVisibleLogLines)
 			if visibleLogCount == 0 {
-				// A line is reserved even when the panel is empty, so the panel
-				// keeps its height.
 				visibleLogCount = 1
 			}
 
@@ -184,8 +190,6 @@ func History(state *State) tea.View {
 		maxVisibleEntries = max(state.Height-reservedHeight, 1)
 		entryCount = len(state.HistoryEntries)
 
-		// The last row of the budget always goes to an entry: an indicator on its
-		// own says nothing about what it is reporting.
 		rowBudget := maxVisibleEntries
 
 		indicatorRowFreed := entryCount > maxVisibleEntries && rowBudget > 1
@@ -193,8 +197,6 @@ func History(state *State) tea.View {
 			rowBudget--
 		}
 
-		// Ensure the cursor is within the visible range, scrolling the window
-		// when it is not.
 		startIdx := 0
 
 		visibleCount = min(entryCount, rowBudget)
@@ -204,7 +206,6 @@ func History(state *State) tea.View {
 			visibleCount = min(entryCount-startIdx, rowBudget)
 		}
 
-		// Only what is left below the window is reported, on a freed indicator row.
 		showMoreIndicator := indicatorRowFreed && startIdx+visibleCount < entryCount
 
 		for i := range visibleCount {
@@ -224,8 +225,6 @@ func History(state *State) tea.View {
 
 			nameStr := entry.BinaryName
 			if DisplayWidth(nameStr) > columns.name {
-				// The ellipsis takes cells of its own, and a column narrower than
-				// it leaves no budget, so the result is capped to the column.
 				budget := max(columns.name-DisplayWidth(historyEllipsis), 0)
 
 				nameStr = TruncateToWidth(nameStr, budget) + historyEllipsis
@@ -323,17 +322,12 @@ func History(state *State) tea.View {
 // Returns:
 //   - The framed content.
 func frame(state *State, body, footer string) string {
-	// The measurement uses the same style as the render, because the left padding
-	// and the width change how many lines the result occupies.
 	style := lipgloss.NewStyle().
 		PaddingLeft(LeftPadding).
 		Width(state.Width - LeftPadding)
 
-	// Measuring what actually renders rather than counting lines keeps the total
-	// from drifting as soon as the layout does.
 	pad := max(state.Height-lipgloss.Height(style.Render(body+footer)), 0)
 	if pad > 0 {
-		// The padding goes inside the body so every line keeps its width.
 		body += strings.Repeat("\n", pad)
 	}
 
