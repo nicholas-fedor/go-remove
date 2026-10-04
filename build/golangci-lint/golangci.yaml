@@ -48,6 +48,7 @@ linters:
     - staticcheck # It's a set of rules from staticcheck. It's not the same thing as the staticcheck binary. The author of staticcheck doesn't support or approve the use of staticcheck as a library inside golangci-lint.
     - tagalign # Check that struct tags are well aligned.
     - testifylint # Checks usage of github.com/stretchr/testify.
+    - unused # Checks Go code for unused constants, variables, functions and types.
     - usestdlibvars # A linter that detect the possibility to use variables/constants from the Go standard library.
     - usetesting # Reports uses of functions with replacement inside the testing package.
     - whitespace # Whitespace is a linter that checks for unnecessary newlines at the start and end of functions, if, for, etc.
@@ -227,6 +228,25 @@ linters:
                 extra-bad-package-names:
                   - helpers
                   - models
+    unused:
+      # Mark all struct fields that have been written to as used.
+      # Default: true
+      field-writes-are-uses: true
+      # Treat IncDec statement (e.g. `i++` or `i--`) as both read and write operation instead of just write.
+      # Default: false
+      post-statements-are-reads: false
+      # Mark all exported fields as used.
+      # default: true
+      exported-fields-are-used: true
+      # Mark all function parameters as used.
+      # default: true
+      parameters-are-used: true
+      # Mark all local variables as used.
+      # default: true
+      local-variables-are-used: true
+      # Mark all identifiers inside generated files as used.
+      # Default: true
+      generated-is-used: true
     varnamelen:
       max-distance: 5
       min-name-length: 3
