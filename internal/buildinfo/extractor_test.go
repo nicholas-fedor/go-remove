@@ -25,6 +25,16 @@ const platformLinux = "linux"
 // platformWindows is the GOOS value for Windows systems.
 const platformWindows = "windows"
 
+// Verify mock implements the interface.
+var _ Extractor = (*mockExtractor)(nil)
+
+// mockExtractor is a mock implementation of the Extractor interface for testing.
+type mockExtractor struct {
+	extractFunc           func(ctx context.Context, binaryPath string) (*BuildInfoData, error)
+	calculateChecksumFunc func(binaryPath string) (string, error)
+	isGoBinaryFunc        func(binaryPath string) bool
+}
+
 // TestNewExtractor tests the creation of a new extractor instance.
 func TestNewExtractor(t *testing.T) {
 	t.Parallel()
@@ -45,7 +55,6 @@ func TestDefaultExtractor_Extract(t *testing.T) {
 	extractor, err := NewExtractor()
 	require.NoError(t, err)
 
-	// Get the path to the test binary (this binary itself)
 	testBinaryPath, err := os.Executable()
 	require.NoError(t, err)
 
@@ -67,7 +76,6 @@ func TestDefaultExtractor_Extract(t *testing.T) {
 			validate: func(t *testing.T, data *BuildInfoData) {
 				t.Helper()
 
-				// Verify basic fields are populated
 				assert.NotEmpty(t, data.GoVersion, "GoVersion should not be empty")
 				assert.NotNil(t, data.Settings, "Settings should not be nil")
 
@@ -166,11 +174,9 @@ func TestDefaultExtractor_Extract_ContextCancellation(t *testing.T) {
 	extractor, err := NewExtractor()
 	require.NoError(t, err)
 
-	// Get the path to the test binary
 	testBinaryPath, err := os.Executable()
 	require.NoError(t, err)
 
-	// Create cancelled context
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
@@ -211,10 +217,8 @@ func TestDefaultExtractor_CalculateChecksum(t *testing.T) {
 			validate: func(t *testing.T, checksum string, content []byte) {
 				t.Helper()
 
-				// Verify checksum is valid hex
 				assert.Len(t, checksum, 64, "SHA256 checksum should be 64 hex characters")
 
-				// Verify by computing expected checksum
 				hasher := sha256.New()
 				hasher.Write(content)
 				expectedChecksum := hex.EncodeToString(hasher.Sum(nil))
@@ -236,10 +240,8 @@ func TestDefaultExtractor_CalculateChecksum(t *testing.T) {
 			validate: func(t *testing.T, checksum string, _ []byte) {
 				t.Helper()
 
-				// Verify checksum format
 				assert.Len(t, checksum, 64, "SHA256 checksum should be 64 hex characters")
 
-				// Verify it's valid hex
 				_, err := hex.DecodeString(checksum)
 				require.NoError(t, err)
 			},
@@ -306,7 +308,6 @@ func TestDefaultExtractor_IsGoBinary(t *testing.T) {
 	extractor, err := NewExtractor()
 	require.NoError(t, err)
 
-	// Get the path to the test binary
 	testBinaryPath, err := os.Executable()
 	require.NoError(t, err)
 
@@ -490,7 +491,6 @@ func TestDefaultExtractor_Extract_WithBuildSettings(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, data)
 
-	// Verify that the data has the expected structure
 	assert.NotEmpty(t, data.GoVersion, "should have Go version")
 	assert.NotNil(t, data.Settings, "should have settings map")
 }
@@ -500,7 +500,6 @@ func BenchmarkCalculateChecksum(b *testing.B) {
 	extractor, err := NewExtractor()
 	require.NoError(b, err)
 
-	// Create a temp file with content
 	tempDir := b.TempDir()
 	testFile := filepath.Join(tempDir, "benchfile.txt")
 
@@ -529,13 +528,6 @@ func BenchmarkIsGoBinary(b *testing.B) {
 	}
 }
 
-// mockExtractor is a mock implementation of the Extractor interface for testing.
-type mockExtractor struct {
-	extractFunc           func(ctx context.Context, binaryPath string) (*BuildInfoData, error)
-	calculateChecksumFunc func(binaryPath string) (string, error)
-	isGoBinaryFunc        func(binaryPath string) bool
-}
-
 func (m *mockExtractor) Extract(ctx context.Context, binaryPath string) (*BuildInfoData, error) {
 	if m.extractFunc != nil {
 		return m.extractFunc(ctx, binaryPath)
@@ -559,6 +551,3 @@ func (m *mockExtractor) IsGoBinary(binaryPath string) bool {
 
 	return false
 }
-
-// Verify mock implements the interface.
-var _ Extractor = (*mockExtractor)(nil)

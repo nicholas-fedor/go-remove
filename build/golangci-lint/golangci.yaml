@@ -39,6 +39,7 @@ linters:
     - intrange # Intrange is a linter to find places where for loops could make use of an integer range.
     - mirror # Reports wrong mirror patterns of bytes/strings usage.
     - misspell # Finds commonly misspelled English words.
+    - modernize # A suite of analyzers that suggest simplifications to Go code, using modern language and library features.
     - nakedret # Checks that functions with naked returns are not longer than a maximum size (can be zero).
     - nlreturn # Nlreturn checks for a new line before return and branch statements to increase code clarity.
     - nolintlint # Reports ill-formed or insufficient nolint directives.
@@ -131,6 +132,35 @@ linters:
   # Linter Settings Configuration
   ######################################################################################################
   settings:
+    decorder:
+      # Required order of `type`, `const`, `var` and `func` declarations inside a file.
+      # Default: types before constants before variables before functions.
+      dec-order:
+        - const
+        - var
+        - type
+        - func
+      # If true, underscore vars (vars with "_" as the name) will be ignored at all checks.
+      # Default: false (underscore vars are not ignored)
+      ignore-underscore-vars: false
+      # If true, order of declarations is not checked at all.
+      # Default: true (disabled)
+      disable-dec-order-check: false
+      # If true, `init` func can be anywhere in file (does not have to be declared before all other functions).
+      # Default: true (disabled)
+      disable-init-func-first-check: false
+      # If true, multiple global `type`, `const` and `var` declarations are allowed.
+      # Default: true (disabled)
+      disable-dec-num-check: true
+      # If true, type declarations will be ignored for dec num check.
+      # Default: false (type statements are not ignored)
+      disable-type-dec-num-check: true
+      # If true, const declarations will be ignored for dec num check.
+      # Default: false (const statements are not ignored)
+      disable-const-dec-num-check: false
+      # If true, var declarations will be ignored for dec num check.
+      # Default: false (var statements are not ignored)
+      disable-var-dec-num-check: false
     # https://golangci-lint.run/docs/linters/configuration/#goconst
     goconst:
       # Minimal length of string constant.
@@ -179,6 +209,8 @@ linters:
       enable-all: true
       disabled-checks:
         - unnamedResult
+    misspell:
+      locale: US
     revive:
       rules:
         - name: var-naming
@@ -531,6 +563,13 @@ output:
   # Add a prefix to the output file references.
   # Default: ""
   # path-prefix: ""
+
+  ####################################################################################################
+  # By default, the report are related to the path obtained by `run.relative-path-mode`.
+  # The mode `abs` allows to show absolute file paths instead of relative file paths.
+  # The option `output.path-prefix` is ignored when using `abs` mode.
+  # Default: ""
+  path-mode: "abs"
 
   ####################################################################################################
   # Order to use when sorting results.

@@ -9,9 +9,6 @@ import (
 	"github.com/nicholas-fedor/go-remove/internal/history"
 )
 
-// Mode selects which screen a State renders.
-type Mode string
-
 const (
 	// ModeBinaries renders the binary selection grid.
 	ModeBinaries Mode = "binaries"
@@ -19,6 +16,9 @@ const (
 	// ModeHistory renders the deletion history table.
 	ModeHistory Mode = "history"
 )
+
+// Mode selects which screen a State renders.
+type Mode string
 
 // State is everything the views need in order to draw a frame.
 //
@@ -62,9 +62,8 @@ type State struct {
 	// empty when none is pending.
 	Confirmation string
 
-	// Logs are the captured log lines, and ShowLogs reports whether the log
-	// panel is visible. Logs is expected to hold the full buffer; the view trims
-	// it to what fits.
+	// ShowLogs reports whether the log panel is visible, and Logs holds the
+	// full buffer, which the view trims to what fits.
 	Logs     []string
 	ShowLogs bool
 }

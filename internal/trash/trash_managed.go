@@ -26,12 +26,13 @@ const (
 	// dirPermission is the permission for creating directories inside the trash.
 	dirPermission = 0o700
 
-	// restoreDirPermission is the permission for a directory recreated during a
-	// restore. The trash keeps its own directories private, but a restore target
-	// belongs to the user, so recreating it at 0o700 would silently change the
-	// permissions of a location such as /usr/local/bin.
+	// A restore target belongs to the user, so recreating it at 0o700 would
+	// change the permissions of a location such as /usr/local/bin. MkdirAll
+	// applies the mode only to directories it creates.
 	restoreDirPermission = 0o755
 )
+
+var _ Trasher = (*managedTrasher)(nil)
 
 // managedTrasher implements Trasher against a trash directory go-remove owns.
 //
@@ -44,8 +45,6 @@ type managedTrasher struct {
 	filesDir  string
 	infoDir   string
 }
-
-var _ Trasher = (*managedTrasher)(nil)
 
 // newTrasher creates a trash manager rooted at the platform default location.
 //
@@ -101,12 +100,11 @@ func newTrasherAt(root string) (Trasher, error) {
 //   - An error if the move fails.
 func (t *managedTrasher) MoveToTrash(ctx context.Context, filePath string) (string, error) {
 	if ctx.Err() != nil {
-		return "", fmt.Errorf("context cancelled: %w", ctx.Err())
+		return "", fmt.Errorf("context canceled: %w", ctx.Err())
 	}
 
-	// Verify source exists. Lstat rather than Stat, because a symlink whose
-	// target is missing still exists and is what should be trashed, whereas
-	// Stat would report it as absent.
+	// Lstat rather than Stat, because a symlink with a missing target still
+	// exists and is what should be trashed.
 	if _, err := os.Lstat(filePath); err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("%w: %s", ErrPathNotFound, filePath)
@@ -116,8 +114,7 @@ func (t *managedTrasher) MoveToTrash(ctx context.Context, filePath string) (stri
 	}
 
 	// Claim a unique trash entry name. The metadata file is written first, so a
-	// crash between the two writes leaves metadata with no data rather than a
-	// file in trash with no way to trace it back.
+	// crash between the writes leaves metadata rather than an untraceable file.
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {
 		absPath = filePath
@@ -134,10 +131,8 @@ func (t *managedTrasher) MoveToTrash(ctx context.Context, filePath string) (stri
 		return "", err
 	}
 
-	// Move file to trash
 	err = t.moveFile(filePath, trashFilePath)
 	if err != nil {
-		// Clean up info file on failure
 		os.Remove(infoFilePath)
 
 		return "", fmt.Errorf("moving file to trash: %w", err)
@@ -160,10 +155,9 @@ func (t *managedTrasher) RestoreFromTrash(
 	trashPath, originalPath string,
 ) error {
 	if ctx.Err() != nil {
-		return fmt.Errorf("context cancelled: %w", ctx.Err())
+		return fmt.Errorf("context canceled: %w", ctx.Err())
 	}
 
-	// Verify file is in trash
 	if !t.IsInTrash(trashPath) {
 		return fmt.Errorf("%w: %s", ErrFileNotInTrash, trashPath)
 	}
@@ -180,7 +174,6 @@ func (t *managedTrasher) RestoreFromTrash(
 
 	originalPath = filepath.Clean(originalPath)
 
-	// Ensure parent directory exists
 	parentDir := filepath.Dir(originalPath)
 	if err := os.MkdirAll(parentDir, restoreDirPermission); err != nil {
 		return fmt.Errorf("creating parent directory: %w", err)
@@ -190,21 +183,15 @@ func (t *managedTrasher) RestoreFromTrash(
 		return err
 	}
 
-	// Clean up trashinfo file
-	infoPath := t.getInfoPath(trashPath)
-	os.Remove(infoPath) // Ignore error
+	// The restore has already succeeded, so a leftover metadata file is not worth
+	// reporting.
+	os.Remove(t.getInfoPath(trashPath))
 
 	return nil
 }
 
 // restoreTo places a trashed file at its original location without ever
 // overwriting an existing file.
-//
-// A hard link is attempted first because the kernel refuses to create one when
-// the destination already exists, which makes the collision check atomic rather
-// than a check-then-act that a concurrent writer can slip through. When the two
-// paths sit on different devices, or the entry is not a regular file, the copy
-// path claims the destination exclusively for the same reason.
 //
 // Parameters:
 //   - ctx: Context for cancellation.
@@ -220,9 +207,11 @@ func (t *managedTrasher) restoreTo(ctx context.Context, trashPath, originalPath 
 		return fmt.Errorf("stating trashed entry: %w", statErr)
 	}
 
-	// Only a regular file takes the hard-link route. link() does not follow
-	// symlinks, so linking one would hard-link the link itself, and every other
-	// entry type is already handled explicitly by the copy path.
+	// The kernel refuses to create a link when the destination already exists, so
+	// this is the collision check itself rather than a check-then-act a
+	// concurrent writer could slip through. Only a regular file qualifies:
+	// link() does not follow symlinks, and the copy path below handles every
+	// other entry type.
 	if info.Mode().IsRegular() {
 		linkErr := os.Link(trashPath, originalPath)
 
@@ -236,13 +225,13 @@ func (t *managedTrasher) restoreTo(ctx context.Context, trashPath, originalPath 
 		case errors.Is(linkErr, fs.ErrExist):
 			return fmt.Errorf("%w: %s", ErrRestoreCollision, originalPath)
 		case ctx.Err() != nil:
-			return fmt.Errorf("context cancelled: %w", ctx.Err())
+			return fmt.Errorf("context canceled: %w", ctx.Err())
 		}
 	}
 
 	// Directories, symlinks, and cross-device moves go through the copy path,
-	// which recreates the entry with its original type and claims the
-	// destination exclusively.
+	// which recreates the original type and claims the destination exclusively
+	// for the same reason the link does.
 	if err := t.copyAndDelete(trashPath, originalPath); err != nil {
 		if errors.Is(err, ErrRestoreCollision) {
 			return fmt.Errorf("%w: %s", ErrRestoreCollision, originalPath)
@@ -262,9 +251,6 @@ func (t *managedTrasher) restoreTo(ctx context.Context, trashPath, originalPath 
 // Returns:
 //   - True if the file is present in trash.
 func (t *managedTrasher) IsInTrash(trashPath string) bool {
-	// Lstat rather than Stat. A symlink whose target has since been removed is
-	// still an entry in the trash, and Stat would report it as absent, which
-	// would make it neither restorable nor deletable.
 	if _, err := os.Lstat(trashPath); err != nil {
 		return false
 	}
@@ -303,7 +289,6 @@ func (t *managedTrasher) ListTrash() ([]TrashEntry, error) {
 
 		originalPath, deletionTime, err := t.readTrashInfo(infoPath)
 		if err != nil {
-			// If we can't read info, use defaults
 			originalPath = ""
 			deletionTime = time.Time{}
 		}
@@ -329,21 +314,19 @@ func (t *managedTrasher) ListTrash() ([]TrashEntry, error) {
 //   - An error if deletion fails.
 func (t *managedTrasher) DeletePermanently(ctx context.Context, trashPath string) error {
 	if ctx.Err() != nil {
-		return fmt.Errorf("context cancelled: %w", ctx.Err())
+		return fmt.Errorf("context canceled: %w", ctx.Err())
 	}
 
 	if !t.IsInTrash(trashPath) {
 		return fmt.Errorf("%w: %s", ErrFileNotInTrash, trashPath)
 	}
 
-	// Remove the file/directory
 	if err := os.RemoveAll(trashPath); err != nil {
 		return fmt.Errorf("deleting from trash: %w", err)
 	}
 
-	// Remove trashinfo file
-	infoPath := t.getInfoPath(trashPath)
-	os.Remove(infoPath) // Ignore error
+	// The data file is gone, so a leftover metadata file is not worth reporting.
+	os.Remove(t.getInfoPath(trashPath))
 
 	return nil
 }
@@ -401,10 +384,8 @@ func (t *managedTrasher) moveFile(src, dst string) error {
 		return nil
 	}
 
-	// Only a cross-device move is worth the copy fallback. Treating a
-	// read-only or permission-denied source as a device mismatch would copy the
-	// whole file, fail to unlink the original, and leave an unreferenced
-	// duplicate behind while reporting failure.
+	// Only a cross-device move is worth the copy fallback; a permission-denied
+	// source would leave an unreferenced duplicate behind.
 	if !isCrossDevice(err) {
 		return fmt.Errorf("moving %s: %w", src, err)
 	}
@@ -426,16 +407,14 @@ func (t *managedTrasher) copyAndDelete(src, dst string) error {
 		return fmt.Errorf("stating source: %w", err)
 	}
 
-	// Handle symlinks specially to preserve them
 	if srcInfo.Mode()&os.ModeSymlink != 0 {
 		linkTarget, err := os.Readlink(src)
 		if err != nil {
 			return fmt.Errorf("reading symlink: %w", err)
 		}
 
-		// The destination is claimed the same way as for files and directories,
-		// so an occupied destination is reported as a collision rather than a
-		// generic symlink failure.
+		// The destination is claimed as for files and directories, so an
+		// occupied one is a collision rather than a generic symlink failure.
 		if err := os.Symlink(linkTarget, dst); err != nil {
 			if errors.Is(err, fs.ErrExist) {
 				return fmt.Errorf("%w: %s", ErrRestoreCollision, dst)
@@ -479,7 +458,7 @@ func (t *managedTrasher) copyAndDelete(src, dst string) error {
 //   - An error if the copy fails.
 func (t *managedTrasher) copyFile(src, dst string, srcInfo os.FileInfo) error {
 	// Opening a named pipe blocks until a writer appears, and nothing in this
-	// path can be cancelled, so anything but a regular file is refused up front.
+	// path can be canceled, so anything but a regular file is refused up front.
 	if !srcInfo.Mode().IsRegular() {
 		return fmt.Errorf(
 			"%w: %s is a %s",
@@ -526,7 +505,6 @@ func (t *managedTrasher) copyFile(src, dst string, srcInfo os.FileInfo) error {
 		return fmt.Errorf("closing destination file: %w", err)
 	}
 
-	// Preserve modification time
 	mtime := srcInfo.ModTime()
 	atime := time.Now()
 
@@ -548,10 +526,8 @@ func (t *managedTrasher) copyFile(src, dst string, srcInfo os.FileInfo) error {
 func (t *managedTrasher) copyDir(src, dst string) error {
 	created, err := t.copyDirContents(src, dst)
 	if err != nil && created {
-		// The destination was made by this call, so a partial tree must not be
-		// stranded. A destination this call did not create belongs to the
-		// caller and is left alone, which is what stops a collision from
-		// deleting the very directory it detected.
+		// Only a destination this call created is removed, so a collision
+		// cannot delete the very directory it detected.
 		os.RemoveAll(dst)
 	}
 
@@ -574,9 +550,8 @@ func (t *managedTrasher) copyDirContents(src, dst string) (bool, error) {
 		return false, fmt.Errorf("stating source directory: %w", err)
 	}
 
-	// The destination root is claimed exclusively. MkdirAll would succeed when
-	// the directory already exists and then merge the two trees, which silently
-	// interleaves files instead of refusing the restore.
+	// The destination root is claimed exclusively, since MkdirAll would merge
+	// the two trees instead of refusing the restore.
 	if err := os.Mkdir(dst, srcInfo.Mode()&fs.ModePerm); err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return false, fmt.Errorf("%w: %s", ErrRestoreCollision, dst)
@@ -600,7 +575,6 @@ func (t *managedTrasher) copyDirContents(src, dst string) (bool, error) {
 			return true, fmt.Errorf("getting entry info: %w", err)
 		}
 
-		// Handle symlinks specially to preserve them
 		if info.Mode()&os.ModeSymlink != 0 {
 			linkTarget, err := os.Readlink(srcPath)
 			if err != nil {

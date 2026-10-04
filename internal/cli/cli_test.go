@@ -20,6 +20,18 @@ import (
 	"github.com/nicholas-fedor/go-remove/internal/tui"
 )
 
+// testCase defines the structure for TestRun test cases.
+type testCase struct {
+	name       string
+	config     Config
+	setupFS    func(t *testing.T) *mockFS.MockFS
+	setupLog   func() logger.Logger
+	wantErr    bool
+	wantErrIs  error       // Sentinel the error must match, when set
+	isTerminal func() bool // Terminal check for the interactive branch, when set
+	wantOutput string      // Expected stdout output for non-verbose success
+}
+
 // captureStdout redirects os.Stdout and returns a function that restores stdout
 // and returns the captured output as a string.
 func captureStdout(t *testing.T) func() string {
@@ -59,18 +71,6 @@ func captureStdout(t *testing.T) func() string {
 	}
 }
 
-// testCase defines the structure for TestRun test cases.
-type testCase struct {
-	name       string
-	config     Config
-	setupFS    func(t *testing.T) *mockFS.MockFS
-	setupLog   func() logger.Logger
-	wantErr    bool
-	wantErrIs  error       // Sentinel the error must match, when set
-	isTerminal func() bool // Terminal check for the interactive branch, when set
-	wantOutput string      // Expected stdout output for non-verbose success
-}
-
 // runTestCase executes a single test case with the provided configuration.
 // It handles stdout capture, dependency setup, execution, and assertions.
 func runTestCase(t *testing.T, tt *testCase) {
@@ -79,7 +79,6 @@ func runTestCase(t *testing.T, tt *testCase) {
 	// Capture stdout for output verification.
 	getOutput := captureStdout(t)
 
-	// Set up dependencies.
 	mockFSInstance := tt.setupFS(t)
 	mockLog := tt.setupLog()
 
@@ -95,7 +94,6 @@ func runTestCase(t *testing.T, tt *testCase) {
 	// Capture stdout output after execution.
 	gotOutput := getOutput()
 
-	// Verify error behavior matches expectations.
 	if (err != nil) != tt.wantErr {
 		t.Errorf("Run() error = %v, wantErr %v", err, tt.wantErr)
 	}
@@ -105,7 +103,6 @@ func runTestCase(t *testing.T, tt *testCase) {
 		assert.ErrorIs(t, err, tt.wantErrIs, "Run() must surface the branch's own error")
 	}
 
-	// Verify stdout output for non-verbose success cases.
 	if tt.wantOutput != "" && gotOutput != tt.wantOutput {
 		t.Errorf("Run() output = %q, want %q", gotOutput, tt.wantOutput)
 	}

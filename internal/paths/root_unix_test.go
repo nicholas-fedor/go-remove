@@ -51,9 +51,8 @@ func TestTrashRoot(t *testing.T) {
 		xdg := filepath.Join(home, "shared", "data")
 		t.Setenv("XDG_DATA_HOME", xdg)
 
-		// The trash root and the application data root must resolve against the
-		// same base. When they disagreed, a relative XDG_DATA_HOME was rejected
-		// by one layer and accepted by the other.
+		// The two must resolve against the same base, or a relative XDG_DATA_HOME
+		// is rejected by one layer and accepted by the other.
 		require.NotEmpty(t, DataHomeCandidates())
 		assert.Equal(t, xdg, DataHomeCandidates()[0])
 		assert.Equal(t, filepath.Join(xdg, "Trash"), TrashRoot())

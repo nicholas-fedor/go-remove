@@ -27,29 +27,23 @@ func Fuzz_addLogEntry(f *testing.F) {
 			showLogs: true,
 		}
 
-		// Create log message with fuzzed inputs
 		logMsg := LogMsg{Level: level, Message: message}
 
-		// Should not panic with any input
 		m.addLogEntry(logMsg)
 
-		// Verify log was added
 		if len(m.logs) == 0 {
 			t.Error("log entry was not added")
 		}
 
-		// Verify the log entry contains expected format
 		lastEntry := m.logs[len(m.logs)-1]
 		if lastEntry == "" && (level != "" || message != "") {
 			t.Error("log entry format is incorrect")
 		}
 
-		// Test circular buffer by adding many entries
 		for range maxLogLines + 10 {
 			m.addLogEntry(LogMsg{Level: level, Message: message})
 		}
 
-		// Verify buffer size is capped at maxLogLines
 		if len(m.logs) > maxLogLines {
 			t.Errorf(
 				"log buffer exceeded maxLogLines: got %d, want <= %d",
@@ -58,7 +52,6 @@ func Fuzz_addLogEntry(f *testing.F) {
 			)
 		}
 
-		// Verify buffer is not empty
 		if len(m.logs) == 0 {
 			t.Error("log buffer should not be empty after adding entries")
 		}
@@ -68,9 +61,7 @@ func Fuzz_addLogEntry(f *testing.F) {
 // Fuzz_pollLogChannel fuzz tests log polling with random log channel states
 // to ensure pollLogChannel() handles various channel conditions without panicking.
 func Fuzz_pollLogChannel(f *testing.F) {
-	// Seed with flags indicating channel state
-	// First bool: whether to send a message
-	// Second bool: whether to close the channel after sending
+	// Seeds: whether to send a message, then whether to close the channel.
 	f.Add(true, false)
 	f.Add(false, false)
 	f.Add(true, true)

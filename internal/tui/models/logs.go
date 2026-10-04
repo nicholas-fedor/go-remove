@@ -14,14 +14,14 @@ import (
 	"github.com/nicholas-fedor/go-remove/internal/logger"
 )
 
+// pollInterval is the duration between log channel polls.
+const pollInterval = 50 * time.Millisecond
+
 // LogMsg is a Bubble Tea message that carries a log entry to be displayed in the TUI.
 type LogMsg struct {
 	Level   string // Log level (e.g., "DBG", "INF", "WRN", "ERR")
 	Message string // Log message content
 }
-
-// pollInterval is the duration between log channel polls.
-const pollInterval = 50 * time.Millisecond
 
 // pollLogTickMsg is a message sent when it's time to poll for logs again.
 type pollLogTickMsg struct{}
@@ -34,12 +34,11 @@ type pollLogTickMsg struct{}
 //   - log: Logger that will receive the capture callback.
 func (m *Model) setupLogCapture(log logger.Logger) {
 	log.SetCaptureFunc(func(level, msg string) {
-		// Send to channel without blocking.
-		// If channel is full, the message is dropped to prevent blocking.
+		// The channel is bounded, so a full one drops the message rather than
+		// blocking the logger that is trying to write it.
 		select {
 		case m.logChan <- LogMsg{Level: level, Message: msg}:
 		default:
-			// Channel is full, message is dropped to prevent blocking.
 		}
 	})
 }
@@ -51,10 +50,8 @@ func (m *Model) setupLogCapture(log logger.Logger) {
 func (m *Model) toggleVerboseLogging() {
 	m.showLogs = !m.showLogs
 
-	// Opening the panel raises the level so the extra detail is worth having.
-	// Closing it returns to the configured level, except when the user asked
-	// for verbose at startup: that request is independent of the panel, so
-	// hiding the panel must not quietly reduce verbosity below what was asked.
+	// Closing the panel returns to the configured level, except when the user
+	// asked for verbose at startup, which is independent of the panel.
 	if m.showLogs || m.config.Verbose {
 		m.logger.Level(logger.DebugLevel)
 	} else {
@@ -74,31 +71,24 @@ func (m *Model) toggleVerboseLogging() {
 //   - Command that produces a LogMsg or poll tick.
 func (m *Model) pollLogChannel() tea.Cmd {
 	return func() tea.Msg {
-		// Wait for either a log message or a timeout.
-		// Using time.After ensures we return a proper tea.Msg (not a tea.Cmd),
-		// which maintains the continuous polling loop.
 		select {
 		case msg := <-m.logChan:
 			return msg
 		case <-time.After(pollInterval):
-			// No message available after interval, return tick to schedule next poll.
 			return pollLogTickMsg{}
 		}
 	}
 }
 
-// addLogEntry adds a log message to the circular buffer.
+// addLogEntry records a log message, dropping the oldest entries past the buffer.
 //
 // Parameters:
 //   - msg: Log message to display.
 func (m *Model) addLogEntry(msg LogMsg) {
-	// Format the log entry: "[LEVEL] message"
 	entry := fmt.Sprintf("[%s] %s", msg.Level, msg.Message)
 
-	// Add to logs slice
 	m.logs = append(m.logs, entry)
 
-	// Maintain circular buffer size
 	if len(m.logs) > maxLogLines {
 		m.logs = m.logs[len(m.logs)-maxLogLines:]
 	}

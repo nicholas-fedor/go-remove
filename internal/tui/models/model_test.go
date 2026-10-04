@@ -22,6 +22,8 @@ import (
 	"github.com/nicholas-fedor/go-remove/internal/tui/render"
 )
 
+var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
 // TestRefreshChoices_ReportsReadFailure verifies a failed rescan is visible
 // rather than silently leaving a stale list on screen.
 func TestRefreshChoices_ReportsReadFailure(t *testing.T) {
@@ -176,8 +178,6 @@ func Test_model_updateGrid(t *testing.T) {
 	}
 }
 
-var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
-
 func stripANSI(str string) string {
 	return ansiRegex.ReplaceAllString(str, "")
 }
@@ -323,9 +323,7 @@ func Test_model_View(t *testing.T) {
 			view := tt.m.View()
 			got := stripANSI(view.Content)
 
-			// The view measures and fills the terminal itself, so the padding
-			// between the content and the footer is asserted as a height
-			// property rather than hand-counted here.
+			// The view pads to fill the terminal, so blank lines are ignored.
 			if content, want := withoutBlankLines(
 				got,
 			), withoutBlankLines(

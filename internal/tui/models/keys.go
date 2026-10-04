@@ -97,8 +97,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Ignore KeyReleaseMsg. KeyMsg matches both, so a single physical
-		// keystroke would otherwise undo or restore twice.
+		// A key release also arrives as a tea.KeyMsg, so it would act twice per
+		// physical keystroke.
 		if m.confirmation != confirmNone {
 			return m.handleConfirmation(msg)
 		}
@@ -110,7 +110,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateBinaryMode(msg)
 
 	case tea.WindowSizeMsg:
-		// Update dimensions and recalculate grid layout on resize.
 		m.width = msg.Width
 		m.height = msg.Height
 		m.updateGrid()
@@ -118,22 +117,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case pollLogTickMsg:
-		// Continue polling for log messages when a tick occurs.
 		cmd := m.pollLogChannel()
 
 		return m, cmd
 
 	case opResultMsg:
-		// The operation has finished, so the model is interactive again.
 		m.busy = ""
 		m.cancelOp = nil
 
 		// The grid is recalculated below, once the status line is final,
 		// because the layout reserves a row for a status that is present.
 
-		// An interrupted operation still applies its side effects, because the
-		// work may not have observed the cancellation, but it must not then
-		// report success the user has already been told they stopped.
+		// An interrupted operation still applies its side effects, but must not
+		// report success the user was told they stopped.
 		interrupted := m.interrupted
 		m.interrupted = false
 
@@ -158,10 +154,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, reload
 		}
 
-		// The operation may report a more specific outcome than the generic
-		// form, so its own status wins when it sets one. An interrupted
-		// operation keeps the status the interrupt already showed, even though
-		// the refresh below reports the work as done.
+		// An operation's own status wins over the generic form, but an
+		// interrupted operation keeps the status the interrupt already showed.
 		preserved := m.status
 
 		if !interrupted {
@@ -190,18 +184,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, reload
 
 	case LogMsg:
-		// Add log message to the circular buffer.
 		m.addLogEntry(msg)
 		m.updateGrid()
 
-		// Continue polling for more log messages.
-		// This ensures all pending logs are captured.
 		cmd := m.pollLogChannel()
 
 		return m, cmd
 
 	case HistoryMsg:
-		// Handle history loading result
 		m.historyLoading = false
 
 		if msg.quiet {
@@ -224,9 +214,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.status = fmt.Sprintf("Loaded %d history entries", len(m.historyEntries))
 			}
 
-			// The list may have shrunk, leaving the cursor past the end, in
-			// which case no row renders as selected and the view looks frozen on
-			// a phantom row until the user moves up.
+			// The list may have shrunk past the cursor, leaving no row rendered
+			// as selected until the user moves up.
 			m.clampHistoryCursor()
 		}
 
@@ -247,19 +236,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) handleConfirmation(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
-		// Confirmed - execute the operation
 		return m.executeConfirmation()
 	case "ctrl+c":
 		// The one key a dialog must never swallow, otherwise the prompt
 		// becomes a trap for anyone who reaches for it.
 		m.confirmation = confirmNone
-		m.status = "Operation cancelled"
+		m.status = "Operation canceled"
 
 		return m, tea.Quit
 	case "n", "N", "q", "esc":
-		// Cancelled - clear confirmation
 		m.confirmation = confirmNone
-		m.status = "Operation cancelled"
+		m.status = "Operation canceled"
 	}
 
 	return m, nil
@@ -302,9 +289,9 @@ func (m *Model) executeConfirmation() (tea.Model, tea.Cmd) {
 		entry = m.historyEntries[m.historyCursor]
 	}
 
-	// Clearing the history iterates and permanently deletes every trashed
-	// binary, the longest operation in the tool. All confirmations run outside
-	// Update so the view keeps rendering and stays interruptible.
+	// Clear-all drops the history entries and leaves the trashed binaries in
+	// place. Confirmations run outside Update so the view keeps rendering and
+	// stays interruptible.
 	switch confirmation {
 	case confirmClearAll:
 		if manager == nil {
@@ -369,57 +356,47 @@ func (m *Model) executeConfirmation() (tea.Model, tea.Cmd) {
 func (m *Model) updateHistoryMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "q":
-		return m, tea.Quit // Exit the TUI
+		return m, tea.Quit
 
 	case "b":
-		// Back to binary mode
-		m.mode = modeBinaries
-
 		// Clear the history-view status first, so a failed rescan below can set
 		// its own rather than being wiped here.
+		m.mode = modeBinaries
 		m.status = ""
 		m.refreshChoices()
 		m.sortChoices()
 		m.updateGrid()
 
 	case keyUp, "k":
-		// Move cursor up in history list
 		if m.historyCursor > 0 {
 			m.historyCursor--
 		}
 
 	case keyDown, "j":
-		// Move cursor down in history list
 		if m.historyCursor < len(m.historyEntries)-1 {
 			m.historyCursor++
 		}
 
 	case keyEnter:
-		// Restore selected entry
 		return m.handleRestore()
 
 	case "d":
-		// Delete permanently (with confirmation)
 		if m.historyCursor < len(m.historyEntries) {
 			m.confirmation = confirmDeletePerm
 		}
 
 	case "c":
-		// Clear this entry (keep in trash)
 		return m.handleClearEntry(false)
 
 	case "C":
-		// Clear all history (with confirmation)
 		if len(m.historyEntries) > 0 {
 			m.confirmation = confirmClearAll
 		}
 
 	case "u":
-		// Undo most recent deletion
 		return m.handleUndo()
 
 	case "L":
-		// Toggle verbose logging and log panel visibility
 		m.toggleVerboseLogging()
 
 		return m, nil
@@ -439,52 +416,47 @@ func (m *Model) updateHistoryMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m *Model) updateBinaryMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "q":
-		return m, tea.Quit // Exit the TUI
+		return m, tea.Quit
 
 	case keyUp, "k":
-		// Move cursor up, stopping at the top row.
 		if m.cursorY > 0 {
 			m.cursorY--
 		}
 
 	case keyDown, "j":
-		// Move cursor down, respecting grid bounds and item count.
 		newY := m.cursorY + 1
 
-		newIdx := newY + m.cursorX*m.rows // Column-major index (fill down columns)
+		// Column-major order, filling each column top to bottom.
+		newIdx := newY + m.cursorX*m.rows
 		if newY < m.rows && newIdx < len(m.choices) {
 			m.cursorY = newY
 		}
 
 	case keyLeft, "h":
-		// Move cursor left, stopping at the first column.
 		if m.cursorX > 0 {
 			m.cursorX--
 		}
 
 	case keyRight, "l":
-		// Move cursor right, respecting column bounds and item count.
 		newX := m.cursorX + 1
 
-		newIdx := m.cursorY + newX*m.rows // Column-major index
+		// Column-major order, filling each column top to bottom.
+		newIdx := m.cursorY + newX*m.rows
 		if newX < m.cols && newIdx < len(m.choices) {
 			m.cursorX = newX
 		}
 
 	case "s":
-		// Toggle sort order and re-sort the choices.
 		m.sortAscending = !m.sortAscending
 		m.sortChoices()
 		m.updateGrid()
 
 	case "L":
-		// Toggle verbose logging and log panel visibility.
 		m.toggleVerboseLogging()
 
 		return m, nil
 
 	case "r":
-		// Switch to history view
 		m.mode = modeHistory
 		m.historyLoading = true
 		m.historyCursor = 0
@@ -495,11 +467,9 @@ func (m *Model) updateBinaryMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case "u":
-		// Undo most recent deletion
 		return m.handleUndo()
 
 	case keyEnter:
-		// Remove the selected binary and update the TUI state.
 		return m.handleRemove()
 	}
 
@@ -516,7 +486,8 @@ func (m *Model) handleRemove() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	idx := m.cursorY + m.cursorX*m.rows // Column-major index
+	// Column-major order, filling each column top to bottom.
+	idx := m.cursorY + m.cursorX*m.rows
 	if idx >= len(m.choices) {
 		return m, nil
 	}
@@ -533,7 +504,6 @@ func (m *Model) handleRemove() (tea.Model, tea.Cmd) {
 	removeCmd := m.runAsync(
 		"removing "+name,
 		func(ctx context.Context) error {
-			// Use history manager if available (it handles trash plus history).
 			if manager != nil {
 				if _, err := manager.RecordDeletion(ctx, binaryPath); err != nil {
 					return fmt.Errorf("recording %s: %w", name, err)
@@ -542,7 +512,6 @@ func (m *Model) handleRemove() (tea.Model, tea.Cmd) {
 				return nil
 			}
 
-			// Fallback: permanent delete only without a manager.
 			if err := filesystem.RemoveBinary(
 				binaryPath,
 				name,
@@ -587,7 +556,6 @@ func (m *Model) handleRestore() (tea.Model, tea.Cmd) {
 
 	entry := m.historyEntries[m.historyCursor]
 
-	// Check if entry can be restored
 	if !entry.InTrash {
 		m.status = fmt.Sprintf("Cannot restore %s: not available in trash", entry.BinaryName)
 
@@ -664,7 +632,6 @@ func (m *Model) handleUndo() (tea.Model, tea.Cmd) {
 			return nil
 		},
 		func(m *Model) {
-			// Refresh history and binaries if in binary mode.
 			if m.mode == modeBinaries {
 				m.refreshChoices()
 				m.sortChoices()
@@ -731,7 +698,7 @@ func (m *Model) handleClearEntry(deleteFromTrash bool) (tea.Model, tea.Cmd) {
 		} else {
 			m.status = "Cleared history entry for " + entry.BinaryName
 		}
-		// Refresh history
+
 		cmd := m.loadHistory()
 
 		return m, cmd

@@ -21,24 +21,24 @@ import (
 
 // Layout constants for TUI state that is not a rendering decision.
 const (
-	// keyCtrlC is the key that interrupts, and the one a dialog must honour.
+	// keyCtrlC is the key that interrupts, and the one a dialog must honor.
 	keyCtrlC = "ctrl+c"
 
-	maxLogLines       = 50  // Maximum number of log lines to retain
-	maxHistoryEntries = 100 // Maximum number of history entries to display
+	maxLogLines       = 50
+	maxHistoryEntries = 100
 )
 
 // Mode constants for TUI state.
 const (
-	modeBinaries = "binaries" // Mode for binary selection view
-	modeHistory  = "history"  // Mode for history view
+	modeBinaries = "binaries"
+	modeHistory  = "history"
 )
 
 // Confirmation constants for destructive operations.
 const (
-	confirmNone       = render.ConfirmNone       // No confirmation pending
-	confirmClearAll   = render.ConfirmClearAll   // Confirm clearing all history
-	confirmDeletePerm = render.ConfirmDeletePerm // Confirm permanent deletion
+	confirmNone       = render.ConfirmNone
+	confirmClearAll   = render.ConfirmClearAll
+	confirmDeletePerm = render.ConfirmDeletePerm
 )
 
 // ErrHistoryNotInitialized indicates the history manager was not initialized.
@@ -56,58 +56,60 @@ type HistoryMsg struct {
 
 // Model encapsulates the state of the TUI.
 //
-// context has to travel on the model for the handlers to reach the work they
+// Context has to travel on the model for the handlers to reach the work they
 // start.
 //
-//nolint:containedctx // Bubble Tea's Update receives no context, so the run's
+//nolint:containedctx // Bubble Tea's Update receives no context; the run's context is carried here.
 type Model struct {
 	// ctx governs the work the model starts, so an interrupt reaches it.
 	ctx context.Context
 
-	// busy names the operation currently running outside Update, or is empty
-	// when the model is idle.
+	// busy names the operation running outside Update, stopping a second from
+	// starting and making Update ignore every key but the interrupt.
 	busy string
 
-	// interrupted records that the running operation was stopped by the user, so
-	// its result cannot claim the work finished.
+	// interrupted records that the user stopped the operation. The result handler
+	// reads it to withhold the success message for work already reported as stopped.
 	interrupted bool
 
-	// cancelOp stops the operation in flight, and opDone is closed when it has
-	// finished. Shutdown waits on opDone so the history manager is never closed
-	// under a recovery that is still running.
+	// An interrupt clears busy without waiting for opDone, so this channel
+	// rather than busy is what says whether the work is really over.
 	cancelOp context.CancelFunc
 	opDone   chan struct{}
 
-	// Mode and view state
-	mode         string // Current mode: "binaries" or "history"
-	confirmation string // Pending confirmation for destructive operations
+	// mode selects the view and confirmation names the destructive action
+	// awaiting acknowledgement.
+	mode         string
+	confirmation string
 
-	// Binary selection state
-	choices []string // List of available binaries
-	cursorX int      // Horizontal cursor position (column)
-	cursorY int      // Vertical cursor position (row)
-	cols    int      // Number of columns in the grid
-	rows    int      // Number of rows in the grid
+	// choices lists the available binaries, and cursorX and cursorY locate the
+	// selection within the rows and cols grid.
+	choices []string
+	cursorX int
+	cursorY int
+	cols    int
+	rows    int
 
-	// History state
-	historyEntries []*history.HistoryEntry // History entries for display
-	historyCursor  int                     // Cursor position in history view
-	historyManager history.Manager         // History manager for operations
-	historyLoading bool                    // Whether history is being loaded
+	historyEntries []*history.HistoryEntry
+	historyCursor  int
+	historyManager history.Manager
+	historyLoading bool
 
-	// General state
-	dir           string             // Directory containing binaries
-	config        Config             // CLI configuration
-	logger        logger.Logger      // Logger instance
-	fs            fs.FS              // Filesystem operations
-	width         int                // Terminal width
-	height        int                // Terminal height
-	status        string             // Status message
-	styles        render.StyleConfig // TUI appearance settings
-	sortAscending bool               // True for ascending sort, false for descending
-	logs          []string           // Captured log messages (circular buffer)
-	showLogs      bool               // Toggle log panel visibility
-	logChan       chan LogMsg        // Channel for receiving log messages from the logger
+	dir           string
+	config        Config
+	logger        logger.Logger
+	fs            fs.FS
+	width         int
+	height        int
+	status        string
+	styles        render.StyleConfig
+	sortAscending bool
+
+	// logs holds the captured log messages, showLogs reports whether the log
+	// panel is visible, and logChan receives log messages from the logger.
+	logs     []string
+	showLogs bool
+	logChan  chan LogMsg
 }
 
 // Config holds the model settings the TUI needs from its caller.
@@ -151,8 +153,6 @@ func New(
 	historyMgr history.Manager,
 	choices []string,
 ) *Model {
-	// Initialize the model with default styles.
-	// Enable log visibility by default when verbose mode is active.
 	m := &Model{
 		ctx:            ctx,
 		choices:        choices,
@@ -172,14 +172,11 @@ func New(
 		historyManager: historyMgr,
 	}
 
-	// Set up mode based on config
 	if config.RestoreMode {
 		m.mode = modeHistory
 		m.historyLoading = true
 	}
 
-	// Always set up log capture infrastructure so verbose mode can be toggled at runtime.
-	// This ensures the log channel and capture callback are ready when the user presses 'L'.
 	m.logChan = make(chan LogMsg, maxLogLines)
 	m.setupLogCapture(log)
 
@@ -187,6 +184,9 @@ func New(
 }
 
 // Wait blocks until any operation started outside Update has finished.
+//
+// Returns:
+//   - True if an operation had to be waited on.
 func (m *Model) Wait() bool { return m.waitForOperation() }
 
 // context returns the context governing the model, falling back to a background
@@ -230,10 +230,8 @@ func (m *Model) refreshChoices() {
 func (m *Model) Init() tea.Cmd {
 	m.sortChoices()
 
-	// Log polling runs for the whole session, not only in verbose mode, so the
-	// log panel holds recent entries whenever the user opens it. Starting it
-	// only under --verbose meant the capture callback filled a channel nobody
-	// drained, so every message was discarded.
+	// Polling runs for the whole session so the log panel holds recent entries;
+	// polling only under --verbose would fill a channel nobody drains.
 	polling := m.pollLogChannel()
 
 	if m.mode == modeHistory {
@@ -260,14 +258,9 @@ func (m *Model) sortChoices() {
 }
 
 // updateGrid recalculates the grid layout from the current state and terminal size.
-//
-// The arithmetic lives in the render package. This applies the result, because
-// the grid and the cursor are model state rather than a rendering decision.
 func (m *Model) updateGrid() {
-	// A status or busy line takes a row from the grid, so a relayout can change
-	// the row count. The selection is carried across as the index it pointed
-	// at, because the same coordinates address a different binary in a grid
-	// with different rows.
+	// The row count can change, so the selection is carried across as the
+	// index it pointed at rather than as coordinates.
 	selected := m.cursorY + m.cursorX*max(m.rows, 1)
 
 	grid := render.GridLayout(&render.GridInput{

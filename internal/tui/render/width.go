@@ -22,13 +22,6 @@ func DisplayWidth(s string) int {
 
 // TruncateToWidth shortens s to at most width cells, ending on a grapheme cluster
 // boundary.
-//
-// Slicing at a byte index would split a multi-byte rune in half and render
-// invalid UTF-8 as mojibake. Accumulating per rune is not enough either: an
-// emoji joined into a single cluster (a ZWJ sequence such as a family, or a
-// skin-tone modifier) spans several runes, and cutting between them leaves a
-// dangling cluster that the terminal renders as tofu. uniseg walks whole
-// clusters, and lipgloss measures them, so a cluster is kept or dropped whole.
 func TruncateToWidth(s string, width int) string {
 	if DisplayWidth(s) <= width {
 		return s
@@ -39,6 +32,10 @@ func TruncateToWidth(s string, width int) string {
 		used    int
 	)
 
+	// Clusters are walked whole and measured by lipgloss, so one is kept or
+	// dropped whole. Cutting at a byte index would split a rune, and cutting per
+	// rune would leave a dangling ZWJ sequence or skin-tone modifier behind,
+	// which the terminal renders as tofu.
 	clusters := uniseg.NewGraphemes(s)
 	for clusters.Next() {
 		cluster := clusters.Str()
@@ -58,9 +55,10 @@ func TruncateToWidth(s string, width int) string {
 
 // PadToWidth appends spaces so s occupies exactly width terminal cells.
 //
-// fmt's %-*s pads by rune count, which is too few for a wide rune and leaves
-// the column overflowing. A styled string measures by its printable text, so
-// this also works on a rendered value.
+// A styled string measures by its printable text, so this also works on a
+// rendered value.
 func PadToWidth(s string, width int) string {
+	// fmt's %-*s would pad by rune count, which is too few for a wide rune and
+	// leaves the column overflowing.
 	return s + strings.Repeat(" ", max(width-DisplayWidth(s), 0))
 }

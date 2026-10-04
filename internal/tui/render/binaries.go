@@ -25,14 +25,12 @@ func Binaries(state *State) tea.View {
 		return newAltScreenView("No binaries found.\n")
 	}
 
-	// Apply configured styles for UI elements.
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(state.Styles.TitleColor))
 	cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(state.Styles.CursorColor))
 	footerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(state.Styles.FooterColor))
 	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(state.Styles.StatusColor))
 	logStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(state.Styles.LogColor))
 
-	// Calculate column width based on the longest binary name.
 	var maxNameLen int
 	for _, choice := range state.Choices {
 		if DisplayWidth(choice) > maxNameLen {
@@ -42,12 +40,12 @@ func Binaries(state *State) tea.View {
 
 	colWidth := maxNameLen + ColWidthPadding
 
-	// Build the grid of binary choices with cursor highlighting.
 	var grid strings.Builder
 
 	for row := range state.Rows {
 		for col := range state.Cols {
-			idx := row + col*state.Rows // Column-major index (fill down columns)
+			// Column-major order, filling each column top to bottom.
+			idx := row + col*state.Rows
 			if idx >= len(state.Choices) {
 				break
 			}
@@ -67,7 +65,6 @@ func Binaries(state *State) tea.View {
 		grid.WriteString("\n")
 	}
 
-	// Assemble the full TUI layout: title, grid, logs (if visible), status, and footer.
 	var s strings.Builder
 
 	s.WriteString(titleStyle.Render("Select a binary to remove:\n"))
@@ -75,7 +72,6 @@ func Binaries(state *State) tea.View {
 	s.WriteString(grid.String())
 	s.WriteString("\n")
 
-	// Render log panel if enabled
 	if state.ShowLogs {
 		visibleLogs := VisibleLogs(state.Logs)
 
@@ -97,14 +93,13 @@ func Binaries(state *State) tea.View {
 
 	switch {
 	case state.Busy != "":
-		s.WriteString(statusStyle.Render("Working: " + state.Busy + " (ctrl+c to stop)"))
+		s.WriteString(statusStyle.Render("Working: ", state.Busy, " (ctrl+c to stop)"))
 		s.WriteString("\n")
 	case state.Status != "":
 		s.WriteString(statusStyle.Render(state.Status))
 		s.WriteString("\n")
 	}
 
-	// Update footer to include new key bindings
 	footerText := "↑/k: up  ↓/j: down  ←/h: left  →/l: right  Enter: remove  s: sort  r: history  u: undo  L: logs  q: quit"
 	footer := footerStyle.Render(footerText)
 

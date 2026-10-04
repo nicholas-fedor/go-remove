@@ -17,11 +17,10 @@ import (
 // isCrossDevice reports whether a move failed because the source and
 // destination are on different filesystems.
 //
-// syscall.EXDEV is an invented value on Windows, declared as an offset into the
-// application error range, and no Windows API ever returns it. The real code
-// reported for a cross-volume move is ERROR_NOT_SAME_DEVICE, so it has to be
-// matched directly or every cross-volume move is reported as a hard failure
-// instead of falling back to a copy.
+// syscall.EXDEV is an invented value on Windows that no API ever returns; the
+// real code for a cross-volume move is ERROR_NOT_SAME_DEVICE. Matching that one
+// directly is what keeps a cross-volume move from being reported as a hard
+// failure instead of falling back to a copy.
 //
 // Parameters:
 //   - err: Error returned by the move.

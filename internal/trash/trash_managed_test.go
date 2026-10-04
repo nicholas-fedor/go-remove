@@ -52,14 +52,11 @@ func TestManagedTrash_RoundTripsReservedCharacters(t *testing.T) {
 
 	tests := []struct {
 		name string
-		// wantEncoded is the literal escaped form of the file name, written out
-		// rather than derived from the encoder so the assertion is not
-		// self-referential.
+		// Written out rather than derived from the encoder, so the assertion
+		// is not self-referential.
 		wantEncoded string
-		// skipOnWindows marks a name Windows cannot create. It reserves the
-		// wildcard character ?, so a file with one in its name cannot exist
-		// there to be trashed. A # and square brackets are ordinary characters
-		// on Windows, so those cases still run there.
+		// A name Windows cannot create, since it reserves the wildcard character
+		// ?. A # and square brackets are ordinary there, so those cases run.
 		skipOnWindows bool
 	}{
 		{name: "tool?v2", wantEncoded: "tool%3Fv2", skipOnWindows: true},
@@ -85,10 +82,8 @@ func TestManagedTrash_RoundTripsReservedCharacters(t *testing.T) {
 			trashPath, err := trasher.MoveToTrash(ctx, binary)
 			require.NoError(t, err)
 
-			// Our own reader would accept an unescaped value, so assert the
-			// literal bytes on disk. A desktop parses the Path by splitting on
-			// the query and fragment delimiters, so a bare ? or # makes it
-			// restore to the wrong location.
+			// The reader below would accept an unescaped value, so assert the
+			// literal bytes on disk.
 			infoContent, readFileErr := os.ReadFile(trasher.getInfoPath(trashPath))
 			require.NoError(t, readFileErr)
 			assert.Contains(t, string(infoContent), tt.wantEncoded,
@@ -358,9 +353,8 @@ func TestRestoreFromTrash_RejectsRelativePath(t *testing.T) {
 	trashPath, err := trasher.MoveToTrash(ctx, source)
 	require.NoError(t, err)
 
-	// Run from a scratch directory. If the validation ever regresses, the
-	// restore resolves against the working directory and would otherwise create
-	// the target inside the package source tree.
+	// If the validation ever regresses, the restore would resolve against
+	// the working directory and create the target in the package tree.
 	t.Chdir(t.TempDir())
 
 	err = trasher.RestoreFromTrash(ctx, trashPath, "relative/target")
@@ -435,11 +429,8 @@ func TestMoveToTrash_DanglingSymlink(t *testing.T) {
 	require.NoError(t, err, "the symlink itself must be trashed, not its target")
 	assert.Equal(t, filepath.Join(dir, "absent-target"), target)
 
-	// The entry must be recognised as present. A stat-based check would follow
-	// the link, fail to resolve the absent target and report the entry as gone,
-	// leaving it unrestorable and undeletable.
 	require.True(t, trasher.IsInTrash(trashPath),
-		"a trashed symlink must be recognised even when its target is missing")
+		"a trashed symlink must be recognized even when its target is missing")
 
 	// Restored, and still a symlink pointing at the same absent target.
 	require.NoError(t, trasher.RestoreFromTrash(ctx, trashPath, link))

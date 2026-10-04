@@ -29,6 +29,21 @@ const trashInfoExt = ".trashinfo"
 // filePermission is the permission for creating files in the trash.
 const filePermission = 0o600
 
+// trashPathSafe lists the characters g_filename_to_uri leaves unescaped, which
+// is the escaping a .trashinfo Path is written against and read back with.
+//
+// This is the RFC 3986 unreserved set plus the sub-delimiters and path
+// delimiters, verified against GLib rather than its header comment: the
+// documented G_URI_RESERVED_CHARS_ALLOWED_IN_PATH also lists a semicolon, but
+// g_filename_to_uri escapes one to %3B, so the semicolon is deliberately absent
+// here. The delimiters a desktop splits on must be escaped: a binary named
+// tool?v2 would otherwise be read back as the path .../tool carrying the query
+// v2, and a name containing # is truncated at the fragment.
+const trashPathSafe = "abcdefghijklmnopqrstuvwxyz" +
+	"ABCDEFGHIJKLMNOPQRSTUVWXYZ" +
+	"0123456789" +
+	"-_.~!$&'()*+,=:@/"
+
 // Trash name length budget.
 //
 // A trash entry is stored as <candidate> under files and <candidate>.trashinfo
@@ -167,27 +182,10 @@ func NewTrasher() (Trasher, error) {
 	return newTrasher()
 }
 
-// trashPathSafe lists the characters g_filename_to_uri leaves unescaped, which
-// is the escaping a .trashinfo Path is written against and read back with.
-//
-// This is the RFC 3986 unreserved set plus the sub-delimiters and path
-// delimiters, verified against GLib rather than its header comment: the
-// documented G_URI_RESERVED_CHARS_ALLOWED_IN_PATH also lists a semicolon, but
-// g_filename_to_uri escapes one to %3B, so the semicolon is deliberately absent
-// here. The delimiters a desktop splits on must be escaped: a binary named
-// tool?v2 would otherwise be read back as the path .../tool carrying the query
-// v2, and a name containing # is truncated at the fragment.
-const trashPathSafe = "abcdefghijklmnopqrstuvwxyz" +
-	"ABCDEFGHIJKLMNOPQRSTUVWXYZ" +
-	"0123456789" +
-	"-_.~!$&'()*+,=:@/"
-
 // encodeTrashPath encodes a path for storage in .trashinfo files.
 //
-// Every byte outside trashPathSafe is percent-encoded, so the value stays
-// unambiguous when a desktop splits it on the query and fragment delimiters.
-// Bytes outside printable ASCII were already escaped, and still are, since
-// they are not in the safe set.
+// Bytes outside printable ASCII were already escaped by the desktop that wrote
+// them, and still are, since none of them are in the safe set.
 //
 // Parameters:
 //   - path: Original filesystem path.
@@ -200,6 +198,8 @@ func encodeTrashPath(path string) string {
 	for i := range len(path) {
 		c := path[i]
 
+		// Percent-encoding keeps the value unambiguous when a desktop splits it
+		// on the query and fragment delimiters.
 		if strings.IndexByte(trashPathSafe, c) < 0 {
 			result = fmt.Appendf(result, "%%%02X", c)
 
@@ -225,7 +225,6 @@ func decodeTrashPath(encoded string) (string, error) {
 
 	for i := 0; i < len(encoded); i++ {
 		if encoded[i] == '%' {
-			// Validate that we have two following hex digits
 			if i+2 >= len(encoded) {
 				return "", fmt.Errorf("%w: incomplete sequence", ErrInvalidPercentEncoding)
 			}
@@ -277,6 +276,8 @@ func parseTrashInfo(content string) (string, time.Time, error) {
 
 	_, err := fmt.Sscanf(content, "[Trash Info]\nPath=%s\nDeletionDate=%s\n", &pathLine, &timeLine)
 	if err != nil {
+		// Foreign metadata may carry extra fields or line endings that defeat
+		// the strict scan, so the two fields are read line by line instead.
 		for line := range strings.SplitSeq(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
 			if after, ok := strings.CutPrefix(line, "Path="); ok {
 				pathLine = after
@@ -311,13 +312,9 @@ func parseTrashInfo(content string) (string, time.Time, error) {
 
 // generateUniqueName creates a candidate trash entry name from a base file name.
 //
-// The suffix is random rather than clock-derived. A clock suffix of one-second
-// resolution makes two calls within the same second produce the same candidate,
-// which previously let a second trash operation silently overwrite the first.
-//
-// The base is truncated so the candidate, its suffix and the metadata extension
-// all fit within the filesystem's name limit. Without that, a long original name
-// fails permanently rather than being shortened.
+// The suffix is random rather than clock-derived, because a clock suffix of
+// one-second resolution makes two calls within the same second produce the same
+// candidate.
 //
 // Parameters:
 //   - base: Original file name.
@@ -331,6 +328,9 @@ func generateUniqueName(base string) string {
 	// deliberately discarded rather than falling back to a weaker source.
 	_, _ = rand.Read(suffix[:])
 
+	// The entry is stored as <candidate> under files and <candidate>.trashinfo
+	// under info, so the base is truncated to leave the suffix and the metadata
+	// extension room within the filesystem's name limit.
 	return truncateUTF8(base, maxTrashBaseBytes) +
 		trashNameSeparator + hex.EncodeToString(suffix[:])
 }
@@ -358,11 +358,8 @@ func truncateUTF8(value string, maxBytes int) string {
 
 // reserveTrashEntry claims an unused trash entry name and writes its metadata.
 //
-// The metadata file is created with O_EXCL, so claiming a name is atomic. Two
-// callers racing for the same name cannot both win: the loser sees fs.ErrExist
-// and retries with a fresh random candidate. A leftover data file from an
-// earlier crash also blocks its own name, so an orphaned entry is never
-// overwritten.
+// The claim is the exclusive creation of the metadata file, which reserves the
+// name for both paths. The data file is left for the caller to fill.
 //
 // Parameters:
 //   - filesDir: Directory holding trashed data files.
@@ -385,7 +382,8 @@ func reserveTrashEntry(
 		dataPath := filepath.Join(filesDir, candidate)
 		infoPath := filepath.Join(infoDir, candidate+trashInfoExt)
 
-		// An existing data file owns the name even if its metadata is gone.
+		// An existing data file owns the name even if its metadata is gone, so
+		// an orphaned entry is never overwritten.
 		_, statErr := os.Lstat(dataPath)
 		if statErr == nil {
 			continue
@@ -393,6 +391,8 @@ func reserveTrashEntry(
 			return "", "", fmt.Errorf("checking trash path: %w", statErr)
 		}
 
+		// O_EXCL makes the claim atomic: two callers racing for this candidate
+		// cannot both create the file, and the loser retries.
 		file, createErr := os.OpenFile(
 			infoPath,
 			os.O_WRONLY|os.O_CREATE|os.O_EXCL,

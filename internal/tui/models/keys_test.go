@@ -44,10 +44,8 @@ func Test_model_Update(t *testing.T) {
 		want    Model
 		wantCmd tea.Cmd
 
-		// wantOp marks a case whose command is the operation itself rather than
-		// a follow-up. drainOperation has already consumed such a command by the
-		// time the outcome is asserted, and its message carries the callbacks
-		// the refresh uses, so it is asserted by type rather than by message.
+		// wantOp marks a case whose command is the operation itself, which
+		// drainOperation has already consumed, so only its type is asserted.
 		wantOp bool
 	}{
 		{
@@ -261,12 +259,8 @@ func Test_model_Update(t *testing.T) {
 				t.Errorf("model.Update() got = %+v, want %+v", gotModel, tt.want)
 			}
 
-			// A command is compared by the message it produces, since two funcs
-			// of the same type are otherwise indistinguishable and a case such
-			// as the quit would pass whatever it returned. An operation is not
-			// invoked again, because the work behind it has already run once and
-			// a second run would repeat a side effect; the drain above proves
-			// what it was instead.
+			// Two funcs of the same type are indistinguishable, so a command is
+			// compared by the message it produces. An operation is not invoked again.
 			switch {
 			case tt.wantOp:
 				require.NotNil(t, gotCmd,
@@ -336,7 +330,7 @@ func TestHistoryMsg_ClampsCursor(t *testing.T) {
 // TestHandleConfirmation_CtrlC verifies ctrl+c always leaves a dialog.
 //
 // A dialog that swallows it is a trap for the user who reaches for the one key
-// every terminal program honours.
+// every terminal program honors.
 func TestHandleConfirmation_CtrlC(t *testing.T) {
 	t.Parallel()
 
@@ -367,7 +361,6 @@ func Test_model_Update_EnterWithHistoryManager(t *testing.T) {
 	historyMock := mockHistory.NewMockManager(t)
 	allowHistoryReload(historyMock)
 
-	// Setup expectations
 	fsMock.On("AdjustBinaryPath", "/bin", "test").Return("/bin/test")
 	historyMock.On("RecordDeletion", mock.Anything, "/bin/test").
 		Return(&history.HistoryEntry{ID: "123", BinaryName: "test"}, nil)
@@ -1139,7 +1132,7 @@ func Test_model_Update_ConfirmationCancel(t *testing.T) {
 			gotModel := drainOperation(t, m, opCmd)
 
 			assert.Equal(t, confirmNone, gotModel.confirmation)
-			assert.Equal(t, "Operation cancelled", gotModel.status)
+			assert.Equal(t, "Operation canceled", gotModel.status)
 		})
 	}
 }

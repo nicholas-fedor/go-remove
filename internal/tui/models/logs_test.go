@@ -16,6 +16,15 @@ import (
 	"github.com/nicholas-fedor/go-remove/internal/tui/render"
 )
 
+// levelRecordingLogger records the last level applied to it.
+type levelRecordingLogger struct {
+	logger.Logger
+
+	level logger.Level
+}
+
+func (l *levelRecordingLogger) Level(level logger.Level) { l.level = level }
+
 // TestLogPolling_AlwaysRuns verifies that log polling starts regardless of
 // --verbose, and that a captured line is retained while the panel is hidden.
 //
@@ -143,15 +152,6 @@ func TestToggleVerboseLogging_PreservesStartupVerbose(t *testing.T) {
 	})
 }
 
-// levelRecordingLogger records the last level applied to it.
-type levelRecordingLogger struct {
-	logger.Logger
-
-	level logger.Level
-}
-
-func (l *levelRecordingLogger) Level(level logger.Level) { l.level = level }
-
 // Test_pollLogChannel_ReturnsLogMsg verifies log message is returned when available.
 func Test_pollLogChannel_ReturnsLogMsg(t *testing.T) {
 	logChan := make(chan LogMsg, 10)
@@ -201,7 +201,6 @@ func Test_addLogEntry_CircularBuffer(t *testing.T) {
 	}
 
 	assert.Len(t, m.logs, maxLogLines)
-	// Verify oldest entries were removed
 	assert.NotContains(t, m.logs, "[INF] message 0")
 	assert.Contains(t, m.logs, fmt.Sprintf("[INF] message %d", maxLogLines+9))
 }

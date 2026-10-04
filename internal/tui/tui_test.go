@@ -23,6 +23,10 @@ import (
 	"github.com/nicholas-fedor/go-remove/internal/tui/models"
 )
 
+// sgrPattern matches an SGR sequence, the escape form that carries color, and
+// captures its parameters.
+var sgrPattern = regexp.MustCompile("\x1b\\[([0-9;]*)m")
+
 // noProgramOptions keeps a test from drawing a real view when Run never gets as
 // far as running a program.
 //
@@ -214,22 +218,8 @@ func TestRunTUI_DirectoryReadFailure(t *testing.T) {
 	}
 }
 
-// sgrPattern matches an SGR sequence, the escape form that carries colour, and
-// captures its parameters.
-var sgrPattern = regexp.MustCompile("\x1b\\[([0-9;]*)m")
-
-// TestRun_NO_COLOR pins the colour profile Bubble Tea derives from the
-// environment, so a view never reaches a user who asked for no colour.
-//
-// The output is a bytes.Buffer, which is not a term.File, so detection would
-// settle on NoTTY and every style would be stripped whether NO_COLOR was set or
-// not. TTY_FORCE makes detection treat the stream as a terminal, which is what
-// puts the two cases on the profile boundary NO_COLOR is defined against: ASCII
-// with it set, ANSI256 without.
-//
-// A colour sequence is asserted rather than any SGR sequence, because NO_COLOR
-// disables colour and not text decoration, as https://no-color.org/ requires. The
-// bold title survives it.
+// TestRun_NO_COLOR pins the color profile Bubble Tea derives from the
+// environment, so a view never reaches a user who asked for no color.
 func TestRun_NO_COLOR(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -237,12 +227,12 @@ func TestRun_NO_COLOR(t *testing.T) {
 		wantColor bool
 	}{
 		{
-			name:      "colour when NO_COLOR is unset",
+			name:      "color when NO_COLOR is unset",
 			env:       []string{"TERM=xterm-256color", "TTY_FORCE=1"},
 			wantColor: true,
 		},
 		{
-			name:      "no colour with NO_COLOR set",
+			name:      "no color with NO_COLOR set",
 			env:       []string{"NO_COLOR=1", "TERM=xterm-256color", "TTY_FORCE=1"},
 			wantColor: false,
 		},
@@ -264,6 +254,11 @@ func TestRun_NO_COLOR(t *testing.T) {
 					tea.WithOutput(&buf),
 					tea.WithWindowSize(80, 24),
 					tea.WithoutSignals(),
+					// The output is a bytes.Buffer, which is not a term.File, so
+					// detection would settle on NoTTY and strip every style whether
+					// NO_COLOR was set or not. TTY_FORCE puts the two cases on the
+					// profile boundary NO_COLOR is defined against: ASCII with it set,
+					// ANSI256 without.
 					tea.WithEnvironment(tt.env),
 				},
 				StdinIsTerminal: alwaysTerminal,
@@ -280,9 +275,12 @@ func TestRun_NO_COLOR(t *testing.T) {
 				t.Fatalf("Run() wrote no view, got %q", out)
 			}
 
+			// A color sequence is asserted rather than any SGR sequence, because
+			// NO_COLOR disables color and not text decoration, as
+			// https://no-color.org/ requires. The bold title survives it.
 			if got := hasColorSGR(out); got != tt.wantColor {
 				t.Errorf(
-					"Run() colour sequence present = %v, want %v, got %q",
+					"Run() color sequence present = %v, want %v, got %q",
 					got,
 					tt.wantColor,
 					out,
@@ -293,13 +291,13 @@ func TestRun_NO_COLOR(t *testing.T) {
 }
 
 // hasColorSGR reports whether any SGR sequence in s asks for a foreground or
-// background colour.
+// background color.
 //
 // Parameters:
 //   - s: Rendered program output.
 //
 // Returns:
-//   - Whether a colour is requested anywhere in the output.
+//   - Whether a color is requested anywhere in the output.
 func hasColorSGR(s string) bool {
 	for _, match := range sgrPattern.FindAllStringSubmatch(s, -1) {
 		if paramsSetColor(match[1]) {
@@ -310,16 +308,16 @@ func hasColorSGR(s string) bool {
 	return false
 }
 
-// paramsSetColor reports whether an SGR parameter list requests a colour.
+// paramsSetColor reports whether an SGR parameter list requests a color.
 //
-// The extended forms are recognised by their 38, 48 or 58 lead, and the original
-// forms by a parameter that is a standard colour number on its own.
+// The extended forms are recognized by their 38, 48 or 58 lead, and the original
+// forms by a parameter that is a standard color number on its own.
 //
 // Parameters:
 //   - params: The numbers between the escape and the terminating m.
 //
 // Returns:
-//   - Whether the sequence asks for colour.
+//   - Whether the sequence asks for color.
 func paramsSetColor(params string) bool {
 	for param := range strings.SplitSeq(params, ";") {
 		n, err := strconv.Atoi(param)

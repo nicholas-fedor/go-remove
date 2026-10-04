@@ -131,7 +131,7 @@ func runCommand(t *testing.T, args []string) (string, error) {
 // and Execute releases a third time. Two concurrent releases touching the same
 // signal registration would race or panic, so this is run under the race
 // detector. A second real signal is not delivered here because the default
-// behaviour restored after the first one would terminate this process.
+// behavior restored after the first one would terminate this process.
 func TestNotifyInterrupt_ReleaseIsSafeToRepeat(t *testing.T) {
 	ctx, release := notifyInterrupt()
 
@@ -146,9 +146,8 @@ func TestNotifyInterrupt_ReleaseIsSafeToRepeat(t *testing.T) {
 // TestRunE_FlagValidation verifies the argument combinations that are rejected
 // before any work is done.
 //
-// These branches had no coverage at all, which is how a duplicated usage block
-// and a blank binary name reaching the TUI went unnoticed. Each message is
-// self explanatory, so the flag list is deliberately not repeated for them.
+// Each message is self explanatory, so the flag list is deliberately not repeated
+// for them.
 func TestRunE_FlagValidation(t *testing.T) {
 	tests := []struct {
 		name string
@@ -193,11 +192,10 @@ func TestRunE_FlagValidation(t *testing.T) {
 	}
 }
 
-// TestRunE_RejectsUnknownLogLevel verifies an unrecognised level is reported.
+// TestRunE_RejectsUnknownLogLevel verifies an unrecognized level is reported.
 //
-// It used to fall back to info silently, so someone who asked for debug output
-// was told nothing and saw none. The check happens before the history database
-// is opened, so it has no side effects.
+// The check happens before the history database is opened, so it has no side
+// effects.
 func TestRunE_RejectsUnknownLogLevel(t *testing.T) {
 	_, err := runCommand(t, []string{"--log-level", "banana", "vhs"})
 
@@ -300,10 +298,8 @@ func TestFlagErrorsShowUsage(t *testing.T) {
 
 			rootCmd.SetOut(os.Stderr)
 			rootCmd.SetErr(os.Stderr)
-			// A previous RunE leaves SilenceUsage set on the shared command, and
-			// an earlier -h leaves the help flag true, which makes cobra short
-			// circuit before validating arguments. Restore what a fresh process
-			// would have. The help flag is added lazily, so force it to exist.
+			// A previous RunE leaves SilenceUsage set and -h leaves help true,
+			// which makes cobra skip argument validation; help is added lazily.
 			rootCmd.SilenceUsage = false
 			rootCmd.InitDefaultHelpFlag()
 

@@ -18,17 +18,6 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// LogCaptureFunc is a callback function that receives captured log messages.
-// The level parameter contains the log level string (e.g., "DBG", "INF", "WRN", "ERR").
-// The msg parameter contains the log message.
-type LogCaptureFunc func(level, msg string)
-
-// Level is a log severity.
-//
-// Levels are ordered by increasing severity, so a logger set to a level emits
-// every message logged at that level or above.
-type Level int8
-
 // Supported log levels, ordered by increasing severity.
 const (
 	// DebugLevel reports detail that is only useful while diagnosing a problem.
@@ -56,6 +45,34 @@ const (
 	captureFatalLevel = "FTL"
 	captureOtherLevel = "LOG"
 )
+
+// Field kinds, one for each value type a Field can carry.
+const (
+	fieldString fieldKind = iota
+	fieldInt
+	fieldBool
+	fieldError
+)
+
+// ErrInvalidLogLevel indicates a log level name is not recognized.
+var ErrInvalidLogLevel = errors.New("invalid log level")
+
+var _ Logger = (*ZerologLogger)(nil)
+
+var _ zerolog.Hook = (*captureWriter)(nil)
+
+// LogCaptureFunc receives captured log messages as a level name such as "DBG"
+// or "INF", and the message.
+//
+// It runs inside the event it captures, while the logger still holds its read
+// lock, so it must not call back into that logger. Nothing enforces this.
+type LogCaptureFunc func(level, msg string)
+
+// Level is a log severity.
+//
+// Levels are ordered by increasing severity, so a logger set to a level emits
+// every message logged at that level or above.
+type Level int8
 
 // Logger defines the logging operations required by the application.
 type Logger interface {
@@ -103,14 +120,6 @@ type Logger interface {
 // fieldKind identifies the kind of value a Field carries.
 type fieldKind uint8
 
-// Field kinds, one for each value type a Field can carry.
-const (
-	fieldString fieldKind = iota
-	fieldInt
-	fieldBool
-	fieldError
-)
-
 // Field is a structured pair attached to a log message.
 //
 // A Field is built with Str, Int, Bool, or Err and passed to one of the level
@@ -119,6 +128,33 @@ type Field struct {
 	kind  fieldKind
 	key   string
 	value any
+}
+
+// ZerologLogger wraps zerolog.Logger to implement the Logger interface.
+type ZerologLogger struct {
+	logger        zerolog.Logger
+	mu            sync.RWMutex
+	output        io.Writer
+	captureWriter *captureWriter
+}
+
+// captureState is one locked observation of a captureWriter's configuration.
+//
+// The hook and the writer each decide an event's fate from one of these, so
+// neither reasons about a half-updated view of the configuration.
+type captureState struct {
+	output      io.Writer
+	captureFunc LogCaptureFunc
+}
+
+// captureWriter covers both halves of capture. As the logger's writer it
+// discards output while the TUI shows the message, and as a zerolog hook it
+// hands the callback the level and message unformatted. The callback's presence
+// is the only record of whether capture is on.
+type captureWriter struct {
+	mu          sync.RWMutex
+	output      io.Writer
+	captureFunc LogCaptureFunc
 }
 
 // Str returns a Field holding a string value.
@@ -196,37 +232,6 @@ func (f Field) apply(event *zerolog.Event) {
 	}
 }
 
-// ZerologLogger wraps zerolog.Logger to implement the Logger interface.
-type ZerologLogger struct {
-	logger        zerolog.Logger
-	mu            sync.RWMutex
-	output        io.Writer
-	captureWriter *captureWriter
-}
-
-var _ Logger = (*ZerologLogger)(nil)
-
-// captureState is one locked observation of a captureWriter's configuration.
-//
-// The hook and the writer each decide an event's fate from one of these, so
-// neither reasons about a half-updated view of the configuration.
-type captureState struct {
-	output      io.Writer
-	captureFunc LogCaptureFunc
-}
-
-// captureWriter covers both halves of capture. As the logger's writer it
-// discards output while the TUI shows the message, and as a zerolog hook it
-// hands the callback the level and message unformatted. The callback's presence
-// is the only record of whether capture is on.
-type captureWriter struct {
-	mu          sync.RWMutex
-	output      io.Writer
-	captureFunc LogCaptureFunc
-}
-
-var _ zerolog.Hook = (*captureWriter)(nil)
-
 // snapshot returns the writer's output and capture callback as one locked
 // observation.
 //
@@ -244,7 +249,8 @@ func (w *captureWriter) snapshot() captureState {
 
 // Write implements io.Writer, writing to the underlying output.
 //
-// When capture is enabled, output is discarded so the TUI does not show duplicate logs.
+// When capture is enabled the hook has already handed this event to the capture
+// callback, so this copy is discarded to keep the TUI from showing it twice.
 //
 // Parameters:
 //   - data: Log bytes produced by zerolog.
@@ -255,13 +261,10 @@ func (w *captureWriter) snapshot() captureState {
 func (w *captureWriter) Write(data []byte) (int, error) {
 	state := w.snapshot()
 
-	// The hook has already handed this event to the capture callback, so the
-	// logger's own copy of it is dropped to keep the TUI from showing it twice.
 	if state.captureFunc != nil {
 		return len(data), nil
 	}
 
-	// Capture is not enabled, write to the underlying output normally.
 	bytesWritten, err := state.output.Write(data)
 	if err != nil {
 		return bytesWritten, fmt.Errorf("failed to write to output: %w", err)
@@ -271,8 +274,6 @@ func (w *captureWriter) Write(data []byte) (int, error) {
 }
 
 // Run implements zerolog.Hook, sending a logged message to the capture callback.
-//
-// The level and message are the ones the event was logged with.
 //
 // Parameters:
 //   - event: Event being logged, unused.
@@ -289,9 +290,7 @@ func (w *captureWriter) Run(_ *zerolog.Event, level zerolog.Level, msg string) {
 
 // SetCaptureFunc sets the capture callback for this writer.
 //
-// A non-nil callback enables capture and discards normal output. The callback
-// is the only record of whether capture is on, so the hook and the writer can
-// never disagree about it.
+// A non-nil callback enables capture and discards normal output.
 //
 // Parameters:
 //   - captureFunc: Callback invoked with level and message, or nil to disable capture.
@@ -346,16 +345,14 @@ func NewLogger() (Logger, error) {
 		NoColor:    false,
 	}
 
-	// Create the base logger with info level.
 	zerologLogger := zerolog.New(output).
 		With().
 		Timestamp().
 		Logger().
 		Level(zerolog.InfoLevel)
 
-	// Install a capture writer so SetCaptureFunc always has somewhere to write.
-	// Without it the call was a silent no-op, and behaviour then depended on
-	// which constructor the caller happened to pick.
+	// Install a capture writer so SetCaptureFunc always has somewhere to write,
+	// whichever constructor built the logger.
 	capture := &captureWriter{output: output}
 
 	zerologLogger = zerologLogger.
@@ -378,20 +375,16 @@ func NewLogger() (Logger, error) {
 //   - Underlying capture writer.
 //   - Always nil error.
 func NewLoggerWithCapture() (Logger, *captureWriter, error) {
-	// Create a captureWriter that wraps stderr.
-	// captureFunc is left as its zero value (nil), so capture starts disabled.
 	captureWriter := &captureWriter{
 		output: os.Stderr,
 	}
 
-	// Create a ConsoleWriter that writes to the captureWriter.
 	consoleWriter := zerolog.ConsoleWriter{
 		Out:        captureWriter,
 		TimeFormat: time.RFC3339,
 		NoColor:    true,
 	}
 
-	// Create the base logger with info level.
 	zerologLogger := zerolog.New(consoleWriter).
 		With().
 		Timestamp().
@@ -410,11 +403,8 @@ func NewLoggerWithCapture() (Logger, *captureWriter, error) {
 
 // NopLogger returns a logger that discards everything written to it.
 //
-// It wraps zerolog's disabled logger, so no message is ever formatted or
-// serialised, whatever level it is logged at.
-//
-// Use it where logging is not the subject: tests, and any caller that wants a
-// logger it can pass along without producing output.
+// Use it where logging is not the subject: tests, and any caller that needs a
+// logger to pass along without producing output.
 //
 // Returns:
 //   - A logger that writes nothing.
@@ -468,16 +458,15 @@ func (z *ZerologLogger) Error(msg string, fields ...Field) {
 
 // log writes a message and its fields at the given level.
 //
-// The read lock is held across the whole write, so a concurrent Level change
-// cannot swap the underlying logger out from under a message being emitted, and
-// a concurrent SetCaptureFunc cannot swap the capture callback out from between
-// the message's capture hook and its write.
-//
 // Parameters:
 //   - level: Severity to record the message at.
 //   - msg: Message to record.
 //   - fields: Structured pairs to attach to the message.
 func (z *ZerologLogger) log(level Level, msg string, fields []Field) {
+	// The read lock is held across the whole write, so a concurrent Level change
+	// cannot swap the underlying logger out from under a message being emitted,
+	// and a concurrent SetCaptureFunc cannot swap the capture callback out from
+	// between the message's capture hook and its write.
 	z.mu.RLock()
 	defer z.mu.RUnlock()
 
@@ -502,26 +491,17 @@ func (z *ZerologLogger) Level(level Level) {
 	z.mu.Lock()
 	defer z.mu.Unlock()
 
-	// Create a new logger with the specified level.
 	z.logger = z.logger.Level(level.zerologLevel())
 }
 
 // SetCaptureFunc sets a callback that receives log messages for TUI display.
-//
-// A nil callback disables capture, and the logger's own output is written again
-// from the next event on.
-//
-// The write lock is held across the swap so that it cannot land between the
-// capture hook and the write of an event already being emitted. zerolog ties
-// those two calls together with no identifier, so keeping the configuration
-// still for the whole event is what lets its halves agree on where it went.
-//
-// The callback runs inside the event it captures, so it must not call back into
-// this logger.
+// A nil callback disables capture, and output is written again.
 //
 // Parameters:
 //   - captureFunc: Callback invoked with level and message, or nil to disable capture.
 func (z *ZerologLogger) SetCaptureFunc(captureFunc LogCaptureFunc) {
+	// The write lock, not a read one, so a swap cannot land between the capture
+	// hook and the write of an event already being emitted.
 	z.mu.Lock()
 	defer z.mu.Unlock()
 
@@ -532,7 +512,7 @@ func (z *ZerologLogger) SetCaptureFunc(captureFunc LogCaptureFunc) {
 
 // zerologLevel maps a Level onto the matching zerolog severity.
 //
-// An unrecognised value resolves to info, so a level outside the supported set
+// An unrecognized value resolves to info, so a level outside the supported set
 // cannot silence a logger.
 //
 // Parameters:
@@ -555,10 +535,7 @@ func (l Level) zerologLevel() zerolog.Level {
 	}
 }
 
-// ErrInvalidLogLevel indicates a log level name is not recognised.
-var ErrInvalidLogLevel = errors.New("invalid log level")
-
-// ParseLogLevel parses a log level name, rejecting an unrecognised value.
+// ParseLogLevel parses a log level name, rejecting an unrecognized value.
 //
 // Supported levels are debug, info, warn, and error.
 //
@@ -567,7 +544,7 @@ var ErrInvalidLogLevel = errors.New("invalid log level")
 //
 // Returns:
 //   - Matching level.
-//   - An error wrapping ErrInvalidLogLevel for an unrecognised name.
+//   - An error wrapping ErrInvalidLogLevel for an unrecognized name.
 func ParseLogLevel(level string) (Level, error) {
 	switch strings.ToLower(level) {
 	case "debug":
@@ -589,7 +566,7 @@ func ParseLogLevel(level string) (Level, error) {
 
 // ParseLevel parses a string log level into a Level.
 //
-// Supported levels are debug, info, warn, and error. Unrecognized values default to info.
+// Supported levels are debug, info, warn, and error.
 //
 // Parameters:
 //   - level: Case-insensitive level name.

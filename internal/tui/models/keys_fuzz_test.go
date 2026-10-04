@@ -95,7 +95,6 @@ func Fuzz_model_Update(f *testing.F) {
 		result, _ := m.Update(msg)
 		resultModel := result.(*Model)
 
-		// Verify state consistency after Update()
 		// Cursor should never be negative
 		if resultModel.cursorX < 0 {
 			t.Errorf("cursorX became negative: %d", resultModel.cursorX)
@@ -178,10 +177,9 @@ func Fuzz_keyMatches(f *testing.F) {
 		case "d":
 			// Delete permanently
 		default:
-			// Unknown key - should be handled gracefully
+			// Unknown key, handled by the default branch above.
 		}
 
-		// Verify key message is valid (no panic)
 		_ = msg.Code
 	})
 }

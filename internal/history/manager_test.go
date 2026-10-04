@@ -73,7 +73,6 @@ func setupManagerTest(
 	mockExtractor := buildinfomocks.NewMockExtractor(t)
 	mockLogger := loggermocks.NewMockLogger(t)
 
-	// Setup logger mock to accept any calls
 	acceptAnyLogCall(mockLogger)
 
 	manager := NewManager(mockTrasher, mockStorer, mockExtractor, mockLogger)
@@ -342,10 +341,8 @@ func TestHistoryManager_RecordDeletion(t *testing.T) {
 
 		manager, mockTrasher, mockStorer, mockExtractor := setupManagerTest(t)
 
-		// An interrupt landing between the move and the record update leaves the
-		// binary in trash, so the recovery must not inherit the cancellation that
-		// caused the failure, or the binary would be stranded by the very
-		// keystroke that should have stopped the work.
+		// The recovery must not inherit the cancellation that caused the
+		// failure, or the binary would be stranded in trash.
 		interrupted, cancel := context.WithCancel(ctx)
 		cancel()
 
@@ -369,9 +366,8 @@ func TestHistoryManager_RecordDeletion(t *testing.T) {
 			UpdateRecord(mock.Anything, mock.AnythingOfType("*storage.HistoryRecord")).
 			Return(storage.ErrDatabaseClosed)
 
-		// A still-cancelled context would make this return immediately. The
-		// state is captured during the call, because the recovery context is
-		// cancelled once RecordDeletion returns.
+		// The state is captured during the call, because the recovery
+		// context is canceled once RecordDeletion returns.
 		var recoveryErr error
 
 		mockTrasher.EXPECT().
@@ -437,9 +433,8 @@ func TestHistoryManager_RecordDeletion(t *testing.T) {
 
 		manager, mockTrasher, mockStorer, mockExtractor := setupManagerTest(t)
 
-		// An interrupt is what makes the move fail, and the record left behind
-		// by that failure is indistinguishable from an interrupted deletion, so
-		// removing it must not inherit the same cancellation.
+		// The record left behind is indistinguishable from an interrupted
+		// deletion, so removing it must not inherit the same cancellation.
 		interrupted, cancel := context.WithCancel(ctx)
 		cancel()
 
@@ -601,9 +596,8 @@ func TestHistoryManager_UndoMostRecent(t *testing.T) {
 		assert.Nil(t, result)
 	})
 
-	// This is the regression the rewrite exists for. Undo used to fetch a single
-	// record and stop at the first unrestorable one, so a single successful undo
-	// made every later undo fail outright.
+	// Undo must not stop at the first unrestorable record: one successful undo must
+	// not make every later undo fail.
 	t.Run("skips unrestorable records and restores the next one", func(t *testing.T) {
 		t.Parallel()
 

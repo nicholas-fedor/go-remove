@@ -9,8 +9,6 @@ package main
 import "github.com/nicholas-fedor/go-remove/cmd"
 
 // main starts the go-remove CLI.
-//
-// It delegates to cmd.Execute for flag parsing, command dispatch, and process exit handling.
 func main() {
 	cmd.Execute()
 }

@@ -11,12 +11,6 @@ import (
 	"github.com/nicholas-fedor/go-remove/internal/history"
 )
 
-// Kind identifies the category of a failure reported by the history layer.
-//
-// The zero value is KindUnknown, which every unmapped error reports. Kinds
-// describe what happened, never how it should be worded.
-type Kind uint8
-
 const (
 	// KindUnknown is an error the history layer does not classify.
 	KindUnknown Kind = iota
@@ -33,6 +27,12 @@ const (
 	// KindRestoreCollision means a file already occupies the restore location.
 	KindRestoreCollision
 )
+
+// Kind identifies the category of a failure reported by the history layer.
+//
+// The zero value is KindUnknown, which every unmapped error reports. Kinds
+// describe what happened, never how it should be worded.
+type Kind uint8
 
 // Classify maps a history error to its category.
 //
