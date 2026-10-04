@@ -46,7 +46,7 @@ A CLI tool to safely remove Go binaries with undo and history support
 - **Interactive TUI**: Browse and select binaries to remove from a grid interface
 - **Undo Support**: Restore the most recently deleted binary with a single command
 - **Deletion History**: Browse and restore any previously removed binary
-- **Safe Removal**: Moves binaries to system trash instead of permanent deletion
+- **Safe Removal**: Moves binaries to a trash directory
 - **Cross-Platform**: Works on Linux (XDG-compliant) and Windows
 - **Verbose Logging**: Optional detailed output for debugging
 
@@ -220,10 +220,15 @@ go-remove -r
 
 Deletion history is stored in a Badger KV database:
 
-**Linux and macOS:**
+**Linux:**
 
 - `$XDG_DATA_HOME/go-remove/history.badger`
 - Fallback: `~/.local/share/go-remove/history.badger`
+
+**macOS:**
+
+- `$XDG_DATA_HOME/go-remove/history.badger`
+- Fallback: `~/Library/Application Support/go-remove/history.badger`
 
 **Windows:**
 
