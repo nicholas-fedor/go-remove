@@ -122,16 +122,28 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case opResultMsg:
-		m.busy = ""
-		m.cancelOp = nil
+		// An interrupt releases the status line, so a result can belong to an
+		// operation that is no longer the current one. Only the current
+		// operation's result may clear the state a newer one is relying on.
+		current := msg.op == m.cur
+
+		// The work is over either way, so shutdown no longer waits on it.
+		m.inFlight = slices.DeleteFunc(m.inFlight, func(op *operation) bool {
+			return op == msg.op
+		})
+
+		if current {
+			m.busy = ""
+			m.cur = nil
+		}
 
 		// The grid is recalculated below, once the status line is final,
 		// because the layout reserves a row for a status that is present.
 
 		// An interrupted operation still applies its side effects, but must not
-		// report success the user was told they stopped.
-		interrupted := m.interrupted
-		m.interrupted = false
+		// report success the user was told they stopped. The flag belongs to the
+		// operation, so only this result can consume it.
+		interrupted := msg.op.interrupted
 
 		if msg.err != nil {
 			if !interrupted {
@@ -170,7 +182,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case interrupted:
 			m.status = preserved
 		case m.status == "":
-			m.status = "Done " + msg.operation
+			m.status = "Done " + msg.op.name
 		}
 
 		m.updateGrid()
@@ -386,7 +398,7 @@ func (m *Model) updateHistoryMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "c":
-		return m.handleClearEntry(false)
+		return m.handleClearEntry()
 
 	case "C":
 		if len(m.historyEntries) > 0 {
@@ -672,15 +684,16 @@ func (m *Model) handleUndo() (tea.Model, tea.Cmd) {
 	return m, undoCmd
 }
 
-// handleClearEntry removes a history entry and optionally deletes it from trash.
+// handleClearEntry removes the selected entry from the history, leaving the
+// trashed binary in place.
 //
-// Parameters:
-//   - deleteFromTrash: When true, also permanently delete the trashed binary.
+// Permanent deletion is not reachable from here: it has its own confirmation
+// dialog, so a clear can never destroy a binary unasked.
 //
 // Returns:
 //   - Updated model.
-//   - Command to refresh history after a successful clear.
-func (m *Model) handleClearEntry(deleteFromTrash bool) (tea.Model, tea.Cmd) {
+//   - Command running the clear outside Update.
+func (m *Model) handleClearEntry() (tea.Model, tea.Cmd) {
 	if m.historyManager == nil || m.historyCursor >= len(m.historyEntries) {
 		m.status = "No history entry selected"
 
@@ -688,21 +701,25 @@ func (m *Model) handleClearEntry(deleteFromTrash bool) (tea.Model, tea.Cmd) {
 	}
 
 	entry := m.historyEntries[m.historyCursor]
-	ctx := m.context()
+	name := entry.BinaryName
+	entryID := entry.ID
+	manager := m.historyManager
 
-	if err := m.historyManager.ClearEntry(ctx, entry.ID, deleteFromTrash); err != nil {
-		m.status = fmt.Sprintf("Error clearing entry: %v", err)
-	} else {
-		if deleteFromTrash {
-			m.status = fmt.Sprintf("Permanently deleted %s and cleared history", entry.BinaryName)
-		} else {
-			m.status = "Cleared history entry for " + entry.BinaryName
-		}
+	// Clearing rewrites the history store, so it runs outside Update to keep the
+	// view responsive and interruptible.
+	clearCmd := m.runAsyncReporting(
+		"clearing history entry for "+name,
+		func(ctx context.Context) error {
+			if err := manager.ClearEntry(ctx, entryID, false); err != nil {
+				return fmt.Errorf("clearing entry: %w", err)
+			}
 
-		cmd := m.loadHistory()
+			return nil
+		},
+		nil,
+		nil,
+		func() string { return "Cleared history entry for " + name },
+	)
 
-		return m, cmd
-	}
-
-	return m, nil
+	return m, clearCmd
 }

@@ -984,8 +984,13 @@ func Test_updateHistoryMode_ClearEntry(t *testing.T) {
 	got, cmd := m.Update(keyPress('c'))
 	gotModel := got.(*Model)
 
-	assert.Equal(t, "Cleared history entry for testbin", gotModel.status)
 	assert.NotNil(t, cmd)
+
+	// An operation now runs outside Update, so the result is applied before the
+	// outcome is asserted.
+	gotModel = drainOperation(t, gotModel, cmd)
+
+	assert.Equal(t, "Cleared history entry for testbin", gotModel.status)
 	historyMock.AssertExpectations(t)
 }
 
@@ -1196,8 +1201,15 @@ func Test_handleClearEntry_ErrorHandling(t *testing.T) {
 		historyCursor:  0,
 	}
 
-	got, _ := m.handleClearEntry(false)
-	gotModel := got.(*Model)
+	got, cmd := m.handleClearEntry()
+	gotModel, _ := got.(*Model)
+
+	// Clearing rewrites the store, so the work is performed by the command.
+	require.NotNil(t, cmd)
+
+	// An operation now runs outside Update, so the result is applied before the
+	// outcome is asserted.
+	gotModel = drainOperation(t, gotModel, cmd)
 
 	assert.Equal(t, "Error clearing entry: clear failed", gotModel.status)
 	historyMock.AssertExpectations(t)
@@ -1216,11 +1228,56 @@ func Test_handleClearEntry_NoHistoryManager(t *testing.T) {
 		historyCursor:  0,
 	}
 
-	got, cmd := m.handleClearEntry(false)
+	got, cmd := m.handleClearEntry()
 	gotModel := got.(*Model)
 
 	assert.Equal(t, "No history entry selected", gotModel.status)
 	assert.Nil(t, cmd)
+}
+
+// Test_handleClearEntry_DefersWorkToCommand verifies clearing an entry runs
+// outside Update, so the view keeps rendering and the work stays interruptible.
+func Test_handleClearEntry_DefersWorkToCommand(t *testing.T) {
+	historyMock := mockHistory.NewMockManager(t)
+	allowHistoryReload(historyMock)
+
+	entry := &history.HistoryEntry{
+		ID:         "entry1",
+		BinaryName: "testbin",
+	}
+
+	historyMock.On("ClearEntry", mock.Anything, "entry1", false).Return(nil)
+
+	m := &Model{
+		choices:        []string{},
+		dir:            "/bin",
+		fs:             mockFS.NewMockFS(t),
+		historyManager: historyMock,
+		logger:         logger.NopLogger(),
+		mode:           modeHistory,
+		historyEntries: []*history.HistoryEntry{entry},
+		historyCursor:  0,
+		cols:           1,
+		rows:           1,
+		width:          80,
+		height:         24,
+		sortAscending:  true,
+	}
+
+	got, cmd := m.Update(keyPress('c'))
+	gotModel := got.(*Model)
+
+	assert.Empty(t, historyMock.Calls, "the clear must not run inside Update")
+	require.NotNil(t, cmd, "the clear must be returned as a command")
+	assert.Equal(t, "clearing history entry for testbin", gotModel.busy,
+		"the operation must be registered while it runs")
+
+	// The command is what performs the clear, so it is only driven here.
+	gotModel = drainOperation(t, gotModel, cmd)
+
+	assert.Equal(t, "Cleared history entry for testbin", gotModel.status)
+	assert.Empty(t, gotModel.busy)
+	historyMock.AssertExpectations(t)
 }
 
 // Test_handleUndo_ErrorHandling verifies undo error handling.

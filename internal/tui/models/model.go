@@ -68,14 +68,14 @@ type Model struct {
 	// starting and making Update ignore every key but the interrupt.
 	busy string
 
-	// interrupted records that the user stopped the operation. The result handler
-	// reads it to withhold the success message for work already reported as stopped.
-	interrupted bool
+	// cur is the operation the model is reporting on, or nil when none owns the
+	// status line. An interrupt releases it while the work finishes, so a stale
+	// result cannot be mistaken for the one the model is waiting on.
+	cur *operation
 
-	// An interrupt clears busy without waiting for opDone, so this channel
-	// rather than busy is what says whether the work is really over.
-	cancelOp context.CancelFunc
-	opDone   chan struct{}
+	// inFlight holds every operation that has been started and not yet reported a
+	// result, including one an interrupt released that is still running.
+	inFlight []*operation
 
 	// mode selects the view and confirmation names the destructive action
 	// awaiting acknowledgement.
