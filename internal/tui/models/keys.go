@@ -289,8 +289,9 @@ func (m *Model) executeConfirmation() (tea.Model, tea.Cmd) {
 		entry = m.historyEntries[m.historyCursor]
 	}
 
-	// Clear-all permanently deletes every trashed binary, and confirmations
-	// run outside Update so the view keeps rendering and stays interruptible.
+	// Clear-all drops the history entries and leaves the trashed binaries in
+	// place. Confirmations run outside Update so the view keeps rendering and
+	// stays interruptible.
 	switch confirmation {
 	case confirmClearAll:
 		if manager == nil {
