@@ -14,10 +14,31 @@ import (
 	"github.com/nicholas-fedor/go-remove/internal/errmsg"
 )
 
+// operation is one unit of work in flight.
+//
+// Its own result carries it back, so a result that arrives after an interrupt
+// let a newer operation start can be told apart from the one the model is
+// waiting on.
+type operation struct {
+	// name is shown on the status line while it runs.
+	name string
+
+	// cancel stops the work.
+	cancel context.CancelFunc
+
+	// done is closed when the work has finished.
+	done chan struct{}
+
+	// interrupted records that the user stopped this operation, so its own
+	// result cannot claim success.
+	interrupted bool
+}
+
 // opResultMsg carries the outcome of work that must not block the render loop.
 type opResultMsg struct {
-	// operation names the work, for the status line.
-	operation string
+	// op is the operation the result belongs to, which is what makes a stale
+	// result recognizable as one the model is no longer waiting on.
+	op *operation
 
 	// err is the outcome, nil on success.
 	err error
@@ -103,25 +124,25 @@ func (m *Model) loadHistoryReporting(quiet bool) tea.Cmd {
 // reaches it and the shutdown path can wait for it to finish.
 //
 // Parameters:
-//   - op: Human-readable name of the operation, shown while it runs.
+//   - name: Human-readable name of the operation, shown while it runs.
 //   - work: The operation to perform.
 //   - refresh: Applied to the model on the update goroutine after success.
 //
 // Returns:
 //   - A command that performs the work and yields the result.
 func (m *Model) runAsync(
-	operation string,
+	name string,
 	work func(context.Context) error,
 	refresh func(m *Model),
 ) tea.Cmd {
-	return m.runAsyncReporting(operation, work, refresh, nil, nil)
+	return m.runAsyncReporting(name, work, refresh, nil, nil)
 }
 
 // runAsyncReporting starts an operation that maps its own failures to status
 // messages.
 //
 // Parameters:
-//   - op: Human-readable name of the operation, shown while it runs.
+//   - name: Human-readable name of the operation, shown while it runs.
 //   - work: The operation to perform.
 //   - refresh: Applied to the model on the update goroutine after success.
 //   - errStatus: Maps a failure to a status message, or nil for the generic form.
@@ -130,7 +151,7 @@ func (m *Model) runAsync(
 // Returns:
 //   - A command that performs the work and yields the result.
 func (m *Model) runAsyncReporting(
-	operation string,
+	name string,
 	work func(context.Context) error,
 	refresh func(m *Model),
 	errStatus func(error) string,
@@ -143,23 +164,30 @@ func (m *Model) runAsyncReporting(
 	}
 
 	ctx, cancel := context.WithCancel(m.context())
-	done := make(chan struct{})
 
-	m.busy = operation
-	m.cancelOp = cancel
-	m.opDone = done
+	tracked := &operation{
+		name:   name,
+		cancel: cancel,
+		done:   make(chan struct{}),
+	}
+
+	m.busy = name
+	m.cur = tracked
+
+	// An interrupted operation keeps running, so shutdown has to wait for it too.
+	m.inFlight = append(m.inFlight, tracked)
 
 	// The busy line costs a row, so the grid has to be laid out again or the
 	// choices overflow the terminal for as long as the work runs.
 	m.updateGrid()
 
 	return func() tea.Msg {
-		defer close(done)
+		defer close(tracked.done)
 
 		err := work(ctx)
 
 		result := opResultMsg{
-			operation: operation,
+			op:        tracked,
 			err:       err,
 			refresh:   refresh,
 			errStatus: errStatus,
@@ -175,33 +203,44 @@ func (m *Model) runAsyncReporting(
 
 // cancelInFlight stops the running operation and reports progress.
 func (m *Model) cancelInFlight() {
-	if m.cancelOp != nil {
-		m.cancelOp()
+	if op := m.cur; op != nil {
+		op.cancel()
+
+		// The work may not observe the cancellation at all, so remember that the
+		// user stopped it rather than trusting the result it eventually reports.
+		op.interrupted = true
 	}
 
+	// The operation stops owning the status line, but it stays in flight until
+	// its own result arrives, because the work itself may still be running.
+	m.cur = nil
 	m.busy = ""
-	// The work may not observe the cancellation at all, so remember that the
-	// user stopped it rather than trusting the result it eventually reports.
-	m.interrupted = true
 
 	// Clearing busy releases the row it reserved, rather than waiting for the result.
 	m.updateGrid()
 }
 
-// waitForOperation blocks until the running operation has finished.
+// waitForOperation blocks until every operation started outside Update has
+// finished.
 //
 // It exists so shutdown does not close the history manager under a recovery
-// that is still running.
+// that is still running, including one an interrupt released the status line
+// for while it kept going.
 //
 // Returns:
 //   - True if an operation had to be waited on.
 func (m *Model) waitForOperation() bool {
-	if m.opDone == nil {
+	if len(m.inFlight) == 0 {
 		return false
 	}
 
-	<-m.opDone
-	m.opDone = nil
+	// Every operation has to be waited on, because an interrupted one is still
+	// in flight and can reach the history manager just as the newest one can.
+	for _, op := range m.inFlight {
+		<-op.done
+	}
+
+	m.inFlight = nil
 
 	return true
 }
