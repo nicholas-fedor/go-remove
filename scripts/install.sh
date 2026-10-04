@@ -179,9 +179,8 @@ run_root() {
 	fi
 }
 
-# Matched literally: VERSION is unvalidated and could carry regex metacharacters.
 sum_line() {
-	grep -F -e "  $1" -e " *$1" "$2"
+	awk -v want="$1" '$2 == want || $2 == "*" want { print; exit }' "$2"
 }
 
 verify_checksum() {
