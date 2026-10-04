@@ -179,17 +179,22 @@ run_root() {
 	fi
 }
 
+# Matched literally: VERSION is unvalidated and could carry regex metacharacters.
+sum_line() {
+	grep -F -e "  $1" -e " *$1" "$2"
+}
+
 verify_checksum() {
 	file=$1
 	sums=$2
 	dir=$(dirname "$sums")
 
-	grep -E "[[:space:]]${file}\$" "$sums" >/dev/null || die "no checksum found for ${file}"
+	sum_line "$file" "$sums" >/dev/null || die "no checksum found for ${file}"
 
 	if command -v sha256sum >/dev/null 2>&1; then
-		(cd "$dir" && grep -E "[[:space:]]${file}\$" checksums.txt | sha256sum -c -)
+		(cd "$dir" && sum_line "$file" "$sums" | sha256sum -c -)
 	elif command -v shasum >/dev/null 2>&1; then
-		(cd "$dir" && grep -E "[[:space:]]${file}\$" checksums.txt | shasum -a 256 -c -)
+		(cd "$dir" && sum_line "$file" "$sums" | shasum -a 256 -c -)
 	else
 		die "sha256sum or shasum is required to verify release artifacts"
 	fi
