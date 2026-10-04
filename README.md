@@ -3,13 +3,13 @@
 
 # go-remove
 
-<img src="/.github/assets/logo.svg" alt="go-remove Logo" width="150">
+<img src=".github/assets/logo.svg" alt="go-remove Logo" width="150">
 
 A CLI tool to safely remove Go binaries with undo and history support
 
 [![Latest Version](https://img.shields.io/github/tag/nicholas-fedor/go-remove.svg)](https://github.com/nicholas-fedor/go-remove/releases)
 [![Codecov](https://codecov.io/gh/nicholas-fedor/go-remove/branch/main/graph/badge.svg)](https://codecov.io/gh/nicholas-fedor/go-remove)
-[![GoDoc](https://godoc.org/github.com/nicholas-fedor/go-remove?status.svg)](https://godoc.org/github.com/nicholas-fedor/go-remove)
+[![Go Reference](https://pkg.go.dev/badge/github.com/nicholas-fedor/go-remove.svg)](https://pkg.go.dev/github.com/nicholas-fedor/go-remove)
 ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/nicholas-fedor/go-remove)
 [![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
@@ -34,7 +34,7 @@ A CLI tool to safely remove Go binaries with undo and history support
 - [Command Reference](#command-reference)
 - [Filesystem Locations](#filesystem-locations)
   - [Data Storage](#data-storage)
-  - [Trash Locations](#trash-locations)
+  - [Trash](#trash)
   - [Binary Directories (in precedence order)](#binary-directories-in-precedence-order)
 - [Building from Source](#building-from-source)
 - [Requirements](#requirements)
@@ -64,7 +64,7 @@ On Linux, the script installs a native package (`.deb`, `.rpm`, `.apk`, or Arch)
 
 | Variable       | Meaning                                                            |
 |----------------|--------------------------------------------------------------------|
-| `VERSION`      | Release tag (`v1.2.0` or `1.2.0`). Default: latest.                |
+| `VERSION`      | Release tag (`vX.Y.Z` or `X.Y.Z`). Default: latest.                |
 | `INSTALL_DIR`  | Directory for archive installs. Default: `$HOME/go/bin`.           |
 | `INSTALL_TYPE` | `auto` (default), `package`, or `archive`.                         |
 
@@ -113,8 +113,8 @@ The binary is installed to `$GOPATH/bin` (typically `~/go/bin/go-remove`).
 Available architectures: `amd64`, `i386`, `arm64v8`
 
 ```powershell
-# Download and extract (replace amd64 with your architecture)
-Invoke-WebRequest -Uri "https://github.com/nicholas-fedor/go-remove/releases/download/v1.0.0/go-remove_windows_amd64_1.0.0.zip" -OutFile "go-remove.zip"
+# Download and extract (replace amd64 with your architecture, and X.Y.Z with the release version)
+Invoke-WebRequest -Uri "https://github.com/nicholas-fedor/go-remove/releases/download/vX.Y.Z/go-remove_windows_amd64_X.Y.Z.zip" -OutFile "go-remove.zip"
 Expand-Archive -Path "go-remove.zip" -DestinationPath "."
 
 # Move to a directory in your PATH
@@ -220,7 +220,7 @@ go-remove -r
 
 Deletion history is stored in a Badger KV database:
 
-**Linux:**
+**Linux and macOS:**
 
 - `$XDG_DATA_HOME/go-remove/history.badger`
 - Fallback: `~/.local/share/go-remove/history.badger`
@@ -230,14 +230,20 @@ Deletion history is stored in a Badger KV database:
 - `%LOCALAPPDATA%\go-remove\history.badger`
 - Fallback: `%USERPROFILE%\go-remove\history.badger`
 
-### Trash Locations
+### Trash
 
-**Linux:** XDG-compliant trash at `$XDG_DATA_HOME/Trash` (fallback: `~/.local/share/Trash`)
+ Trashed binaries are stored in `files/` and metadata files (`.trashinfo`) in `info/` in the following Trash locations:
 
-- `files/` - Trashed binaries
-- `info/` - Metadata files (`.trashinfo`)
+**Linux and macOS:**
 
-**Windows:** Windows Recycle Bin via Shell API
+- `$XDG_DATA_HOME/Trash`
+- Fallback: `~/.local/share/Trash`
+
+A relative `$XDG_DATA_HOME` is treated as unset.
+
+**Windows:**
+
+- `%LOCALAPPDATA%\go-remove\trash`
 
 ### Binary Directories (in precedence order)
 
