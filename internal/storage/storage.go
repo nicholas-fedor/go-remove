@@ -3,37 +3,8 @@ Copyright © 2026 Nicholas Fedor <nick@nickfedor.com>
 SPDX-License-Identifier: AGPL-3.0-or-later
 */
 
-// Package storage provides KV storage for history records using Badger v4.
-//
-// This package implements persistent storage for go-remove history records,
-// enabling undo and restore functionality. Records are stored with chronologically
-// sortable keys for efficient time-based queries.
-//
-// Key Format:
-//   - Keys use the format "<zero-padded-timestamp>:<binary_name>" (e.g., "00000001709321234:golangci-lint").
-//   - The timestamp is zero-padded to 20 digits to ensure lexicographic order equals chronological order.
-//   - Unix timestamps ensure sortability and uniqueness.
-//
-// Storage Location:
-//   - Linux: $XDG_DATA_HOME/go-remove/history.badger (fallback: ~/.local/share/go-remove/history.badger).
-//   - Windows: %LOCALAPPDATA%/go-remove/history.badger.
-//
-// Usage:
-//
-//	store, err := storage.NewBadgerStore("/path/to/db")
-//	if err != nil {
-//	    return err
-//	}
-//	defer store.Close()
-//
-//	// Save a record
-//	err = store.SaveRecord(ctx, record)
-//
-//	// Get the most recent record
-//	record, err := store.GetMostRecent(ctx)
-//
-//	// List all records
-//	records, err := store.ListRecords(ctx, opts)
+// Package storage persists go-remove history records in a Badger key-value
+// store under chronologically sortable keys.
 package storage
 
 import (
@@ -46,6 +17,12 @@ import (
 
 	badger "github.com/dgraph-io/badger/v4"
 )
+
+// ValueLogSizeExponent defines the exponent for value log file size calculation (1 << 20 = 1MB).
+const ValueLogSizeExponent = 20
+
+// LevelZeroTablesStall defines the conservative stall threshold for L0 tables.
+const LevelZeroTablesStall = 2
 
 // Common errors for storage operations.
 var (
@@ -69,12 +46,12 @@ var (
 
 	// ErrRecordKeyExhausted indicates no unused storage key could be found.
 	ErrRecordKeyExhausted = errors.New("no unused record key available")
+
+	// errRecordKeyOccupied signals that a candidate storage key is already in use.
+	errRecordKeyOccupied = errors.New("record key already occupied")
 )
 
-// errRecordKeyOccupied signals that a candidate storage key is already in use.
-//
-// It is internal to the save path and never escapes SaveRecord.
-var errRecordKeyOccupied = errors.New("record key already occupied")
+var _ Storer = (*BadgerStore)(nil)
 
 // HistoryRecord represents a single binary removal record.
 type HistoryRecord struct {
@@ -116,35 +93,9 @@ type HistoryRecord struct {
 
 	// Key is the storage key this record is stored under.
 	//
-	// It is set when the record is written and is authoritative thereafter,
-	// because a random discriminator may have been appended to avoid
-	// colliding with an existing record. Records written before this field
-	// existed leave it empty, and RecordKey falls back to deriving the legacy
-	// key from Timestamp and BinaryName.
+	// A record written before this field existed leaves it empty, and RecordKey
+	// derives the legacy key instead.
 	Key string `json:"key,omitempty"`
-}
-
-// RecordKey returns the storage key for the record.
-//
-// Parameters:
-//   - None.
-//
-// Returns:
-//   - The stored key, or the legacy derived key when none was recorded.
-func (r *HistoryRecord) RecordKey() string {
-	if r.Key != "" {
-		return r.Key
-	}
-
-	return GenerateKey(r.Timestamp, r.BinaryName)
-}
-
-// DisplayTime returns a formatted time string for TUI display.
-//
-// Returns:
-//   - Timestamp formatted as "2006-01-02 15:04:05".
-func (r *HistoryRecord) DisplayTime() string {
-	return time.Unix(r.Timestamp, 0).Format("2006-01-02 15:04:05")
 }
 
 // ListOptions provides filtering and pagination for record listing.
@@ -152,10 +103,10 @@ type ListOptions struct {
 	// OnlyAvailable filters to records where TrashAvailable is true.
 	OnlyAvailable bool
 
-	// Limit maximum number of records to return (0 = no limit).
+	// Limit is the maximum number of records to return (0 = no limit).
 	Limit int
 
-	// Offset number of records to skip.
+	// Offset is the number of records to skip.
 	Offset int
 }
 
@@ -248,13 +199,25 @@ type BadgerStore struct {
 	closed   atomic.Bool
 }
 
-var _ Storer = (*BadgerStore)(nil)
+// RecordKey returns the storage key for the record.
+//
+// Returns:
+//   - The stored key, or the legacy derived key when none was recorded.
+func (r *HistoryRecord) RecordKey() string {
+	if r.Key != "" {
+		return r.Key
+	}
 
-// ValueLogSizeExponent defines the exponent for value log file size calculation (1 << 20 = 1MB).
-const ValueLogSizeExponent = 20
+	return GenerateKey(r.Timestamp, r.BinaryName)
+}
 
-// LevelZeroTablesStall defines the conservative stall threshold for L0 tables.
-const LevelZeroTablesStall = 2
+// DisplayTime returns a formatted time string for TUI display.
+//
+// Returns:
+//   - Timestamp formatted as "2006-01-02 15:04:05".
+func (r *HistoryRecord) DisplayTime() string {
+	return time.Unix(r.Timestamp, 0).Format("2006-01-02 15:04:05")
+}
 
 // NewBadgerStore creates a new Badger-based storage instance.
 //
@@ -267,14 +230,14 @@ const LevelZeroTablesStall = 2
 //   - Opened Badger store.
 //   - An error if the database cannot be opened.
 func NewBadgerStore(path string) (*BadgerStore, error) {
-	// Configure Badger with reasonable defaults for desktop application
+	// Configure Badger for a desktop application.
 	opts := badger.DefaultOptions(path).
-		WithSyncWrites(true).                             // Ensure durability
-		WithLogger(nil).                                  // Disable verbose logging
-		WithValueLogFileSize(1 << ValueLogSizeExponent).  // 1MB value log files
-		WithNumMemtables(1).                              // Minimal memory usage
-		WithNumLevelZeroTables(1).                        // Minimal memory usage
-		WithNumLevelZeroTablesStall(LevelZeroTablesStall) // Conservative stall threshold
+		WithSyncWrites(true).
+		WithLogger(nil).
+		WithValueLogFileSize(1 << ValueLogSizeExponent).
+		WithNumMemtables(1).
+		WithNumLevelZeroTables(1).
+		WithNumLevelZeroTablesStall(LevelZeroTablesStall)
 
 	database, err := badger.Open(opts)
 	if err != nil {
@@ -331,13 +294,9 @@ func validateRecord(record *HistoryRecord) error {
 
 // saveRecordExclusive writes the record under a key that is free at commit time.
 //
-// The existence probe and the write share a single read-write transaction.
-// Badger arms conflict detection for write transactions, so if another writer
-// claims the key after this transaction read it, the commit is rejected with
-// ErrConflict rather than overwriting. A collision or a conflict is retried with
-// a fresh random discriminator.
-//
-// The derived key is tried first so the common case keeps the legacy layout.
+// A collision or a conflict is retried with a fresh random discriminator, so two
+// deletions of the same binary within one second are both stored instead of one
+// replacing the other.
 //
 // Parameters:
 //   - ctx: Context for cancellation.
@@ -345,7 +304,7 @@ func validateRecord(record *HistoryRecord) error {
 //
 // Returns:
 //   - An error if the record cannot be marshaled or written, if no key was
-//     free, or if the context is cancelled.
+//     free, or if the context is canceled.
 func (s *BadgerStore) saveRecordExclusive(ctx context.Context, record *HistoryRecord) error {
 	base := GenerateKey(record.Timestamp, record.BinaryName)
 
@@ -354,6 +313,8 @@ func (s *BadgerStore) saveRecordExclusive(ctx context.Context, record *HistoryRe
 			return fmt.Errorf("%w: %w", ErrContextCanceled, err)
 		}
 
+		// The derived key is tried first so the common case keeps the legacy
+		// layout.
 		key := base
 		if attempt > 0 {
 			key = base + ":" + randomKeyDiscriminator()
@@ -368,6 +329,10 @@ func (s *BadgerStore) saveRecordExclusive(ctx context.Context, record *HistoryRe
 			return fmt.Errorf("marshaling record: %w", err)
 		}
 
+		// The existence probe and the write share a single read-write
+		// transaction. Badger arms conflict detection for write transactions, so
+		// a writer that claims the key after this transaction read it turns the
+		// commit into badger.ErrConflict rather than an overwrite.
 		err = s.database.Update(func(txn *badger.Txn) error {
 			_, getErr := txn.Get([]byte(key))
 
@@ -387,9 +352,8 @@ func (s *BadgerStore) saveRecordExclusive(ctx context.Context, record *HistoryRe
 
 			return nil
 		case errors.Is(err, errRecordKeyOccupied), errors.Is(err, badger.ErrConflict):
-			// Occupied by a committed record, or claimed by a writer that
-			// committed after this transaction read the key. Retry with a
-			// fresh discriminator.
+			// Occupied, or claimed by a writer that committed after this
+			// transaction read the key, so retry with a fresh discriminator.
 			continue
 		default:
 			return fmt.Errorf("writing record: %w", err)
@@ -401,10 +365,9 @@ func (s *BadgerStore) saveRecordExclusive(ctx context.Context, record *HistoryRe
 
 // SaveRecord persists a history record to Badger.
 //
-// The key is reserved before writing. If the derived key is already occupied by
-// a different record, a random discriminator is appended so the new record is
-// stored alongside the existing one rather than replacing it. Overwriting would
-// destroy the only index for a copy of the binary already sitting in trash.
+// A key already held by another record is left alone: the new record is stored
+// alongside it under a key carrying a random discriminator, since overwriting
+// would destroy the only index for a copy of the binary already in trash.
 //
 // Parameters:
 //   - ctx: Context for cancellation.
@@ -600,8 +563,6 @@ func (s *BadgerStore) ListRecords(ctx context.Context, opts ListOptions) ([]Hist
 
 // UpdateRecord updates an existing history record.
 //
-// The record key is derived from Timestamp and BinaryName.
-//
 // Parameters:
 //   - ctx: Context for cancellation.
 //   - record: History record to update.
@@ -715,6 +676,8 @@ func (s *BadgerStore) DeleteAllRecords(ctx context.Context) error {
 				return fmt.Errorf("%w: %w", ErrContextCanceled, err)
 			}
 
+			// An iterator's key is only valid until it moves, so the keys are
+			// gathered here and deleted afterwards.
 			key := make([]byte, len(iterator.Item().Key()))
 			copy(key, iterator.Item().Key())
 			keys = append(keys, key)

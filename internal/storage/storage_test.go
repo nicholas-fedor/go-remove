@@ -28,7 +28,6 @@ const testBinaryName = "test-binary"
 func setupTestStore(t *testing.T) (*BadgerStore, func()) {
 	t.Helper()
 
-	// Create temporary directory for test database using t.TempDir()
 	tempDir := t.TempDir()
 
 	dbPath := filepath.Join(tempDir, "test.db")
@@ -452,7 +451,6 @@ func TestBadgerStore_UpdateRecord(t *testing.T) {
 		err := store.UpdateRecord(ctx, &record)
 		require.NoError(t, err)
 
-		// Verify update
 		key := GenerateKey(timestamp, binaryName)
 		updated, err := store.GetRecord(ctx, key)
 		require.NoError(t, err)
@@ -529,7 +527,6 @@ func TestBadgerStore_DeleteRecord(t *testing.T) {
 		err := store.DeleteRecord(ctx, key)
 		require.NoError(t, err)
 
-		// Verify deletion
 		_, err = store.GetRecord(ctx, key)
 		assert.ErrorIs(t, err, ErrRecordNotFound)
 	})
@@ -583,13 +580,11 @@ func TestBadgerStore_DeleteAllRecords(t *testing.T) {
 
 		ctx := t.Context()
 
-		// Create multiple records
 		for i := range 5 {
 			record := createTestRecord(time.Now().Unix()+int64(i), fmt.Sprintf("binary-%d", i))
 			require.NoError(t, store.SaveRecord(ctx, &record))
 		}
 
-		// Verify records exist
 		records, err := store.ListRecords(ctx, ListOptions{})
 		require.NoError(t, err)
 		assert.Len(t, records, 5)
@@ -598,7 +593,6 @@ func TestBadgerStore_DeleteAllRecords(t *testing.T) {
 		err = store.DeleteAllRecords(ctx)
 		require.NoError(t, err)
 
-		// Verify all deleted
 		records, err = store.ListRecords(ctx, ListOptions{})
 		require.NoError(t, err)
 		assert.Empty(t, records)
@@ -628,7 +622,6 @@ func TestBadgerStore_DeleteAllRecords(t *testing.T) {
 
 		ctx := t.Context()
 
-		// Create some records first
 		for i := range 3 {
 			record := createTestRecord(time.Now().Unix()+int64(i), fmt.Sprintf("binary-%d", i))
 			require.NoError(t, store.SaveRecord(ctx, &record))
@@ -785,10 +778,8 @@ func TestParseKey(t *testing.T) {
 // TestSaveRecord_KeyCollisionPreservesBothRecords verifies that two records
 // sharing a timestamp and basename are both stored.
 //
-// The key used to be written with a blind txn.Set, so the second record
-// replaced the first. The first record is the only index for a copy of the
-// binary already sitting in trash, so overwriting it made that copy
-// unreachable.
+// The first record is the only index for a copy of the binary already sitting in
+// trash, so overwriting it would make that copy unreachable.
 func TestSaveRecord_KeyCollisionPreservesBothRecords(t *testing.T) {
 	t.Parallel()
 
@@ -1009,7 +1000,6 @@ func TestHistoryRecord_DisplayTime(t *testing.T) {
 			record := HistoryRecord{Timestamp: tt.timestamp}
 			result := record.DisplayTime()
 			assert.NotEmpty(t, result)
-			// Verify format by parsing
 			_, err := time.Parse("2006-01-02 15:04:05", result)
 			require.NoError(t, err)
 		})
@@ -1023,7 +1013,6 @@ func TestIntegration_CRUDWorkflow(t *testing.T) {
 
 	ctx := t.Context()
 
-	// Create
 	record1 := createTestRecord(time.Now().Unix(), "binary1")
 	record2 := createTestRecord(time.Now().Unix()+1, "binary2")
 
@@ -1055,7 +1044,6 @@ func TestIntegration_CRUDWorkflow(t *testing.T) {
 	_, err = store.GetRecord(ctx, key1)
 	require.ErrorIs(t, err, ErrRecordNotFound)
 
-	// Verify only one record remains
 	records, err = store.ListRecords(ctx, ListOptions{})
 	require.NoError(t, err)
 	assert.Len(t, records, 1)
@@ -1088,8 +1076,8 @@ func TestErrorWrapping(t *testing.T) {
 	})
 }
 
-// TestDeserialize_LegacyRecordWithBuildInfo verifies a record written before
-// BuildInfo was dropped still decodes.
+// TestDeserialize_LegacyRecordWithBuildInfo verifies a record that still
+// carries the BuildInfo field decodes.
 //
 // The field carried the full debug.BuildInfo, so a database written by an
 // earlier version still holds it. Undecoded keys are ignored rather than

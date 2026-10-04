@@ -22,9 +22,9 @@ type HistoryEntry struct {
 	VCSRevision string
 	InTrash     bool
 
-	// Pending marks a deletion that was interrupted before it completed, so the
-	// binary may be in trash with no record pointing at it. Such an entry is
-	// neither restorable nor evidence that a restore already happened.
+	// Pending marks a deletion interrupted before it completed, so the binary
+	// may be in trash with no record pointing at it. The entry is then neither
+	// restorable nor evidence that a restore already happened.
 	Pending bool
 }
 

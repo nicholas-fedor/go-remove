@@ -42,6 +42,15 @@ const (
 	historyCursorPrefix = "  "
 )
 
+// HistoryTitleLines covers the view title and the blank line beneath it.
+const HistoryTitleLines = 2
+
+// HistoryTableHeaderLines covers the header row and the rule beneath it.
+const HistoryTableHeaderLines = 2
+
+// HistoryTrashHeading is the heading of the column reporting trash availability.
+const HistoryTrashHeading = "In Trash"
+
 // historyColumns holds the widths chosen for one frame's table.
 type historyColumns struct {
 	date      int
@@ -53,12 +62,6 @@ type historyColumns struct {
 
 // sizeHistoryColumns derives the table widths from the terminal width.
 //
-// Columns are sized from the space the frame actually leaves rather than a
-// fixed total. The frame sets Width(width-leftPadding) and pads its content by
-// leftPadding, so the space left for the columns is the width less both. Sizing
-// off a single subtraction over-allocates leftPadding cells and wraps every
-// row. Every row also carries a cursor prefix, which comes off next.
-//
 // The trash column is dropped first because it is the least informative, and
 // neither remaining column is forced wider than the space available, so a
 // narrow window truncates rather than wrapping.
@@ -69,17 +72,22 @@ type historyColumns struct {
 // Returns:
 //   - The column widths for this frame.
 func sizeHistoryColumns(width int) historyColumns {
+	// The frame sets Width(width-LeftPadding) and pads its content by
+	// LeftPadding, so the space left for the columns is the width less both.
+	// Sizing off a single subtraction over-allocates LeftPadding cells and wraps
+	// every row.
 	content := max(width-2*LeftPadding, 1)
+
+	// Every row also carries a cursor prefix and a column divider, which come off
+	// next.
 	free := max(content-DisplayWidth(historyCursorPrefix)-historyColumnDivider, 1)
 
 	trashWidth := len(HistoryTrashHeading)
 	dateWidth := min(historyDateWidth, max(free-historyMinNameWidth, 1))
 	nameWithoutTrash := max(free-dateWidth-historyColumnDivider, 1)
 
-	// The candidate is deliberately left unclamped so it reflects the space
-	// that is really left. Clamping it before the comparison would make every
-	// candidate meet the minimum and pin the trash column on even when it does
-	// not fit.
+	// The candidate is left unclamped so the comparison below sees the
+	// space that is really left rather than every candidate meeting the minimum.
 	nameWithTrashCandidate := max(
 		free-dateWidth-2*historyColumnDivider-trashWidth,
 		1,
@@ -109,7 +117,6 @@ func sizeHistoryColumns(width int) historyColumns {
 // Returns:
 //   - A Bubble Tea view listing deletion history.
 func History(state *State) tea.View {
-	// Apply configured styles for UI elements.
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(state.Styles.TitleColor))
 	headerStyle := lipgloss.NewStyle().
 		Bold(true).
@@ -126,7 +133,6 @@ func History(state *State) tea.View {
 	s.WriteString(titleStyle.Render("Deletion History\n"))
 	s.WriteString("\n")
 
-	// Calculate visible count first for use in both rendering and height calculation
 	var (
 		visibleCount      int
 		entryCount        int
@@ -141,7 +147,6 @@ func History(state *State) tea.View {
 	default:
 		columns := sizeHistoryColumns(state.Width)
 
-		// Table header
 		dateHeading := TruncateToWidth(historyDateHeading, columns.date)
 
 		header := PadToWidth(dateHeading, columns.date) +
@@ -161,15 +166,16 @@ func History(state *State) tea.View {
 		)))
 		s.WriteString("\n")
 
-		// Calculate available height for history entries
-		// Reserve space for: title(2) + header(2) + footer(1) + status(1) + padding(2)
+		// Title(2) + header(2) + footer(1) + status(1) + padding(2), which
+		// totals minAvailHeightAdjustment so the two views budget alike.
 		reservedHeight := 8
 
 		if state.ShowLogs {
-			// Reserve additional space for log panel (header + separator + lines)
 			visibleLogCount := min(len(state.Logs), MaxVisibleLogLines)
 			if visibleLogCount == 0 {
-				visibleLogCount = 1 // Placeholder line
+				// A line is reserved even when the panel is empty, so the panel
+				// keeps its height.
+				visibleLogCount = 1
 			}
 
 			reservedHeight += visibleLogCount + LogPanelSeparatorLines
@@ -198,12 +204,9 @@ func History(state *State) tea.View {
 			visibleCount = min(entryCount-startIdx, rowBudget)
 		}
 
-		// What is left below the window is all the indicator can honestly
-		// report, so it appears only while something remains and there is a row
-		// to show it on.
+		// Only what is left below the window is reported, on a freed indicator row.
 		showMoreIndicator := indicatorRowFreed && startIdx+visibleCount < entryCount
 
-		// Table rows - display only visible entries
 		for i := range visibleCount {
 			entryIdx := startIdx + i
 			if entryIdx >= entryCount {
@@ -221,11 +224,8 @@ func History(state *State) tea.View {
 
 			nameStr := entry.BinaryName
 			if DisplayWidth(nameStr) > columns.name {
-				// The ellipsis occupies cells of its own, so the name is
-				// shortened into what the column has left once they are paid
-				// for. A column narrower than the ellipsis leaves no budget at
-				// all, which would put the ellipsis past the column edge, so the
-				// result is capped to the column afterwards.
+				// The ellipsis takes cells of its own, and a column narrower than
+				// it leaves no budget, so the result is capped to the column.
 				budget := max(columns.name-DisplayWidth(historyEllipsis), 0)
 
 				nameStr = TruncateToWidth(nameStr, budget) + historyEllipsis
@@ -248,11 +248,11 @@ func History(state *State) tea.View {
 					PadToWidth(trashStr, columns.trash)
 			}
 
-			s.WriteString(prefix + row)
+			s.WriteString(prefix)
+			s.WriteString(row)
 			s.WriteString("\n")
 		}
 
-		// Show indicator if there are more entries
 		if showMoreIndicator {
 			remaining := entryCount - startIdx - visibleCount
 			moreMsg := fmt.Sprintf("...and %d more", remaining)
@@ -263,7 +263,6 @@ func History(state *State) tea.View {
 
 	s.WriteString("\n")
 
-	// Render log panel if enabled
 	if state.ShowLogs {
 		visibleLogs := VisibleLogs(state.Logs)
 
@@ -283,7 +282,6 @@ func History(state *State) tea.View {
 		s.WriteString("\n")
 	}
 
-	// Show confirmation dialog if active
 	switch state.Confirmation {
 	case ConfirmClearAll:
 		s.WriteString(statusStyle.Render("Clear all history? This cannot be undone. (y/n)"))
@@ -303,7 +301,6 @@ func History(state *State) tea.View {
 		}
 	}
 
-	// Footer with history-specific key bindings
 	var footerText string
 
 	switch {
@@ -318,12 +315,6 @@ func History(state *State) tea.View {
 
 // frame pads the body to fill the terminal and wraps it in the left-padded frame.
 //
-// Padding is measured from what actually renders rather than from a hand-counted
-// total that drifts as soon as the layout does. The measurement uses the same
-// style as the render, because left padding and the width can change how many
-// lines the result occupies, and the padding goes inside the body so every line
-// keeps its width.
-//
 // Parameters:
 //   - state: The snapshot supplying the terminal dimensions.
 //   - body: The rendered content above the footer.
@@ -332,23 +323,19 @@ func History(state *State) tea.View {
 // Returns:
 //   - The framed content.
 func frame(state *State, body, footer string) string {
+	// The measurement uses the same style as the render, because the left padding
+	// and the width change how many lines the result occupies.
 	style := lipgloss.NewStyle().
 		PaddingLeft(LeftPadding).
 		Width(state.Width - LeftPadding)
 
+	// Measuring what actually renders rather than counting lines keeps the total
+	// from drifting as soon as the layout does.
 	pad := max(state.Height-lipgloss.Height(style.Render(body+footer)), 0)
 	if pad > 0 {
+		// The padding goes inside the body so every line keeps its width.
 		body += strings.Repeat("\n", pad)
 	}
 
 	return style.Render(body + footer)
 }
-
-// HistoryTitleLines covers the view title and the blank line beneath it.
-const HistoryTitleLines = 2
-
-// HistoryTableHeaderLines covers the header row and the rule beneath it.
-const HistoryTableHeaderLines = 2
-
-// HistoryTrashHeading is the heading of the column reporting trash availability.
-const HistoryTrashHeading = "In Trash"

@@ -14,22 +14,21 @@ import (
 	"strings"
 )
 
-// ErrInvalidKeyFormat indicates the key is not in the expected format.
-var ErrInvalidKeyFormat = errors.New(
-	"invalid key format: expected '<zero-padded-timestamp>:<binary_name>'",
-)
-
-// ErrEmptyBinaryName indicates the binary name in the key is empty.
-var ErrEmptyBinaryName = errors.New("empty binary name in key")
-
 // maxRecordKeyAttempts bounds the search for an unused record key.
 const maxRecordKeyAttempts = 100
 
+var (
+	// ErrInvalidKeyFormat indicates the key is not in the expected format.
+	ErrInvalidKeyFormat = errors.New(
+		"invalid key format: expected '<zero-padded-timestamp>:<binary_name>'",
+	)
+
+	// ErrEmptyBinaryName indicates the binary name in the key is empty.
+	ErrEmptyBinaryName = errors.New("empty binary name in key")
+)
+
 // randomKeyDiscriminator returns a short random string used to distinguish two
 // records that would otherwise share a key.
-//
-// Parameters:
-//   - None.
 //
 // Returns:
 //   - A hexadecimal string of 12 characters.
@@ -44,10 +43,6 @@ func randomKeyDiscriminator() string {
 
 // GenerateKey creates a composite Badger key.
 //
-// The key format is "<zero-padded-timestamp>:<binary_name>". A random
-// discriminator is appended as a further segment when that key is already in
-// use, giving "<timestamp>:<binary_name>:<discriminator>".
-//
 // Parameters:
 //   - timestamp: Unix timestamp of the deletion.
 //   - binaryName: Name of the deleted binary.
@@ -60,9 +55,8 @@ func GenerateKey(timestamp int64, binaryName string) string {
 
 // ParseKey extracts the timestamp and binary name from a composite key.
 //
-// A key written with a discriminator carries it as a further segment, so the
-// returned binary name includes that suffix. Callers that only need to reject
-// malformed keys are unaffected.
+// A key carrying a discriminator holds it as a further segment, so the returned
+// binary name includes that suffix.
 //
 // Parameters:
 //   - key: Composite storage key to parse.

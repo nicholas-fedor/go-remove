@@ -23,23 +23,20 @@ const DirPermissions = 0o750
 // windowsOS is the runtime.GOOS value for Windows.
 const windowsOS = "windows"
 
-// ErrNoWritableStorage indicates no writable directory was found for storage.
-var ErrNoWritableStorage = errors.New("no writable directory found for storage")
+var (
+	// ErrNoWritableStorage indicates no writable directory was found for storage.
+	ErrNoWritableStorage = errors.New("no writable directory found for storage")
 
-// ErrGorootNotSet indicates that GOROOT is not set when required.
-var ErrGorootNotSet = errors.New("GOROOT is not set")
+	// ErrGorootNotSet indicates that GOROOT is not set when required.
+	ErrGorootNotSet = errors.New("GOROOT is not set")
+)
 
 // DataHomeCandidates returns candidate application data directories for the
 // current platform, most preferred first.
 //
-// On Linux and other Unix-like systems the XDG base directory specification is
-// followed: $XDG_DATA_HOME when it is set and absolute, then ~/.local/share. A
-// relative $XDG_DATA_HOME is skipped rather than joined, because joining it
-// would resolve the data directory against the working directory. The trash root
-// applies the same rule, and both now come from here so they cannot drift.
-//
-// On macOS the location is ~/Library/Application Support. On Windows it is
-// %LOCALAPPDATA%, then %USERPROFILE%.
+// Unix-like systems follow the XDG base directory specification, macOS adds
+// ~/Library/Application Support, and Windows uses %LOCALAPPDATA% then
+// %USERPROFILE%.
 //
 // Returns:
 //   - Ordered list of candidate directories. Empty entries are omitted.
@@ -48,7 +45,6 @@ func DataHomeCandidates() []string {
 
 	switch runtime.GOOS {
 	case windowsOS:
-		// Try LOCALAPPDATA first, then USERPROFILE
 		if dataHome := os.Getenv("LOCALAPPDATA"); dataHome != "" {
 			candidates = append(candidates, dataHome)
 		}
@@ -57,22 +53,23 @@ func DataHomeCandidates() []string {
 			candidates = append(candidates, userProfile)
 		}
 	case "darwin":
-		// An explicit XDG_DATA_HOME is honoured here as well, so the same
-		// variable selects both the application data directory and the trash
-		// root. Application Support remains the default when it is unset.
+		// XDG_DATA_HOME is honored here too, so one variable selects both the
+		// application data directory and the trash root. A relative value is
+		// skipped rather than joined, because joining it would resolve the data
+		// directory against the working directory.
 		if dataHome := os.Getenv("XDG_DATA_HOME"); dataHome != "" && filepath.IsAbs(dataHome) {
 			candidates = append(candidates, dataHome)
 		}
 
-		// Try ~/Library/Application Support
 		if userHome, err := os.UserHomeDir(); err == nil {
 			candidates = append(
 				candidates,
 				filepath.Join(userHome, "Library", "Application Support"),
 			)
 		}
-	default: // Linux and other Unix-like systems
-		// Try $XDG_DATA_HOME first, then ~/.local/share.
+
+	// Linux and other Unix-like systems.
+	default:
 		if dataHome := os.Getenv("XDG_DATA_HOME"); dataHome != "" && filepath.IsAbs(dataHome) {
 			candidates = append(candidates, dataHome)
 		}
@@ -104,12 +101,10 @@ func WritableDataHome() (string, error) {
 		}
 	}
 
-	// Fallback: try user home directory
 	if userHome, err := os.UserHomeDir(); err == nil && IsDirWritable(userHome) {
 		return userHome, nil
 	}
 
-	// Last resort: try executable directory
 	if exePath, err := os.Executable(); err == nil {
 		if exeDir := filepath.Dir(exePath); IsDirWritable(exeDir) {
 			return exeDir, nil
@@ -165,13 +160,9 @@ func IsDirWritable(dir string) bool {
 // BinDir resolves the Go toolchain binary directory.
 //
 // Without useGoroot the order is $GOBIN, then $GOPATH/bin, then ~/go/bin.
-//
-// A relative $GOBIN or $GOPATH is treated as unset, because a relative binary
-// directory would resolve against the working directory, which is wherever the
-// tool happens to be invoked from rather than where the toolchain lives. The
-// same absolute-path rule is applied by DataHomeCandidates, so the binary
-// directory and the application data root cannot disagree about which paths
-// count as resolved.
+// A relative value is rejected at each of those steps, since it would resolve
+// against the working directory rather than the toolchain. GOROOT is joined
+// without that check, so a relative GOROOT yields a relative path.
 //
 // Parameters:
 //   - useGoroot: Whether to target $GOROOT/bin instead.
@@ -195,28 +186,24 @@ func BinDir(useGoroot bool) (string, error) {
 		return goBin, nil
 	}
 
+	// DataHomeCandidates applies the same rule, so the two cannot disagree
+	// about which paths count as resolved.
 	gopath := os.Getenv("GOPATH")
 	if gopath != "" {
-		// GOPATH is a list, and only its first entry is the search root.
-		// Validating the whole string would accept "/abs/path:relative" as
-		// absolute on the strength of its first character and then join the
-		// binary directory onto the entire list.
+		// Only the first entry is the search root. Validating the whole
+		// string would accept "/abs/path:relative" as absolute.
 		gopath, _, _ = strings.Cut(gopath, string(os.PathListSeparator))
 	}
 
 	if gopath != "" && !filepath.IsAbs(gopath) {
-		// A relative GOPATH would place the binary directory inside the working
-		// directory, so it falls through to the home directory exactly as an
-		// unset value does.
+		// A relative GOPATH would place the binary directory in the working
+		// directory, so treat it as unset.
 		gopath = ""
 	}
 
 	if gopath == "" {
-		// os.UserHomeDir reads $HOME on Unix and %USERPROFILE% on Windows, and
-		// returns either verbatim. An unresolvable home is an error rather than
-		// a path, and a relative one is rejected for the same reason a relative
-		// GOPATH is, because joining it would resolve against the working
-		// directory.
+		// os.UserHomeDir returns $HOME or %USERPROFILE% verbatim, and an
+		// unresolvable home is an error rather than a path.
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", fmt.Errorf("resolving home directory: %w", err)

@@ -15,7 +15,7 @@ import (
 	"github.com/nicholas-fedor/go-remove/internal/history"
 )
 
-// TestClassify verifies each sentinel is recognised, including through a wrap.
+// TestClassify verifies each sentinel is recognized, including through a wrap.
 func TestClassify(t *testing.T) {
 	t.Parallel()
 

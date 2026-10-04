@@ -21,20 +21,28 @@ import (
 
 // OS-specific constants for filesystem operations.
 const (
-	windowsOS  = "windows" // Operating system identifier for Windows
-	windowsExt = ".exe"    // File extension for Windows executables
+	windowsOS  = "windows"
+	windowsExt = ".exe"
 )
 
 var goBinaryExtractor = &buildinfo.DefaultExtractor{}
 
-// ErrGorootNotSet indicates that GOROOT is not set when required.
-//
-// It is the same sentinel as paths.ErrGorootNotSet, so errors.Is matches either
-// name.
-var ErrGorootNotSet = paths.ErrGorootNotSet
+var (
+	// ErrGorootNotSet indicates that GOROOT is not set when required.
+	//
+	// It is the same sentinel as paths.ErrGorootNotSet, so errors.Is matches either
+	// name.
+	ErrGorootNotSet = paths.ErrGorootNotSet
 
-// ErrBinaryNotFound indicates that a binary does not exist at the specified path.
-var ErrBinaryNotFound = errors.New("binary not found")
+	// ErrBinaryNotFound indicates that a binary does not exist at the specified path.
+	ErrBinaryNotFound = errors.New("binary not found")
+)
+
+var (
+	_ FS      = (*RealFS)(nil)
+	_ Lister  = (*RealFS)(nil)
+	_ Remover = (*RealFS)(nil)
+)
 
 // Lister reports the Go binaries that may be removed from a directory.
 //
@@ -104,12 +112,6 @@ type FS interface {
 // RealFS implements the FS interface using real filesystem operations.
 type RealFS struct{}
 
-var (
-	_ FS      = (*RealFS)(nil)
-	_ Lister  = (*RealFS)(nil)
-	_ Remover = (*RealFS)(nil)
-)
-
 // NewRealFS creates a RealFS instance.
 //
 // Returns:
@@ -133,26 +135,24 @@ func (r *RealFS) DetermineBinDir(useGoroot bool) (string, error) {
 
 // AdjustBinaryPath constructs a full binary path, adding .exe on Windows if needed.
 //
-// The argument is a name from the scanned directory, not a path. Separators and
-// parent references are ignored rather than joined, because filepath.Join would
-// resolve them and let a positional argument reach outside the binary
-// directory, which is the one thing this tool is meant to prevent. A base of
-// ".." is normalised to ".", since filepath.Base keeps ".." unchanged and
-// joining it would step out of the directory.
+// The argument is a name from the scanned directory rather than a path, so a
+// positional argument cannot address anything outside dir.
 //
 // Parameters:
 //   - dir: Directory containing the binary.
 //   - binary: Binary file name.
 //
 // Returns:
-//   - Path of the binary within dir, or dir itself when binary names no entry
-//     inside it.
+//   - Path of the binary within dir, or dir itself when ".." or "." names no
+//     entry inside it.
 func (r *RealFS) AdjustBinaryPath(dir, binary string) string {
+	// filepath.Base discards separators and parent references, so an argument
+	// given as a path still names only its last element.
 	name := filepath.Base(binary)
 
-	// A base of ".." or "." names no entry inside dir, so the directory itself is
-	// the answer. Return before the Windows suffix, which would otherwise turn
-	// the directory into "bin.exe".
+	// filepath.Base leaves ".." unchanged, and neither it nor "." names an entry
+	// inside dir, so return before the Windows suffix below, which would turn the
+	// directory into "bin.exe".
 	if name == ".." || name == "." {
 		return dir
 	}
@@ -168,11 +168,8 @@ func (r *RealFS) AdjustBinaryPath(dir, binary string) string {
 // hasExecutableSuffix reports whether a name already ends in the Windows
 // executable extension.
 //
-// The comparison ignores case. Windows treats "tool.exe" and "tool.EXE" as the
-// same file, so a case-sensitive test would append a second extension and
-// point at a path that does not exist. Discovery and path construction must
-// agree on this rule: a binary listed by ListBinaries has to be the one
-// AdjustBinaryPath names.
+// Discovery and path construction have to agree on this rule, or a binary listed
+// by ListBinaries would not be the one AdjustBinaryPath names.
 //
 // Parameters:
 //   - name: File name or path to inspect.
@@ -180,6 +177,9 @@ func (r *RealFS) AdjustBinaryPath(dir, binary string) string {
 // Returns:
 //   - True when the extension matches .exe regardless of case.
 func hasExecutableSuffix(name string) bool {
+	// Windows treats "tool.exe" and "tool.EXE" as the same file, so a
+	// case-sensitive test would append a second extension and name a path that
+	// does not exist.
 	return strings.EqualFold(filepath.Ext(name), windowsExt)
 }
 
@@ -223,9 +223,8 @@ func (r *RealFS) RemoveBinary(binaryPath, name string, verbose bool, log logger.
 //
 // Returns:
 //   - Names of Go binaries in the directory.
-//   - An error if the directory cannot be read. A read failure used to be
-//     reported as an empty directory, which sent the user looking for missing
-//     binaries rather than a permission problem.
+//   - An error if the directory cannot be read, so a permission or I/O failure
+//     is not reported as an empty directory.
 func (r *RealFS) ListBinaries(dir string) ([]string, error) {
 	files, err := os.ReadDir(dir)
 	if err != nil {

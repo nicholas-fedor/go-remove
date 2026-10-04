@@ -100,9 +100,8 @@ func TestView_FillsTerminalHeight(t *testing.T) {
 					state.Height = height
 					state.Width = width
 
-					// The real flow recalculates the grid on the first size
-					// message, so the test does the same rather than using
-					// hand-set rows that the program would never have.
+					// Recalculate the grid as the first size message does, rather than
+					// using rows the program would never produce.
 					withGrid(state)
 
 					// The model picks the view from the mode, so the test does the
@@ -115,16 +114,11 @@ func TestView_FillsTerminalHeight(t *testing.T) {
 						content = Binaries(state).Content
 					}
 
-					// The view must fill the terminal, never fall short of it. It
-					// may exceed it on a very short terminal with the log panel
-					// open, since the content genuinely does not fit.
+					// A view that cannot fit may exceed the terminal height, but it must
+					// still reach the bottom.
 					got := lipgloss.Height(content)
 
 					if state.ShowLogs && got > height {
-						// The log panel and the chrome around it are taller
-						// than the terminal, so the content cannot be made to
-						// fit. What must still hold is that the view reaches the
-						// bottom rather than falling short of it.
 						assert.GreaterOrEqual(t, got, height,
 							"a view that cannot fit must still reach the bottom")
 

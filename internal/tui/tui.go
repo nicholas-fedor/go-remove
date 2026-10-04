@@ -50,8 +50,7 @@ type Options struct {
 	ProgramOptions []tea.ProgramOption
 
 	// StdinIsTerminal reports whether standard input is an interactive
-	// terminal. It is a field rather than a package variable so a test can
-	// supply its own without shared mutable state.
+	// terminal. It is a field so a test can supply its own.
 	StdinIsTerminal func() bool
 }
 
@@ -90,9 +89,8 @@ func stdinIsTerminal(check func() bool) bool {
 //
 //nolint:gocritic // hugeParam: Options is a settings struct, read once per run.
 func Run(ctx context.Context, opts Options) error {
-	// A TUI needs a terminal. Under a pipe or in CI the failure otherwise
-	// surfaces as a nested bubbletea error with no hint that the non-interactive
-	// form is a plain argument.
+	// Under a pipe or in CI the failure would otherwise surface as a nested
+	// bubbletea error with no hint that a binary name is the plain form.
 	if !stdinIsTerminal(opts.StdinIsTerminal) {
 		return fmt.Errorf(
 			"%w: go-remove needs an interactive terminal, pass a binary name to remove it directly",
@@ -100,7 +98,6 @@ func Run(ctx context.Context, opts Options) error {
 		)
 	}
 
-	// Fetch available binaries from the specified directory.
 	choices, err := opts.FS.ListBinaries(opts.Dir)
 	if err != nil {
 		return fmt.Errorf("listing binaries in %s: %w", opts.Dir, err)
@@ -120,20 +117,17 @@ func Run(ctx context.Context, opts Options) error {
 		choices,
 	)
 
-	// Start the TUI program with the caller's context. Bubbletea's own signal
-	// handling is disabled so an interrupt reaches the context installed by
-	// Execute rather than racing it, leaving a single interruption path.
+	// Bubbletea's own signal handling is disabled so an interrupt reaches
+	// the context installed by Execute rather than racing it.
 	program := tea.NewProgram(m, append(
 		[]tea.ProgramOption{tea.WithContext(ctx), tea.WithoutSignalHandler()},
 		opts.ProgramOptions...,
 	)...)
 
-	// Run the program and capture any runtime errors.
 	_, runErr := program.Run()
 
-	// An operation may still be running, possibly part way through a recovery.
-	// The history manager is closed by the caller straight after this returns,
-	// so wait rather than closing the store underneath it.
+	// An operation may still be running, and the caller closes the history
+	// manager straight after, so wait rather than closing the store underneath.
 	m.Wait()
 
 	if runErr != nil {
@@ -142,9 +136,8 @@ func Run(ctx context.Context, opts Options) error {
 			return nil
 		}
 
-		// A cancelled context makes Bubbletea kill the program, which is still
-		// the user's interrupt rather than a real failure. Anything else keeps
-		// its own identity, so an unexpected kill is still reported.
+		// A canceled context makes Bubbletea kill the program, which is still
+		// the user's interrupt. Any other kill keeps its own identity.
 		if errors.Is(runErr, tea.ErrProgramKilled) && errors.Is(ctx.Err(), context.Canceled) {
 			return nil
 		}

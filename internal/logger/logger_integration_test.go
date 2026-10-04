@@ -50,6 +50,19 @@ type recorder struct {
 	messages []capturedMessage
 }
 
+// LoggerIntegrationTestSuite provides integration tests for the logger Logger interface.
+//
+// This suite tests the orchestration between the application layer and logging layer,
+// ensuring that all logging operations behave correctly through the Logger interface.
+// All tests use the MockLogger to simulate logging operations without producing
+// actual output.
+type LoggerIntegrationTestSuite struct {
+	suite.Suite
+
+	// Mock for the Logger interface
+	mockLogger *mocks.MockLogger
+}
+
 // capture returns a LogCaptureFunc that records every line it is given.
 //
 // Returns:
@@ -128,19 +141,6 @@ func capturedLogger(t *testing.T) (logger.Logger, *recorder) {
 	loggerInstance.SetCaptureFunc(records.capture())
 
 	return loggerInstance, records
-}
-
-// LoggerIntegrationTestSuite provides integration tests for the logger Logger interface.
-//
-// This suite tests the orchestration between the application layer and logging layer,
-// ensuring that all logging operations behave correctly through the Logger interface.
-// All tests use the MockLogger to simulate logging operations without producing
-// actual output.
-type LoggerIntegrationTestSuite struct {
-	suite.Suite
-
-	// Mock for the Logger interface
-	mockLogger *mocks.MockLogger
 }
 
 // SetupTest initializes the test suite before each test.
@@ -358,8 +358,7 @@ func (s *LoggerIntegrationTestSuite) TestCaptureDisabledRestoresOutput() {
 func (s *LoggerIntegrationTestSuite) TestConcurrentLogging() {
 	const iterations = 50
 
-	// Set up expectations for concurrent calls.
-	// We use Once() for each call, so we need to set up multiple expectations.
+	// Once() for each call, so several expectations are registered per iteration.
 	for range iterations {
 		s.mockLogger.EXPECT().Debug("debug message").Return().Once()
 		s.mockLogger.EXPECT().Info("info message").Return().Once()
@@ -399,7 +398,6 @@ func (s *LoggerIntegrationTestSuite) TestConcurrentLogging() {
 func (s *LoggerIntegrationTestSuite) TestConcurrentLevelChanges() {
 	const iterations = 50
 
-	// Set up expectations.
 	for range iterations {
 		s.mockLogger.EXPECT().Info("info message").Return().Once()
 		s.mockLogger.EXPECT().Level(mock.Anything).Return().Once()
@@ -407,14 +405,12 @@ func (s *LoggerIntegrationTestSuite) TestConcurrentLevelChanges() {
 
 	var wg sync.WaitGroup
 
-	// Concurrent logging.
 	for range iterations {
 		wg.Go(func() {
 			s.mockLogger.Info("info message")
 		})
 	}
 
-	// Concurrent level changes.
 	for range iterations {
 		wg.Go(func() {
 			s.mockLogger.Level(logger.DebugLevel)
@@ -454,7 +450,6 @@ func (s *LoggerIntegrationTestSuite) TestCaptureFuncCalledMultipleTimes() {
 	// Give time for capture to process.
 	time.Sleep(50 * time.Millisecond)
 
-	// Verify capture was called for each message.
 	s.GreaterOrEqual(
 		records.count("rapid log message"),
 		numMessages*9/10,
@@ -479,9 +474,9 @@ func (s *LoggerIntegrationTestSuite) TestNilCaptureFuncDisablesCapture() {
 		capturedAfter++
 	}
 
-	// Verify the new capture function is NOT called since we set nil.
+	// The replacement capture function must not be called, since nil wins.
 	loggerInstance.SetCaptureFunc(captureFuncAfter)
-	loggerInstance.SetCaptureFunc(nil) // Disable again.
+	loggerInstance.SetCaptureFunc(nil)
 
 	for range 10 {
 		loggerInstance.Info("message without capture")
@@ -502,7 +497,6 @@ func (s *LoggerIntegrationTestSuite) TestNilCaptureFuncDisablesCapture() {
 func TestLogCaptureFuncType(t *testing.T) {
 	t.Parallel()
 
-	// Verify LogCaptureFunc can be assigned and called.
 	var (
 		called                     bool
 		capturedLevel, capturedMsg string
@@ -514,7 +508,6 @@ func TestLogCaptureFuncType(t *testing.T) {
 		capturedMsg = msg
 	})
 
-	// Call the function.
 	captureFunc("INF", "test message")
 
 	assert.True(t, called)
@@ -635,11 +628,9 @@ func TestNewLoggerWithCaptureIntegration(t *testing.T) {
 	require.NotNil(t, loggerInstance)
 	require.NotNil(t, captureWriter)
 
-	// Verify it implements the interface.
 	iface := loggerInstance
 	assert.NotNil(t, iface)
 
-	// Test capture functionality.
 	var captured bool
 
 	captureFunc := func(_, _ string) {
@@ -672,26 +663,18 @@ func TestLogLevelTransitions(t *testing.T) {
 
 	loggerInstance, records := capturedLogger(t)
 
-	// At info level, debug should be filtered.
 	loggerInstance.Level(logger.InfoLevel)
 	loggerInstance.Debug("debug at info level")
 	assert.Zero(t, records.count("debug at info level"))
 
-	// Change to debug level.
 	loggerInstance.Level(logger.DebugLevel)
-
-	// Now debug should pass through.
 	loggerInstance.Debug("debug at debug level")
 	assert.Equal(t, 1, records.count("debug at debug level"))
 
-	// Change to error level.
 	loggerInstance.Level(logger.ErrorLevel)
-
-	// Now info should be filtered.
 	loggerInstance.Info("info at error level")
 	assert.Zero(t, records.count("info at error level"))
 
-	// But error should pass.
 	loggerInstance.Error("error at error level")
 	assert.Equal(t, 1, records.count("error at error level"))
 }

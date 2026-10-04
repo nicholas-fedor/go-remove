@@ -5,14 +5,35 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 package render
 
-// Layout constants for the choice grid. These must stay consistent with the
-// view functions that draw the result.
 const (
-	ColWidthPadding          = 3 // Padding added to column width for spacing
-	availWidthAdjustment     = 4 // Adjustment to width for border and padding
-	minAvailHeightAdjustment = 8 // Minimum height adjustment for title, footer and padding
-	MaxVisibleLogLines       = 5 // Maximum number of log lines to display
-	LogPanelSeparatorLines   = 2 // Number of separator lines for log panel
+	// ColWidthPadding is the cursor gutter every row carries plus the cell that
+	// separates one column from the next, so padded names cannot touch.
+	ColWidthPadding = 3
+
+	// availWidthAdjustment is the horizontal space the frame spends around the
+	// grid. It is charged twice, once by the frame's own width and once by its
+	// left padding.
+	availWidthAdjustment = 4
+
+	// minAvailHeightAdjustment is the vertical space the frame spends around the
+	// grid: the title, the blank lines above and below it, the status or busy
+	// line, and the footer. It is deliberately over-reserved, so a frame that
+	// comes up short loses a row of choices rather than overflowing the
+	// terminal. History counts the same overhead in its own reservedHeight, so
+	// the two must agree.
+	minAvailHeightAdjustment = 8
+
+	// MaxVisibleLogLines is the most log lines the panel will show.
+	MaxVisibleLogLines = 5
+
+	// LogPanelSeparatorLines is the rule and blank line around the log panel.
+	LogPanelSeparatorLines = 2
+
+	// LeftPadding is the padding applied to the left of every rendered frame.
+	LeftPadding = 2
+
+	// visibleLenPrefix is the gutter every choice row carries, selected or not.
+	visibleLenPrefix = 2
 )
 
 // GridInput describes what a grid layout is computed from.
@@ -28,8 +49,7 @@ type GridInput struct {
 	Status string
 
 	// Busy names the operation in flight. The busy line is drawn in place of the
-	// status line rather than beside it, so a non-empty Busy costs one row too,
-	// and not one row each.
+	// status line rather than beside it, so a non-empty Busy costs one row too.
 	Busy string
 
 	// ShowLogs reports whether the log panel is visible, and LogCount is how
@@ -74,9 +94,7 @@ func GridLayout(input *GridInput) Grid {
 	colWidth := maxNameLen + ColWidthPadding
 	availWidth := input.Width - availWidthAdjustment
 
-	// The status line takes one row when present, and so does the busy line,
-	// which replaces the status line rather than joining it. The constant height
-	// adjustment does not account for either dynamically.
+	// Status and busy share a row, which the constant adjustment cannot cover.
 	statusAdjustment := 0
 	if input.Status != "" || input.Busy != "" {
 		statusAdjustment = 1
@@ -99,7 +117,7 @@ func GridLayout(input *GridInput) Grid {
 		return Grid{}
 	}
 
-	// Maximise rows, then bound columns by the width available.
+	// Maximize rows, then bound columns by the width available.
 	maxCols := max(availWidth/colWidth, 1)
 
 	rows := min(availHeight, len(input.Choices))
@@ -142,9 +160,3 @@ func clampCursor(grid Grid, count int) Grid {
 
 	return grid
 }
-
-// LeftPadding is the padding applied to the left of every rendered frame.
-const LeftPadding = 2
-
-// visibleLenPrefix is the gutter every choice row carries, selected or not.
-const visibleLenPrefix = 2

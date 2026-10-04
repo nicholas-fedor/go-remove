@@ -273,7 +273,6 @@ func TestRealFS_RemoveBinary(t *testing.T) {
 				logger: func(t *testing.T) logger.Logger {
 					t.Helper()
 
-					// Create mock with expectations for verbose logging.
 					log := mocks.NewMockLogger(t)
 					log.EXPECT().Debug(mock.Anything, mock.Anything).Maybe()
 					log.EXPECT().Info(mock.Anything, mock.Anything).Maybe()
@@ -293,7 +292,6 @@ func TestRealFS_RemoveBinary(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Set up temporary file if provided.
 			if tt.setup != nil {
 				tt.args.binaryPath = tt.setup()
 			}
@@ -319,9 +317,8 @@ func TestRealFS_RemoveBinary_VerboseLogging(t *testing.T) {
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "testbin")
 
-	// Mockery records the variadic tail as a single slice argument, so a call that
-	// carries fields expects the message plus that slice rather than the fields
-	// spread out.
+	// Mockery records the variadic tail as one slice argument, so a call
+	// with fields expects the message plus that slice.
 	log.EXPECT().
 		Debug("Constructed binary path", []logger.Field{logger.Str("path", tmpFile)}).
 		Once()
@@ -359,9 +356,8 @@ func TestRealFS_AdjustBinaryPath_StaysInDirectory(t *testing.T) {
 	realFS := &RealFS{}
 	dir := filepath.Join(string(filepath.Separator), "home", "user", "go", "bin")
 
-	// AdjustBinaryPath appends the executable suffix on Windows, so an ordinary
-	// name is expected to resolve with it. The parent cases resolve to the
-	// directory itself and carry no suffix.
+	// An ordinary name resolves with the Windows suffix; a parent case
+	// resolves to the directory itself and carries none.
 	exe := ""
 	if runtime.GOOS == windowsOS {
 		exe = windowsExt
@@ -519,7 +515,6 @@ func TestRealFS_ListBinaries(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Set up temporary directory if provided.
 			if tt.setup != nil {
 				tt.args.dir = tt.setup()
 			}

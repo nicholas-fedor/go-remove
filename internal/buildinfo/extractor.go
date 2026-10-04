@@ -35,6 +35,8 @@ var (
 	)
 )
 
+var _ Extractor = (*DefaultExtractor)(nil)
+
 // Extractor defines operations for extracting build information from Go binaries.
 type Extractor interface {
 	// Extract retrieves build information from a binary file.
@@ -92,8 +94,6 @@ type BuildInfoData struct {
 // DefaultExtractor implements the Extractor interface using debug/buildinfo.
 type DefaultExtractor struct{}
 
-var _ Extractor = (*DefaultExtractor)(nil)
-
 // NewExtractor creates a new build info extractor.
 //
 // Returns:
@@ -127,12 +127,10 @@ func isSupportedPlatform() bool {
 //   - Structured build info.
 //   - An error if the file is missing, not a Go binary, or extraction fails.
 func (e *DefaultExtractor) Extract(ctx context.Context, binaryPath string) (*BuildInfoData, error) {
-	// Check context cancellation
 	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context cancelled: %w", err)
+		return nil, fmt.Errorf("context canceled: %w", err)
 	}
 
-	// Verify file exists
 	if _, err := os.Stat(binaryPath); err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("%w: %s", ErrPathNotFound, binaryPath)
@@ -141,12 +139,10 @@ func (e *DefaultExtractor) Extract(ctx context.Context, binaryPath string) (*Bui
 		return nil, fmt.Errorf("checking binary path: %w", err)
 	}
 
-	// Read build info directly from binary
 	info, err := buildinfo.ReadFile(binaryPath)
 	if err != nil {
-		// A file that could not be read is not the same as a file that is not
-		// a Go binary. Reporting both as ErrNotGoBinary dropped an unreadable
-		// entry from the listing without saying why.
+		// An unreadable entry is not the same as a non-Go binary, so a
+		// path error keeps its own cause rather than becoming ErrNotGoBinary.
 		if pathErr := (*fs.PathError)(nil); errors.As(err, &pathErr) {
 			return nil, fmt.Errorf("reading build info from %s: %w", binaryPath, err)
 		}
@@ -154,23 +150,19 @@ func (e *DefaultExtractor) Extract(ctx context.Context, binaryPath string) (*Bui
 		return nil, fmt.Errorf("%w: %w", ErrNotGoBinary, err)
 	}
 
-	// Build the structured data
 	data := &BuildInfoData{
 		GoVersion: info.GoVersion,
 		Settings:  make(map[string]string),
 	}
 
-	// Extract main module information
 	if info.Main.Path != "" {
 		data.ModulePath = info.Main.Path
 		data.Version = info.Main.Version
 	}
 
-	// Parse build settings
 	for _, setting := range info.Settings {
 		data.Settings[setting.Key] = setting.Value
 
-		// Extract VCS information from settings
 		switch setting.Key {
 		case "vcs.revision":
 			data.VCSRevision = setting.Value
@@ -191,7 +183,6 @@ func (e *DefaultExtractor) Extract(ctx context.Context, binaryPath string) (*Bui
 //   - Hex-encoded SHA256 digest.
 //   - An error if the file cannot be read.
 func (e *DefaultExtractor) CalculateChecksum(binaryPath string) (string, error) {
-	// Open the binary file
 	file, err := os.Open(binaryPath)
 	if err != nil {
 		if os.IsNotExist(err) {

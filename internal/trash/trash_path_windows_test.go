@@ -22,7 +22,7 @@ import (
 // syscall.EXDEV is declared there as an offset into the application error range
 // and is never returned by a Windows API, so matching it alone would report
 // every cross-volume move as a hard failure. ERROR_NOT_SAME_DEVICE is the code
-// MoveFileEx actually returns, and it is what must be recognised.
+// MoveFileEx actually returns, and it is what must be recognized.
 func TestIsCrossDevice_Windows(t *testing.T) {
 	t.Parallel()
 

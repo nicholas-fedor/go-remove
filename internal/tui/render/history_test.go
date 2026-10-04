@@ -46,9 +46,8 @@ func TestViewHistory_AlignsColumnsWithCJKNames(t *testing.T) {
 	// The rows follow the title, a blank line, the column heading and the rule.
 	firstRow := HistoryTitleLines + HistoryTableHeaderLines
 
-	// Each row ends with its trash value. A name column sized by runes rather
-	// than cells shifts that column, so compare the cell offset of the value
-	// rather than its byte index, which differs for a wide name anyway.
+	// A name column sized by runes rather than cells would shift the trash
+	// column, so compare the cell offset rather than the byte index.
 	offsets := make([]int, 0, 3)
 
 	for i := range 3 {
@@ -85,9 +84,8 @@ func TestViewHistory_FitsNarrowTerminal(t *testing.T) {
 		InTrash:    true,
 	}
 
-	// Nine columns is the narrowest the table can render: a row carries the cursor
-	// gutter, the date, a divider and the name, and the frame pads both sides.
-	// Below that the row has no room to fit at all.
+	// Nine columns is the narrowest the table can render; below that the row
+	// has no room to fit at all.
 	for _, width := range []int{9, 10, 11, 12, 20, 24, 28, 30, 41, 42, 80, 160} {
 		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {
 			t.Parallel()
@@ -110,11 +108,8 @@ func TestViewHistory_FitsNarrowTerminal(t *testing.T) {
 					DisplayWidth(line), line)
 			}
 
-			// A row wider than the frame wraps onto a second line, and every
-			// wrapped line is still within the width, so the check above misses
-			// it. The entry row is the one carrying the cursor glyph, and
-			// whatever follows it is blank padding, so any content on the next
-			// line is the tail of a row that spilled past the frame.
+			// Every wrapped line is still within the width, so a row that spills
+			// past the frame is caught as content on the line after the cursor.
 			index := cursorRowIndex(t, lines)
 			row := lines[index]
 
@@ -240,7 +235,7 @@ func TestViewHistory_StatusRowLeavesNoRoomForIndicator(t *testing.T) {
 	assert.NotContains(t, rendered, "...and",
 		"the indicator must be suppressed when no row is free for it")
 
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		assert.LessOrEqual(t, lipgloss.Height(line), state.Height,
 			"every line must stay within the terminal, got %q", line)
 	}

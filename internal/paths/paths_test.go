@@ -204,16 +204,13 @@ func TestStoragePath(t *testing.T) {
 // %USERPROFILE% on Windows, and a case that set only one would resolve the
 // real home of whichever platform the suite runs on.
 func TestBinDir(t *testing.T) {
-	// A literal such as "/gobin" is not absolute on Windows, which has no
-	// volume for it, so the absolute inputs are built from a temporary
-	// directory that is absolute on every platform.
+	// A literal such as "/gobin" is not absolute on Windows, so the absolute
+	// inputs are built from a temporary directory.
 	root := t.TempDir()
 	goBinAbs := filepath.Join(root, "gobin")
 	goPathAbs := filepath.Join(root, "gopath")
 	goRootAbs := filepath.Join(root, "goroot")
 
-	// The home fallback is built from the temporary root so it is absolute on
-	// every platform, which a literal such as "/home/u" is not on Windows.
 	home := filepath.Join(root, "home", "u")
 	homeGoBin := filepath.Join(home, "go", "bin")
 
@@ -303,9 +300,8 @@ func TestBinDir(t *testing.T) {
 			want: homeGoBin,
 		},
 		{
-			// GOPATH is a list. Only its first entry is the search root, so a
-			// trailing entry must not turn an absolute first entry into a path
-			// with a list separator glued onto it.
+			// Only the first entry is the search root, so a trailing entry must
+			// not glue a list separator onto an absolute first entry.
 			name: "a gopath list uses its first entry",
 			env: map[string]string{
 				"GOBIN":       "",
@@ -329,9 +325,6 @@ func TestBinDir(t *testing.T) {
 			want: homeGoBin,
 		},
 		{
-			// os.UserHomeDir returns $HOME verbatim, so a relative home would
-			// otherwise produce a binary directory resolved against the working
-			// directory.
 			name: "a relative home is rejected",
 			env: map[string]string{
 				"GOBIN":       "",
@@ -352,9 +345,8 @@ func TestBinDir(t *testing.T) {
 			got, err := BinDir(tt.useGoroot)
 
 			if tt.wantErr {
-				// The GOROOT case reports its own sentinel. A home that cannot
-				// be used reports a different failure, so only require an
-				// error when the case does not name one to match.
+				// The GOROOT case names its own sentinel; any other case
+				// only requires an error.
 				if tt.useGoroot {
 					require.ErrorIs(t, err, ErrGorootNotSet)
 				} else {

@@ -22,9 +22,8 @@ type opResultMsg struct {
 	// err is the outcome, nil on success.
 	err error
 
-	// errStatus turns a failure into a specific message. Without it the generic
-	// "Error <op>" form is used, which loses the distinction the history layer
-	// makes between an unrestorable entry and a real fault.
+	// Without it the generic "Error <op>" form is used, losing the distinction
+	// the history layer makes between an unrestorable entry and a real fault.
 	errStatus func(error) string
 
 	// okStatus is the operation's own success message. Only the operation knows
@@ -86,7 +85,6 @@ func (m *Model) loadHistory() tea.Cmd {
 //   - Command that produces a HistoryMsg.
 func (m *Model) loadHistoryReporting(quiet bool) tea.Cmd {
 	return func() tea.Msg {
-		// Check if history manager is available
 		if m.historyManager == nil {
 			return HistoryMsg{Entries: nil, Error: ErrHistoryNotInitialized, quiet: quiet}
 		}
@@ -186,9 +184,7 @@ func (m *Model) cancelInFlight() {
 	// user stopped it rather than trusting the result it eventually reports.
 	m.interrupted = true
 
-	// The busy line is gone, so the row it reserved is released here. Waiting for
-	// the result to arrive would leave the reservation behind until the work
-	// happened to finish.
+	// Clearing busy releases the row it reserved, rather than waiting for the result.
 	m.updateGrid()
 }
 

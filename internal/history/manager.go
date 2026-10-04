@@ -20,6 +20,27 @@ import (
 	"github.com/nicholas-fedor/go-remove/internal/trash"
 )
 
+// recoveryTimeout bounds the attempt to undo a half-finished deletion, so a
+// stuck restore cannot leave the process hanging after an interrupt.
+const recoveryTimeout = 30 * time.Second
+
+// Log field keys used across history operations.
+const (
+	logFieldBinary  = "binary"
+	logFieldEntryID = "entry_id"
+	logFieldPath    = "path"
+	logFieldTrash   = "trash"
+)
+
+// undoPageSize bounds how many history records UndoMostRecent reads at a time.
+//
+// Each persisted record embeds the binary's full build information, so loading
+// the whole history to restore one entry would be needlessly expensive.
+const undoPageSize = 50
+
+// platformWindows is the GOOS value for Windows systems.
+const platformWindows = "windows"
+
 // Common errors for history operations.
 var (
 	// ErrEntryNotFound indicates the requested history entry does not exist.
@@ -55,58 +76,9 @@ var (
 	ErrChecksumMismatch = errors.New("trash copy does not match the recorded checksum")
 )
 
-// recoveryTimeout bounds the attempt to undo a half-finished deletion, so a
-// stuck restore cannot leave the process hanging after an interrupt.
-const recoveryTimeout = 30 * time.Second
-
-// detachedContext returns a context for a write that must complete even though
-// the caller's context is already cancelled.
-//
-// These writes exist to put the store back into a consistent state, so
-// inheriting the cancellation that caused the problem would leave it worse:
-// a record left behind is indistinguishable from an interrupted deletion.
-//
-// Parameters:
-//   - ctx: The caller's context, used only for its values.
-//
-// Returns:
-//   - A bounded context detached from cancellation.
-//   - A function that releases it, which must be called when the write ends.
-func detachedContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.WithoutCancel(ctx), recoveryTimeout)
-}
-
-// Log field keys used across history operations.
-const (
-	logFieldBinary  = "binary"
-	logFieldEntryID = "entry_id"
-	logFieldPath    = "path"
-	logFieldTrash   = "trash"
-)
-
-// undoPageSize bounds how many history records UndoMostRecent reads at a time.
-//
-// Each persisted record embeds the binary's full build information, so loading
-// the whole history to restore one entry would be needlessly expensive.
-const undoPageSize = 50
-
-// platformWindows is the GOOS value for Windows systems.
-const platformWindows = "windows"
-
-// trashStateQueryable reports whether the platform's trash can confirm that a
-// path is still present.
-//
-// The Windows Recycle Bin is owned by the shell and exposes no reliable
-// membership check, so IsInTrash always reports false there. Consulting it
-// would mark every entry as absent straight after a successful deletion.
-func trashStateQueryable() bool {
-	return runtime.GOOS != platformWindows
-}
+var _ Manager = (*HistoryManager)(nil)
 
 // Manager defines high-level history operations.
-//
-// This interface provides the orchestration layer that coordinates trash,
-// storage, and buildinfo packages to provide undo/restore functionality.
 type Manager interface {
 	// RecordDeletion captures a binary deletion to history.
 	//
@@ -190,9 +162,6 @@ type Manager interface {
 }
 
 // HistoryManager implements the Manager interface.
-//
-// It coordinates trash operations, storage persistence, and build info
-// extraction to provide a unified history management interface.
 type HistoryManager struct {
 	trasher   trash.Trasher
 	storer    storage.Storer
@@ -200,7 +169,31 @@ type HistoryManager struct {
 	logger    logger.Logger
 }
 
-var _ Manager = (*HistoryManager)(nil)
+// detachedContext returns a context for a write that must complete even though
+// the caller's context is already canceled.
+//
+// These writes exist to put the store back into a consistent state, so
+// inheriting the cancellation that caused the problem would leave it worse:
+// a record left behind is indistinguishable from an interrupted deletion.
+//
+// Parameters:
+//   - ctx: The caller's context, used only for its values.
+//
+// Returns:
+//   - A bounded context detached from cancellation.
+//   - A function that releases it, which must be called when the write ends.
+func detachedContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), recoveryTimeout)
+}
+
+// trashStateQueryable reports whether the platform's trash can confirm that a
+// path is still present.
+func trashStateQueryable() bool {
+	// The Windows Recycle Bin is owned by the shell and exposes no reliable
+	// membership check, so consulting it would mark every entry as absent
+	// straight after a successful deletion.
+	return runtime.GOOS != platformWindows
+}
 
 // NewManager creates a new history manager instance.
 //
@@ -212,14 +205,6 @@ var _ Manager = (*HistoryManager)(nil)
 //
 // Returns:
 //   - A Manager instance.
-//
-// Example:
-//
-//	trasher, _ := trash.NewTrasher()
-//	store, _ := storage.NewBadgerStore(dbPath)
-//	extractor, _ := buildinfo.NewExtractor()
-//	log, _ := logger.NewLogger()
-//	manager := history.NewManager(trasher, store, extractor, log)
 func NewManager(
 	trasher trash.Trasher,
 	storer storage.Storer,
@@ -235,20 +220,6 @@ func NewManager(
 }
 
 // RecordDeletion captures a binary deletion to history.
-//
-// The workflow is:
-//  1. Extract build info from binary
-//  2. Calculate checksum
-//  3. Persist the record, before the binary is moved, marked not yet in trash
-//  4. Move binary to trash
-//  5. Update the record with the trash location
-//
-// Recording before moving is what makes an interrupted deletion recoverable.
-// Moving first leaves a binary in trash that no record points at if the process
-// dies before the write, and the trash directory is not indexed by anything else,
-// so that binary is unrecoverable through go-remove. Writing first leaves at
-// worst a record missing its trash location, which still names the binary and
-// leaves the file discoverable in the trash.
 //
 // Parameters:
 //   - ctx: Context for cancellation.
@@ -270,22 +241,18 @@ func (m *HistoryManager) RecordDeletion(
 		logger.Str(logFieldPath, binaryPath),
 	)
 
-	// Extract build info from binary
 	buildData, err := m.extractor.Extract(ctx, binaryPath)
 	if err != nil {
 		return nil, fmt.Errorf("extracting build info: %w", err)
 	}
 
-	// Calculate checksum
 	checksum, err := m.extractor.CalculateChecksum(binaryPath)
 	if err != nil {
 		return nil, fmt.Errorf("calculating checksum: %w", err)
 	}
 
-	// Get original directory
 	originalDir := filepath.Dir(binaryPath)
 
-	// Create history record
 	now := time.Now()
 
 	record := storage.HistoryRecord{
@@ -296,34 +263,35 @@ func (m *HistoryManager) RecordDeletion(
 		ModulePath:     buildData.ModulePath,
 		Version:        buildData.Version,
 		VCSRevision:    buildData.VCSRevision,
-		VCSTime:        time.Time{}, // Will be empty if parsing fails
+		VCSTime:        time.Time{},
 		GoVersion:      buildData.GoVersion,
 		Checksum:       checksum,
-		TrashAvailable: false, // The binary has not moved yet.
+		TrashAvailable: false,
 		OriginalDir:    originalDir,
 	}
 
-	// Try to parse VCS time if available
 	if buildData.VCSTime != "" {
 		if parsedTime, err := time.Parse(time.RFC3339, buildData.VCSTime); err == nil {
 			record.VCSTime = parsedTime
 		}
 	}
 
-	// Persist the intent before touching the binary.
+	// Persist the intent before touching the binary. Moving first would leave a
+	// binary in trash that no record points at if the process dies before this
+	// write, and the trash directory is not indexed by anything else, so that
+	// binary would be unrecoverable through go-remove. Writing first leaves at
+	// worst a record with no trash location, which still names the binary and
+	// leaves the file discoverable in the trash.
 	if err := m.storer.SaveRecord(ctx, &record); err != nil {
 		return nil, fmt.Errorf("saving history record: %w", err)
 	}
 
-	// Move binary to trash
 	trashPath, moveErr := m.trasher.MoveToTrash(ctx, binaryPath)
 	if moveErr != nil {
 		moveFailure := fmt.Errorf("moving to trash: %w", moveErr)
 
-		// Nothing was moved, so the record describes a deletion that did not
-		// happen. Drop it rather than leave history claiming otherwise. The
-		// write is detached because the move may have failed precisely because
-		// the context was cancelled.
+		// Nothing was moved, so drop the record. The delete is detached because
+		// the move may have failed because the context was canceled.
 		cleanupCtx, cancelCleanup := detachedContext(ctx)
 		defer cancelCleanup()
 
@@ -338,16 +306,14 @@ func (m *HistoryManager) RecordDeletion(
 			logger.Str(logFieldPath, binaryPath),
 		)
 
-		// A leftover record is indistinguishable from an interrupted deletion,
-		// so the cleanup failure is reported. Otherwise the caller is told only
-		// about the move and later finds a pending entry it cannot explain.
+		// A leftover record is indistinguishable from an interrupted deletion, so
+		// the cleanup failure is reported alongside the move.
 		return nil, errors.Join(
 			moveFailure,
 			fmt.Errorf("removing the history record for a deletion that did not occur: %w", delErr),
 		)
 	}
 
-	// Record where the binary went, so the entry becomes restorable.
 	record.TrashPath = trashPath
 	record.TrashAvailable = true
 
@@ -359,11 +325,8 @@ func (m *HistoryManager) RecordDeletion(
 			logger.Str(logFieldTrash, trashPath),
 		)
 
-		// Recovery must not inherit the cancellation that caused the failure, or
-		// the binary would be left in trash purely because the user interrupted
-		// us. It is bounded so a stuck restore cannot hang forever, and a second
-		// interrupt terminates the process outright, since Execute restores the
-		// default signal handler once the first one cancels the context.
+		// Recovery drops the cancellation that caused the failure so an interrupt
+		// cannot strand the binary in trash, and a timeout bounds a stuck restore.
 		recoverCtx, cancelRecover := context.WithTimeout(
 			context.WithoutCancel(ctx),
 			recoveryTimeout,
@@ -385,9 +348,8 @@ func (m *HistoryManager) RecordDeletion(
 			return nil, fmt.Errorf("recording trash location: %w", err)
 		}
 
-		// The binary is in trash and cannot be put back, and the record does
-		// not point at it. Report both facts, because the caller otherwise
-		// cannot tell that a binary is stranded with no usable index.
+		// Report both facts, since the caller cannot otherwise tell that a binary
+		// is stranded with no usable index.
 		return nil, errors.Join(
 			fmt.Errorf("recording trash location: %w", err),
 			fmt.Errorf(
@@ -408,29 +370,7 @@ func (m *HistoryManager) RecordDeletion(
 	return entryFromRecord(&record), nil
 }
 
-// UndoMostRecent restores the most recently deleted binary.
-//
-// The workflow is:
-//  1. Get most recent record from storage
-//  2. Check if in trash (TrashAvailable flag)
-//  3. If in trash: RestoreFromTrash
-//  4. If not in trash: Cannot restore (return error)
-//  5. Update storage: TrashAvailable=false
-//
-// Parameters:
-//   - ctx: Context for cancellation.
-//
-// Returns:
-//   - The result of the restore operation.
-//   - An error if the operation fails or no history exists.
-//
 // UndoMostRecent restores the most recent deletion that can still be restored.
-//
-// Records are examined newest first, one bounded page at a time. One that is
-// already restored, or whose trash copy has since been removed, is reconciled
-// and skipped rather than ending the search, because those are expected states
-// rather than failures. Previously a single restored record made every later
-// undo fail outright.
 //
 // Parameters:
 //   - ctx: Context for cancellation.
@@ -474,10 +414,8 @@ func (m *HistoryManager) UndoMostRecent(ctx context.Context) (*RestoreResult, er
 				return result, nil
 			}
 
-			// Only an unrestorable record is worth skipping. Any other failure is
-			// real and must reach the caller rather than being masked by an older
-			// entry. An interrupted deletion is unrestorable, so it is skipped like
-			// the other states, and remains visible in the history listing.
+			// Only an unrestorable record is worth skipping; any other failure
+			// reaches the caller, and an interrupted deletion counts as unrestorable.
 			if !errors.Is(restoreErr, ErrAlreadyRestored) &&
 				!errors.Is(restoreErr, ErrNotInTrash) &&
 				!errors.Is(restoreErr, ErrRecoveryRequired) {
@@ -534,13 +472,6 @@ func (m *HistoryManager) reconcileTrashState(
 
 // Restore restores a specific binary from history by ID.
 //
-// The workflow is:
-//  1. Get specific record from storage
-//  2. Check if in trash
-//  3. If in trash: RestoreFromTrash
-//  4. If not in trash: Return error (cannot restore deleted binary)
-//  5. Update storage: TrashAvailable=false
-//
 // Parameters:
 //   - ctx: Context for cancellation.
 //   - entryID: The history entry ID (format: "timestamp:binary_name").
@@ -554,7 +485,6 @@ func (m *HistoryManager) Restore(ctx context.Context, entryID string) (*RestoreR
 		logger.Str(logFieldEntryID, entryID),
 	)
 
-	// Get specific record
 	record, err := m.storer.GetRecord(ctx, entryID)
 	if err != nil {
 		if errors.Is(err, storage.ErrRecordNotFound) {
@@ -571,9 +501,8 @@ func (m *HistoryManager) Restore(ctx context.Context, entryID string) (*RestoreR
 // interrupted rather than one that finished.
 //
 // A record is persisted before its binary moves, so it carries no trash path
-// until the move completes. An earlier version always wrote a trash path, so an
-// empty one identifies exactly the window between recording the intent and
-// recording where the binary went.
+// until the move completes. An empty trash path therefore identifies exactly the
+// window between recording the intent and recording where the binary went.
 func deletionPending(record *storage.HistoryRecord) bool {
 	return !record.TrashAvailable && record.TrashPath == ""
 }
@@ -601,38 +530,33 @@ func (m *HistoryManager) restoreRecord(
 		)
 	}
 
-	// Check if already restored
 	if !record.TrashAvailable {
 		return nil, fmt.Errorf("%w: binary has already been restored", ErrAlreadyRestored)
 	}
 
-	// Check if still in trash
 	if !m.reconcileTrashState(ctx, record) {
 		return nil, fmt.Errorf("%w: %s", ErrNotInTrash, record.BinaryName)
 	}
 
-	// Check if file exists at original location
 	if record.OriginalPath == "" {
 		return nil, fmt.Errorf("%w: original path is empty", ErrInvalidRecord)
 	}
 
-	// Check if a file already exists at the original location
-	// Only treat as collision if the file is different from the one in trash
+	// An occupied destination is either a collision or a copy already back in
+	// place, and os.Link cannot tell them apart, so the entries are compared.
 	if stat, err := os.Stat(record.OriginalPath); err == nil {
-		// File exists at original location - check if it's the same file (already restored)
 		trashStat, trashErr := os.Stat(record.TrashPath)
 		if trashErr != nil {
 			// Can't access trash file, assume collision to be safe
 			return nil, fmt.Errorf("%w: %s", ErrRestoreCollision, record.OriginalPath)
 		}
 
-		// Compare device and inode to determine if files are the same
-		// If they are the same file, it's already restored, not a collision
+		// A same-file match means the copy is already back in place, not a
+		// collision.
 		if !os.SameFile(stat, trashStat) {
 			return nil, fmt.Errorf("%w: %s", ErrRestoreCollision, record.OriginalPath)
 		}
 
-		// Files are the same - already restored, update record and return error
 		record.TrashAvailable = false
 
 		if updateErr := m.storer.UpdateRecord(ctx, record); updateErr != nil {
@@ -645,17 +569,13 @@ func (m *HistoryManager) restoreRecord(
 		return nil, fmt.Errorf("%w: %s", ErrAlreadyRestored, record.BinaryName)
 	}
 
-	// Verify the trash copy against the checksum captured at deletion time,
-	// before anything is moved. Restoring altered or damaged bytes would report
-	// a success and put an unusable binary back where the user expects a working
-	// one. Refusing here leaves the copy in trash, where it stays recoverable,
-	// and leaves the record untouched.
+	// Verify before moving anything: restoring damaged bytes would report a
+	// success, and refusing here leaves the copy recoverable in trash.
 	if record.Checksum != "" {
 		actual, err := m.extractor.CalculateChecksum(record.TrashPath)
 		if err != nil {
-			// An unreadable copy is not a mismatch, so the underlying cause is
-			// preserved rather than reported as corrupt content. The restore is
-			// still refused, because the copy cannot be verified.
+			// An unreadable copy is not a mismatch, so the read cause is
+			// preserved instead of being reported as corrupt content.
 			return nil, fmt.Errorf(
 				"reading the trashed copy at %s to verify its checksum: %w",
 				record.TrashPath,
@@ -680,7 +600,6 @@ func (m *HistoryManager) restoreRecord(
 		}
 	}
 
-	// Restore from trash
 	if err := m.trasher.RestoreFromTrash(ctx, record.TrashPath, record.OriginalPath); err != nil {
 		if errors.Is(err, trash.ErrRestoreCollision) {
 			return nil, fmt.Errorf("%w: %s", ErrRestoreCollision, record.OriginalPath)
@@ -689,7 +608,6 @@ func (m *HistoryManager) restoreRecord(
 		return nil, fmt.Errorf("restoring from trash: %w", err)
 	}
 
-	// Update record to mark as restored
 	record.TrashAvailable = false
 
 	if err := m.storer.UpdateRecord(ctx, record); err != nil {
@@ -741,13 +659,8 @@ func (m *HistoryManager) GetHistory(ctx context.Context, limit int) ([]*HistoryE
 
 	entries := entriesFromRecords(records)
 
-	// Report the live trash state rather than the stored flag. The flag is only
-	// a record of what was true when the binary was deleted, and the system
-	// trash can be emptied independently. Reconciling here is read-only, so
-	// opening the view never rewrites history.
-	//
-	// On platforms that cannot answer the question, the stored flag is the only
-	// signal available and is kept.
+	// The live trash state is authoritative, since the system trash can be
+	// emptied independently; where it cannot be queried, the flag is kept.
 	queryable := trashStateQueryable()
 
 	for i := range entries {
@@ -781,7 +694,6 @@ func (m *HistoryManager) DeletePermanently(ctx context.Context, entryID string) 
 		logger.Str(logFieldEntryID, entryID),
 	)
 
-	// Get the record
 	record, err := m.storer.GetRecord(ctx, entryID)
 	if err != nil {
 		if errors.Is(err, storage.ErrRecordNotFound) {
@@ -791,7 +703,6 @@ func (m *HistoryManager) DeletePermanently(ctx context.Context, entryID string) 
 		return fmt.Errorf("getting record: %w", err)
 	}
 
-	// Delete from trash if available
 	if record.TrashAvailable && m.trasher.IsInTrash(record.TrashPath) {
 		if err := m.trasher.DeletePermanently(ctx, record.TrashPath); err != nil {
 			if !errors.Is(err, trash.ErrFileNotInTrash) {
@@ -800,7 +711,6 @@ func (m *HistoryManager) DeletePermanently(ctx context.Context, entryID string) 
 		}
 	}
 
-	// Delete the history entry
 	if err := m.storer.DeleteRecord(ctx, entryID); err != nil {
 		return fmt.Errorf("deleting history entry: %w", err)
 	}
@@ -829,13 +739,11 @@ func (m *HistoryManager) ClearHistory(ctx context.Context, clearTrash bool) erro
 	)
 
 	if clearTrash {
-		// Get all records to clear from trash
 		records, err := m.storer.ListRecords(ctx, storage.ListOptions{})
 		if err != nil {
 			return fmt.Errorf("listing records for trash clearing: %w", err)
 		}
 
-		// Delete each binary from trash
 		for i := range records {
 			if records[i].TrashAvailable && m.trasher.IsInTrash(records[i].TrashPath) {
 				if err := m.trasher.DeletePermanently(ctx, records[i].TrashPath); err != nil {
@@ -849,7 +757,6 @@ func (m *HistoryManager) ClearHistory(ctx context.Context, clearTrash bool) erro
 		}
 	}
 
-	// Delete all history entries
 	if err := m.storer.DeleteAllRecords(ctx); err != nil {
 		return fmt.Errorf("deleting all records: %w", err)
 	}
@@ -882,7 +789,6 @@ func (m *HistoryManager) ClearEntry(
 		logger.Bool("delete_from_trash", deleteFromTrash),
 	)
 
-	// Get the record
 	record, err := m.storer.GetRecord(ctx, entryID)
 	if err != nil {
 		if errors.Is(err, storage.ErrRecordNotFound) {
@@ -892,7 +798,6 @@ func (m *HistoryManager) ClearEntry(
 		return fmt.Errorf("getting record: %w", err)
 	}
 
-	// Delete from trash if requested
 	if deleteFromTrash && record.TrashAvailable && m.trasher.IsInTrash(record.TrashPath) {
 		if err := m.trasher.DeletePermanently(ctx, record.TrashPath); err != nil {
 			if !errors.Is(err, trash.ErrFileNotInTrash) {
@@ -901,7 +806,6 @@ func (m *HistoryManager) ClearEntry(
 		}
 	}
 
-	// Delete the history entry
 	if err := m.storer.DeleteRecord(ctx, entryID); err != nil {
 		return fmt.Errorf("deleting history entry: %w", err)
 	}

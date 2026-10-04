@@ -7,19 +7,19 @@ package render
 
 // StyleConfig holds TUI appearance settings.
 //
-// The colours are ANSI 256-color codes rather than resolved values. Colour
+// The colors are ANSI 256-color codes rather than resolved values. color
 // downsampling happens when the view is written, so a value here is a request
-// for a colour, not a promise of one.
+// for a color, not a promise of one.
 type StyleConfig struct {
-	TitleColor    string // ANSI 256-color code for title
-	CursorColor   string // ANSI 256-color code for cursor
-	FooterColor   string // ANSI 256-color code for footer
-	StatusColor   string // ANSI 256-color code for status
-	LogColor      string // ANSI 256-color code for log messages
-	HistoryColor  string // ANSI 256-color code for history table header
-	TrashYesColor string // ANSI 256-color code for "Yes" in trash available column
-	TrashNoColor  string // ANSI 256-color code for "No" in trash available column
-	Cursor        string // Symbol used for the cursor
+	TitleColor    string
+	CursorColor   string
+	FooterColor   string
+	StatusColor   string
+	LogColor      string
+	HistoryColor  string
+	TrashYesColor string
+	TrashNoColor  string
+	Cursor        string
 }
 
 // DefaultStyleConfig returns the appearance used when none is configured.

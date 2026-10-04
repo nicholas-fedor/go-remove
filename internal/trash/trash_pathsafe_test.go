@@ -15,9 +15,8 @@ import (
 func TestTrashPathSafe_MatchesGLib(t *testing.T) {
 	t.Parallel()
 
-	// Verified against g_filename_to_uri on GLib 2.88.3. Compared as a set,
-	// since trashPathSafe is ordered for readability rather than to mirror the
-	// order the probe happened to print.
+	// Verified against g_filename_to_uri on GLib 2.88.3, compared as a set
+	// since trashPathSafe is ordered for readability.
 	const want = "!$&'()*+,-./0123456789:=@ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz~"
 
 	for _, c := range want {

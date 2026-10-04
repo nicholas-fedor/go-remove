@@ -39,9 +39,7 @@ func TestTruncateToWidth(t *testing.T) {
 			want:  "👨‍👩‍👧‍👦",
 		},
 		{
-			// The cluster does not fit in the last two cells, so it is dropped
-			// whole rather than cut after the man, which would leave a
-			// dangling zero-width joiner on screen.
+			// Cutting after the man would leave a dangling zero-width joiner.
 			name:  "cluster cut off is dropped whole",
 			input: "ab👨‍👩‍👧‍👦",
 			width: 3,

@@ -37,7 +37,7 @@ func TestViewBinaries_FitsNarrowTerminal(t *testing.T) {
 
 			rendered := stripANSI(Binaries(state).Content)
 
-			for _, line := range strings.Split(rendered, "\n") {
+			for line := range strings.SplitSeq(rendered, "\n") {
 				assert.LessOrEqual(t, DisplayWidth(line), width,
 					"no line may exceed the terminal width, got %d for %q",
 					DisplayWidth(line), line)

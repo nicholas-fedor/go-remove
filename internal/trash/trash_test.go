@@ -68,7 +68,6 @@ func TestNewTrasher(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, trasher)
 
-	// Verify we can get trash path
 	trashPath := trasher.GetTrashPath()
 
 	if runtime.GOOS == platformLinux {
@@ -159,7 +158,6 @@ func TestMoveToTrash(t *testing.T) {
 				assert.True(t, trasher.IsInTrash(trashPath),
 					"file should be in trash after MoveToTrash")
 
-				// Verify original file no longer exists
 				_, err = os.Stat(filePath)
 				assert.True(t, os.IsNotExist(err),
 					"original file should not exist after moving to trash")
@@ -184,7 +182,7 @@ func TestMoveToTrash_ContextCancellation(t *testing.T) {
 	err := os.WriteFile(testFile, []byte("test content"), 0o644)
 	require.NoError(t, err)
 
-	// Create cancelled context
+	// Create canceled context
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
@@ -246,7 +244,6 @@ func TestRestoreFromTrash(t *testing.T) {
 				trashPath, err := trasher.MoveToTrash(ctx, originalPath)
 				require.NoError(t, err)
 
-				// Create file at original location to cause collision
 				err = os.WriteFile(originalPath, []byte("blocking content"), 0o644)
 				require.NoError(t, err)
 
@@ -289,11 +286,9 @@ func TestRestoreFromTrash(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 
-				// Verify file exists at original location
 				_, err = os.Stat(originalPath)
 				require.NoError(t, err)
 
-				// Verify file no longer in trash
 				assert.False(t, trasher.IsInTrash(trashPath))
 			}
 		})
@@ -352,14 +347,12 @@ func TestDeletePermanently(t *testing.T) {
 	trashPath, err := trasher.MoveToTrash(ctx, testFile)
 	require.NoError(t, err)
 
-	// Verify file is in trash
 	assert.True(t, trasher.IsInTrash(trashPath))
 
 	// Delete permanently
 	err = trasher.DeletePermanently(ctx, trashPath)
 	require.NoError(t, err)
 
-	// Verify file no longer exists
 	assert.False(t, trasher.IsInTrash(trashPath))
 	_, err = os.Stat(trashPath)
 	assert.True(t, os.IsNotExist(err))
@@ -397,7 +390,6 @@ func TestListTrash(t *testing.T) {
 
 	trasher := newTestTrasher(t)
 
-	// Create and trash multiple files
 	tempDir := t.TempDir()
 	fileNames := []string{"file1.txt", "file2.txt", "file3.txt"}
 
@@ -488,9 +480,8 @@ func TestEncodeDecodeTrashPath(t *testing.T) {
 			path:     "/home/user/file\x01\x02.txt",
 			expected: "/home/user/file%01%02.txt",
 		},
-		// The query and fragment delimiters must be escaped. A desktop splits
-		// the Path value on them, so leaving them bare makes a binary named
-		// tool?v2 restore to .../tool and a name containing # truncate there.
+		// A desktop splits the Path value on the query and fragment delimiters,
+		// so a bare ? or # would restore to the wrong location.
 		{
 			name:     "path with question mark",
 			path:     "/tmp/a?b",
@@ -833,9 +824,8 @@ func TestMoveToTrash_ConcurrentSameName(t *testing.T) {
 func TestGenerateUniqueName(t *testing.T) {
 	t.Parallel()
 
-	// The suffix must be random, not clock-derived. Two calls in the same
-	// second previously produced the same candidate, which let a second trash
-	// operation silently overwrite the first.
+	// The suffix must be random, not clock-derived: a clock suffix repeats
+	// within one second, letting a second operation overwrite the first.
 	const draws = 1000
 
 	seen := make(map[string]struct{}, draws)

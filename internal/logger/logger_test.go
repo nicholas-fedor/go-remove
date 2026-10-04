@@ -19,10 +19,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// consoleLineFields is the number of fields a console line of an event with a
+// single-token message holds: a timestamp, a level, and the message.
+const consoleLineFields = 3
+
 // syncBuffer is a thread-safe wrapper around bytes.Buffer for concurrent writes.
 type syncBuffer struct {
 	buf bytes.Buffer
 	mu  sync.Mutex
+}
+
+// capturedEntry is one log message the capture callback reported.
+type capturedEntry struct {
+	level string
+	msg   string
+}
+
+// messageCounter counts messages per text, for capture callbacks and output
+// that are read while other goroutines are still logging.
+type messageCounter struct {
+	mu     sync.Mutex
+	counts map[string]int
 }
 
 // Write writes p to the buffer in a thread-safe manner.
@@ -40,19 +57,6 @@ func (sb *syncBuffer) String() string {
 	defer sb.mu.Unlock()
 
 	return sb.buf.String()
-}
-
-// capturedEntry is one log message the capture callback reported.
-type capturedEntry struct {
-	level string
-	msg   string
-}
-
-// messageCounter counts messages per text, for capture callbacks and output
-// that are read while other goroutines are still logging.
-type messageCounter struct {
-	mu     sync.Mutex
-	counts map[string]int
 }
 
 // newMessageCounter builds an empty counter.
@@ -75,10 +79,6 @@ func (mc *messageCounter) count(msg string) int {
 
 	return mc.counts[msg]
 }
-
-// consoleLineFields is the number of fields a console line of an event with a
-// single-token message holds: a timestamp, a level, and the message.
-const consoleLineFields = 3
 
 // loggedMessages counts the messages present in console output.
 //
@@ -150,7 +150,6 @@ func TestNewLogger(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, got)
 
-	// Verify the returned logger is a *ZerologLogger.
 	_, ok := got.(*ZerologLogger)
 	assert.True(t, ok, "expected *ZerologLogger, got %T", got)
 }
@@ -620,7 +619,7 @@ func TestParseLevel(t *testing.T) {
 	}
 }
 
-// TestParseLogLevel verifies ParseLogLevel rejects unrecognised names.
+// TestParseLogLevel verifies ParseLogLevel rejects unrecognized names.
 func TestParseLogLevel(t *testing.T) {
 	t.Parallel()
 
@@ -630,7 +629,7 @@ func TestParseLogLevel(t *testing.T) {
 
 	got, err = ParseLogLevel("nonsense")
 	require.ErrorIs(t, err, ErrInvalidLogLevel)
-	assert.Equal(t, InfoLevel, got, "an unrecognised name reports info alongside the error")
+	assert.Equal(t, InfoLevel, got, "an unrecognized name reports info alongside the error")
 }
 
 // BenchmarkZerologLogger_Debug benchmarks the Debug method.
@@ -699,7 +698,6 @@ func TestZerologLogger_ConcurrentAccess(t *testing.T) {
 	})
 	wg.Wait()
 
-	// Verify output contains messages from all levels.
 	output := buf.String()
 	assert.Positive(t, strings.Count(output, "debug message"))
 	assert.Positive(t, strings.Count(output, "info message"))
