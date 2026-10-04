@@ -138,6 +138,33 @@ func TestWritableDataHome_PrefersWritableCandidate(t *testing.T) {
 	assert.Equal(t, xdg, dir)
 }
 
+// TestWritableDataHome_NoWritableCandidate verifies the search reports failure
+// rather than falling back to the directory holding the executable.
+//
+// That directory is typically a system location such as /usr/local/bin, so a
+// database written there is removed by the next package upgrade.
+func TestWritableDataHome_NoWritableCandidate(t *testing.T) {
+	// Point every candidate at a path that cannot be created, by nesting it
+	// beneath a regular file.
+	base := t.TempDir()
+
+	blocker := filepath.Join(base, "blocker")
+	require.NoError(t, os.WriteFile(blocker, []byte("x"), 0o600))
+
+	isolated := isolateHome(t)
+
+	t.Setenv("XDG_DATA_HOME", filepath.Join(blocker, "data"))
+	t.Setenv("HOME", filepath.Join(blocker, "home"))
+	t.Setenv("USERPROFILE", filepath.Join(blocker, "home"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(blocker, "local"))
+
+	dir, err := WritableDataHome()
+
+	require.ErrorIs(t, err, ErrNoWritableStorage)
+	assert.Empty(t, dir)
+	assert.NotEmpty(t, isolated, "the home directory is still redirected")
+}
+
 // TestIsDirWritable verifies writability probing, including that the probe
 // leaves no temporary file behind.
 func TestIsDirWritable(t *testing.T) {

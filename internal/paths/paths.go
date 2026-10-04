@@ -84,8 +84,7 @@ func DataHomeCandidates() []string {
 
 // WritableDataHome finds a writable directory for application data.
 //
-// It tries the platform data directories first, then the user home directory,
-// then the directory holding the running executable.
+// It tries the platform data directories first, then the user home directory.
 //
 // Returns:
 //   - Writable data directory path.
@@ -103,12 +102,6 @@ func WritableDataHome() (string, error) {
 
 	if userHome, err := os.UserHomeDir(); err == nil && IsDirWritable(userHome) {
 		return userHome, nil
-	}
-
-	if exePath, err := os.Executable(); err == nil {
-		if exeDir := filepath.Dir(exePath); IsDirWritable(exeDir) {
-			return exeDir, nil
-		}
 	}
 
 	return "", ErrNoWritableStorage
