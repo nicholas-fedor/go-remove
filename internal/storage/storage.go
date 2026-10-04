@@ -47,6 +47,10 @@ var (
 	// ErrRecordKeyExhausted indicates no unused storage key could be found.
 	ErrRecordKeyExhausted = errors.New("no unused record key available")
 
+	// ErrTransactionTooLarge indicates a transaction exceeded the database's
+	// size limit, so the work it covered did not happen.
+	ErrTransactionTooLarge = errors.New("transaction exceeds the database size limit")
+
 	// errRecordKeyOccupied signals that a candidate storage key is already in use.
 	errRecordKeyOccupied = errors.New("record key already occupied")
 )
@@ -203,6 +207,23 @@ type BadgerStore struct {
 //
 // Returns:
 //   - The stored key, or the legacy derived key when none was recorded.
+//
+// translateWriteError marks a Badger transaction that outgrew the size limit, so
+// callers can tell it apart from a genuine write failure.
+//
+// Parameters:
+//   - err: Error returned by a Badger write transaction.
+//
+// Returns:
+//   - ErrTransactionTooLarge wrapping err, or err unchanged.
+func translateWriteError(err error) error {
+	if errors.Is(err, badger.ErrTxnTooBig) {
+		return fmt.Errorf("%w: %w", ErrTransactionTooLarge, err)
+	}
+
+	return err
+}
+
 func (r *HistoryRecord) RecordKey() string {
 	if r.Key != "" {
 		return r.Key
@@ -356,7 +377,7 @@ func (s *BadgerStore) saveRecordExclusive(ctx context.Context, record *HistoryRe
 			// transaction read the key, so retry with a fresh discriminator.
 			continue
 		default:
-			return fmt.Errorf("writing record: %w", err)
+			return fmt.Errorf("writing record: %w", translateWriteError(err))
 		}
 	}
 
@@ -603,7 +624,7 @@ func (s *BadgerStore) UpdateRecord(ctx context.Context, record *HistoryRecord) e
 			return ErrRecordNotFound
 		}
 
-		return fmt.Errorf("updating record: %w", err)
+		return fmt.Errorf("updating record: %w", translateWriteError(err))
 	}
 
 	return nil
@@ -642,7 +663,7 @@ func (s *BadgerStore) DeleteRecord(ctx context.Context, key string) error {
 			return ErrRecordNotFound
 		}
 
-		return fmt.Errorf("deleting record: %w", err)
+		return fmt.Errorf("deleting record: %w", translateWriteError(err))
 	}
 
 	return nil
@@ -696,7 +717,7 @@ func (s *BadgerStore) DeleteAllRecords(ctx context.Context) error {
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("deleting all records: %w", err)
+		return fmt.Errorf("deleting all records: %w", translateWriteError(err))
 	}
 
 	return nil

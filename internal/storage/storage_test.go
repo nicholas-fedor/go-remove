@@ -1098,3 +1098,37 @@ func TestDeserialize_LegacyRecordWithBuildInfo(t *testing.T) {
 	assert.Equal(t, "vhs", record.BinaryName)
 	assert.Equal(t, "abc123", record.Checksum)
 }
+
+// TestTranslateWriteError verifies a transaction that outgrew the size limit is
+// distinguishable from a genuine write failure.
+func TestTranslateWriteError(t *testing.T) {
+	t.Parallel()
+
+	t.Run("marks an oversized transaction", func(t *testing.T) {
+		t.Parallel()
+
+		wrapped := fmt.Errorf("committing: %w", badger.ErrTxnTooBig)
+
+		err := translateWriteError(wrapped)
+
+		require.ErrorIs(t, err, ErrTransactionTooLarge)
+		require.ErrorIs(t, err, badger.ErrTxnTooBig)
+	})
+
+	t.Run("leaves other failures alone", func(t *testing.T) {
+		t.Parallel()
+
+		other := fmt.Errorf("committing: %w", badger.ErrConflict)
+
+		err := translateWriteError(other)
+
+		require.NotErrorIs(t, err, ErrTransactionTooLarge)
+		require.ErrorIs(t, err, badger.ErrConflict)
+	})
+
+	t.Run("leaves a nil error alone", func(t *testing.T) {
+		t.Parallel()
+
+		require.NoError(t, translateWriteError(nil))
+	})
+}
