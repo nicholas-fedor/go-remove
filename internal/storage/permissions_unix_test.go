@@ -14,6 +14,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/nicholas-fedor/go-remove/internal/logger"
 )
 
 // TestBadgerStore_FilesAreNotWorldReadable verifies the database files are
@@ -29,7 +31,7 @@ func TestBadgerStore_FilesAreNotWorldReadable(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "history.badger")
 
-	store, err := NewBadgerStore(dbPath)
+	store, err := NewBadgerStore(dbPath, logger.NopLogger())
 	require.NoError(t, err)
 	require.NoError(t, store.Close())
 

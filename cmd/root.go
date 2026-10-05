@@ -175,7 +175,7 @@ func initHistoryManager(log logger.Logger) (history.Manager, error) {
 		return nil, fmt.Errorf("creating storage directory: %w", err)
 	}
 
-	storer, err := storage.NewBadgerStore(dbPath)
+	storer, err := storage.NewBadgerStore(dbPath, log)
 	if err != nil {
 		return nil, fmt.Errorf("initializing storage: %w", err)
 	}

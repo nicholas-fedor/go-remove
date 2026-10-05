@@ -12,14 +12,21 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"os"
 	"sync/atomic"
 	"time"
 
 	badger "github.com/dgraph-io/badger/v4"
+
+	"github.com/nicholas-fedor/go-remove/internal/logger"
 )
 
 // ValueLogSizeExponent defines the exponent for value log file size calculation (1 << 20 = 1MB).
 const ValueLogSizeExponent = 20
+
+// dbDirPermissions restricts the database directory to its owner, so the files
+// created inside it cannot be reached by other users.
+const dbDirPermissions = 0o700
 
 // LevelZeroTablesStall defines the conservative stall threshold for L0 tables.
 const LevelZeroTablesStall = 2
@@ -200,6 +207,7 @@ type Storer interface {
 type BadgerStore struct {
 	database *badger.DB
 	path     string
+	logger   logger.Logger
 	closed   atomic.Bool
 }
 
@@ -250,7 +258,7 @@ func (r *HistoryRecord) DisplayTime() string {
 // Returns:
 //   - Opened Badger store.
 //   - An error if the database cannot be opened.
-func NewBadgerStore(path string) (*BadgerStore, error) {
+func NewBadgerStore(path string, log logger.Logger) (*BadgerStore, error) {
 	// Configure Badger for a desktop application.
 	opts := badger.DefaultOptions(path).
 		WithSyncWrites(true).
@@ -262,8 +270,8 @@ func NewBadgerStore(path string) (*BadgerStore, error) {
 
 	var database *badger.DB
 
-	// The mask covers only this call, so nothing else in the process is
-	// affected by it.
+	// The mask is process-wide for the duration of the open, so files created
+	// elsewhere at the same time may come out more restrictive than intended.
 	err := withRestrictiveUmask(func() error {
 		opened, openErr := badger.Open(opts)
 		database = opened
@@ -275,8 +283,24 @@ func NewBadgerStore(path string) (*BadgerStore, error) {
 		return nil, fmt.Errorf("opening badger database at %s: %w", path, err)
 	}
 
+	// Badger creates the directory owner-only, but a directory left behind by an
+	// earlier install keeps whatever mode it had, and its mode is what later
+	// files inherit.
+	if err := os.Chmod(path, dbDirPermissions); err != nil {
+		if closeErr := database.Close(); closeErr != nil {
+			log.Warn(
+				"Failed to close database after its directory could not be restricted",
+				logger.Err(closeErr),
+				logger.Str("path", path),
+			)
+		}
+
+		return nil, fmt.Errorf("restricting database directory %s to owner access: %w", path, err)
+	}
+
 	return &BadgerStore{
 		database: database,
+		logger:   log,
 		path:     path,
 	}, nil
 }
