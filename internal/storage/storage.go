@@ -260,7 +260,17 @@ func NewBadgerStore(path string) (*BadgerStore, error) {
 		WithNumLevelZeroTables(1).
 		WithNumLevelZeroTablesStall(LevelZeroTablesStall)
 
-	database, err := badger.Open(opts)
+	var database *badger.DB
+
+	// The mask covers only this call, so nothing else in the process is
+	// affected by it.
+	err := withRestrictiveUmask(func() error {
+		opened, openErr := badger.Open(opts)
+		database = opened
+
+		//nolint:wrapcheck // The caller adds the database path to this error.
+		return openErr
+	})
 	if err != nil {
 		return nil, fmt.Errorf("opening badger database at %s: %w", path, err)
 	}
