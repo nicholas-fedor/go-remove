@@ -18,6 +18,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	json "encoding/json/v2"
+
+	"github.com/nicholas-fedor/go-remove/internal/logger"
 )
 
 // testBinaryName is a constant for the test binary name to avoid magic strings.
@@ -31,7 +33,7 @@ func setupTestStore(t *testing.T) (*BadgerStore, func()) {
 	tempDir := t.TempDir()
 
 	dbPath := filepath.Join(tempDir, "test.db")
-	store, err := NewBadgerStore(dbPath)
+	store, err := NewBadgerStore(dbPath, logger.NopLogger())
 	require.NoError(t, err, "Failed to create test store")
 
 	cleanup := func() {
@@ -71,7 +73,7 @@ func TestNewBadgerStore(t *testing.T) {
 
 	t.Run("fails with invalid path", func(t *testing.T) {
 		// Try to create store with an empty path, which is invalid on all platforms
-		_, err := NewBadgerStore("")
+		_, err := NewBadgerStore("", logger.NopLogger())
 		assert.Error(t, err)
 	})
 }
