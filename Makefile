@@ -12,7 +12,11 @@ MAIN_PACKAGE := .
 # Go configuration
 GO := go
 GO_FLAGS := -v
-GO_BUILD_FLAGS := -ldflags="-s -w"
+VERSION_PKG := github.com/nicholas-fedor/go-remove/internal/version
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT_SHA ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+GO_BUILD_FLAGS := -ldflags="-s -w -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).CommitSHA=$(COMMIT_SHA) -X $(VERSION_PKG).BuildTime=$(BUILD_TIME)"
 GOPATH := $(shell $(GO) env GOPATH)
 GOBIN := $(GOPATH)/bin
 
