@@ -32,6 +32,7 @@ A CLI tool to safely remove Go binaries with undo and history support
   - [Undo Deletion](#undo-deletion)
   - [Restore from History](#restore-from-history)
 - [Command Reference](#command-reference)
+  - [Migrating from Flags](#migrating-from-flags)
 - [Filesystem Locations](#filesystem-locations)
   - [Data Storage](#data-storage)
   - [Trash](#trash)
@@ -128,10 +129,10 @@ Move-Item -Path ".\go-remove.exe" -Destination "$env:LOCALAPPDATA\Microsoft\Wind
 go-remove
 
 # Remove a specific binary
-go-remove vhs
+go-remove rm vhs
 
 # Undo the last deletion
-go-remove --undo
+go-remove undo
 ```
 
 ## Usage
@@ -141,24 +142,24 @@ go-remove --undo
 Remove a specific binary by name:
 
 ```bash
-go-remove vhs
+go-remove rm vhs
 ```
 
 With verbose output:
 
 ```bash
-go-remove -v vhs
+go-remove -v rm vhs
 ```
 
 Remove from `GOROOT/bin` instead of `GOBIN`/`GOPATH/bin`:
 
 ```bash
-go-remove --goroot vhs
+go-remove --goroot rm vhs
 ```
 
 ### Interactive TUI
 
-Launch without arguments to use the interactive TUI:
+Launch without a command to use the interactive TUI:
 
 ```bash
 go-remove
@@ -179,9 +180,7 @@ go-remove
 Restore the most recently deleted binary:
 
 ```bash
-go-remove --undo
-# or
-go-remove -u
+go-remove undo
 ```
 
 ### Restore from History
@@ -189,9 +188,7 @@ go-remove -u
 Browse and restore from deletion history:
 
 ```bash
-go-remove --restore
-# or
-go-remove -r
+go-remove restore
 ```
 
 **History View Controls:**
@@ -206,13 +203,32 @@ go-remove -r
 
 ## Command Reference
 
+| Command              | Description                                   |
+|----------------------|-----------------------------------------------|
+| `go-remove`          | Open the interactive TUI                      |
+| `go-remove rm <bin>` | Remove a binary (alias: `remove`)             |
+| `go-remove undo`     | Restore the most recently deleted binary      |
+| `go-remove restore`  | Open the deletion history view                |
+| `go-remove version`  | Print the version, commit, and build time     |
+
+Global flags work with every command:
+
 | Flag          | Short | Description                                         |
 |---------------|-------|-----------------------------------------------------|
-| `--undo`      | `-u`  | Restore the most recently deleted binary            |
-| `--restore`   | `-r`  | Open the deletion history view                      |
 | `--goroot`    |       | Target `GOROOT/bin` instead of `GOBIN`/`GOPATH/bin` |
-| `--log-level` |       | Set log level (`debug`, `info`, `warn`, `error`)    |
-| `--help`      | `-h`  | Show help message                                   |
+| `--log-level` | `-l`  | Set log level (`debug`, `info`, `warn`, `error`)    |
+| `--verbose`   | `-v`  | Enable verbose output                               |
+| `--help`      | `-h`  | Show help for any command                           |
+
+### Migrating from Flags
+
+Earlier releases selected the operation with flags. Each one is now a command:
+
+| Before                | Now                    |
+|-----------------------|------------------------|
+| `go-remove <bin>`     | `go-remove rm <bin>`   |
+| `go-remove --undo`    | `go-remove undo`       |
+| `go-remove --restore` | `go-remove restore`    |
 
 ## Filesystem Locations
 

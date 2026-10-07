@@ -189,7 +189,7 @@ func TestRunTUI_NoTerminal(t *testing.T) {
 		t.Fatalf("Run() error = %v, want %v", err, ErrNotATerminal)
 	}
 
-	if !strings.Contains(err.Error(), "pass a binary name") {
+	if !strings.Contains(err.Error(), "'go-remove rm <binary>'") {
 		t.Errorf("Run() error = %v, want it to point at the non-interactive form", err)
 	}
 }

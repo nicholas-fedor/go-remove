@@ -90,10 +90,10 @@ func stdinIsTerminal(check func() bool) bool {
 //nolint:gocritic // hugeParam: Options is a settings struct, read once per run.
 func Run(ctx context.Context, opts Options) error {
 	// Under a pipe or in CI the failure would otherwise surface as a nested
-	// bubbletea error with no hint that a binary name is the plain form.
+	// bubbletea error with no hint that the rm command is the plain form.
 	if !stdinIsTerminal(opts.StdinIsTerminal) {
 		return fmt.Errorf(
-			"%w: go-remove needs an interactive terminal, pass a binary name to remove it directly",
+			"%w: go-remove needs an interactive terminal, use 'go-remove rm <binary>' to remove one directly",
 			ErrNotATerminal,
 		)
 	}

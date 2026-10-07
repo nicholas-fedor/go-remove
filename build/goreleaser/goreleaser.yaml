@@ -12,6 +12,9 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
+      - -X github.com/nicholas-fedor/go-remove/internal/version.Version={{.Version}}
+      - -X github.com/nicholas-fedor/go-remove/internal/version.CommitSHA={{.FullCommit}}
+      - -X github.com/nicholas-fedor/go-remove/internal/version.BuildTime={{.Date}}
     env:
       - CGO_ENABLED=0
     goos:
