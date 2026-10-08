@@ -50,8 +50,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Delete the mock-only integration suites by @nicholas-fedor in [#613](https://github.com/nicholas-fedor/go-remove/pull/613)
 
+### Continuous Integration
+
+- Add changelog generation with git-cliff by @nicholas-fedor in [#652](https://github.com/nicholas-fedor/go-remove/pull/652)
+
 ### Chores
 
+- **deps:** Update github/codeql-action digest to 24c5418 by @renovate[bot] in [#653](https://github.com/nicholas-fedor/go-remove/pull/653)
 - **deps:** Update step-security/harden-runner action to v2.22.1 by @renovate[bot] in [#651](https://github.com/nicholas-fedor/go-remove/pull/651)
 - **deps:** Update module github.com/mattn/go-runewidth to v0.0.31 by @renovate[bot] in [#650](https://github.com/nicholas-fedor/go-remove/pull/650)
 - **deps:** Update step-security/harden-runner action to v2.22.0 by @renovate[bot] in [#648](https://github.com/nicholas-fedor/go-remove/pull/648)
