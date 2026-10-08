@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Chores
+
+- Update go module directive to v1.27.2 by @renovate[bot] in [#659](https://github.com/nicholas-fedor/go-remove/pull/659)
+
+## [0.4.0] - 2026-10-08
+
 ### Added
 
 - **Breaking:** Replace mode flags with subcommands by @nicholas-fedor in [#649](https://github.com/nicholas-fedor/go-remove/pull/649)
@@ -87,7 +93,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### New Contributors
 
-- @github-actions[bot] made their first contribution in [#654](https://github.com/nicholas-fedor/go-remove/pull/654)
+- @github-actions[bot] made their first contribution in [#657](https://github.com/nicholas-fedor/go-remove/pull/657)
 
 ## [0.3.4] - 2026-09-14
 
@@ -830,7 +836,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Compare Releases
 
-- [unreleased](https://github.com/nicholas-fedor/go-remove/compare/v0.3.4...HEAD)
+- [unreleased](https://github.com/nicholas-fedor/go-remove/compare/v0.4.0...HEAD)
+- [0.4.0](https://github.com/nicholas-fedor/go-remove/compare/v0.3.4...v0.4.0)
 - [0.3.4](https://github.com/nicholas-fedor/go-remove/compare/v0.3.3...v0.3.4)
 - [0.3.3](https://github.com/nicholas-fedor/go-remove/compare/v0.3.2...v0.3.3)
 - [0.3.2](https://github.com/nicholas-fedor/go-remove/compare/v0.3.1...v0.3.2)
