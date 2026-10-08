@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Omit the commit scope from changelog entries by @nicholas-fedor in [#656](https://github.com/nicholas-fedor/go-remove/pull/656)
 - Keep database files private to their owner by @nicholas-fedor in [#646](https://github.com/nicholas-fedor/go-remove/pull/646)
 - Mark an oversized transaction by @nicholas-fedor in [#645](https://github.com/nicholas-fedor/go-remove/pull/645)
 - Stop falling back to the executable directory by @nicholas-fedor in [#644](https://github.com/nicholas-fedor/go-remove/pull/644)
@@ -56,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Chores
 
+- Update step-security/harden-runner action to v2.22.1 by @renovate[bot] in [#655](https://github.com/nicholas-fedor/go-remove/pull/655)
 - Update github/codeql-action digest to 24c5418 by @renovate[bot] in [#653](https://github.com/nicholas-fedor/go-remove/pull/653)
 - Update step-security/harden-runner action to v2.22.1 by @renovate[bot] in [#651](https://github.com/nicholas-fedor/go-remove/pull/651)
 - Update module github.com/mattn/go-runewidth to v0.0.31 by @renovate[bot] in [#650](https://github.com/nicholas-fedor/go-remove/pull/650)
