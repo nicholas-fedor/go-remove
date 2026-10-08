@@ -1,6 +1,6 @@
 module github.com/nicholas-fedor/go-remove
 
-go 1.27.1
+go 1.27.2
 
 require (
 	charm.land/bubbletea/v2 v2.0.10
