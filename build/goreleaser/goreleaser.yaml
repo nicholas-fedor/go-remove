@@ -92,11 +92,7 @@ nfpms:
         dst: /usr/share/doc/go-remove/LICENSE.md
 
 changelog:
-  sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
+  disable: true
 
 release:
   github:
