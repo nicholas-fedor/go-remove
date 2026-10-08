@@ -105,7 +105,7 @@ commit_preprocessors = [{ pattern = '\s*\((\w+\s)?#([0-9]+)\)', replace = "" }]
 # Groups follow the Conventional Commits type. The first matching parser wins.
 commit_parsers = [
   # Skip the automated changelog and CLI reference pull requests.
-  { message = "(?i)update.*changelog", skip = true },
+  { message = "^docs\\(changelog\\): update changelog(\\n|$)", skip = true },
   { message = "(?i)regenerate the cli reference", skip = true },
   { field = "author.name", pattern = "renovate\\[bot\\]", group = "<!-- 9 -->Chores" },
   { message = "(?i)^(chore|fix|build)(\\(deps\\))?!?:.*(update (module|dependency)|bump.*from.*to)", group = "<!-- 9 -->Chores" },
