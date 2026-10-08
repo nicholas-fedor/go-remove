@@ -1,0 +1,83 @@
+---
+name: Update Changelog
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - CHANGELOG.md
+  workflow_dispatch:
+
+permissions:
+  contents: read # Set default read-only permissions
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changelog:
+    name: Generate Changelog
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # For committing changelog
+      pull-requests: write # For creating and merging the PR
+    steps:
+      - name: Harden the Runner (Step Security)
+        uses: step-security/harden-runner@351661ca32ac09a36dc5ee2d536e3128f2a3c8ed # v2.22.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout Repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Generate Changelog
+        uses: orhun/git-cliff-action@a9a95522b26fe6403f7bb24031f21fb573d0f5ff # v4.9.1
+        env:
+          OUTPUT: CHANGELOG.md
+          GITHUB_REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          config: cliff.toml
+          args: --verbose
+
+      - name: Create Pull Request for Changelog
+        id: create_pr
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: docs/update-changelog
+          author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          committer: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          sign-commits: true
+          title: "docs(changelog): update changelog"
+          commit-message: "docs(changelog): update changelog"
+          body: "Automated changelog update"
+          delete-branch: true
+
+      # Requests auto-merge, and merges directly when the repository has
+      # auto-merge disabled, so the changelog stays fully automated. The
+      # branch and head commit checks keep it from merging anything else.
+      - name: Merge the Changelog Pull Request
+        if: ${{ steps.create_pr.outputs.pull-request-number }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.create_pr.outputs.pull-request-number }}
+          EXPECTED_BRANCH: docs/update-changelog
+        run: |
+          set -eu
+          head_ref="$(gh pr view "$PR_NUMBER" --json headRefName --jq .headRefName)"
+          head_sha="$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)"
+          if [ "$head_ref" != "$EXPECTED_BRANCH" ]; then
+            echo "::error::Refusing to merge a pull request from '$head_ref'."
+            exit 1
+          fi
+          if ! gh pr merge --auto --squash --match-head-commit "$head_sha" "$PR_NUMBER"; then
+            echo "Auto-merge is unavailable, so merging the pull request directly"
+            gh pr merge --squash --match-head-commit "$head_sha" "$PR_NUMBER"
+          fi

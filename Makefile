@@ -172,6 +172,12 @@ release:
 	@echo "Building release..."
 	$(GORELEASER) release --config $(GORELEASER_CONFIG) --clean
 
+# Regenerate CHANGELOG.md from the commit history with git-cliff
+.PHONY: changelog
+changelog:
+	@echo "Generating changelog..."
+	git cliff --output CHANGELOG.md
+
 # =============================================================================
 # Development Helpers
 # =============================================================================
@@ -210,6 +216,7 @@ help:
 	@echo "  verify            - Run lint, vet, and test (comprehensive verification)"
 	@echo "  release-snapshot  - Build release snapshot with goreleaser"
 	@echo "  release           - Build full release with goreleaser"
+	@echo "  changelog         - Regenerate CHANGELOG.md with git-cliff"
 	@echo "  run               - Build and run the application"
 	@echo "  check             - Run fmt, lint, and vet"
 	@echo "  help              - Display this help information"
