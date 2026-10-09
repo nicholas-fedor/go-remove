@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Chores
 
+- Update nicholas-fedor/actionlint-action action to v1.0.19 by @renovate[bot] in [#667](https://github.com/nicholas-fedor/go-remove/pull/667)
 - Update nicholas-fedor/govulncheck-action action to v1.1.0 by @renovate[bot] in [#665](https://github.com/nicholas-fedor/go-remove/pull/665)
 - Remove codacy integration by @nicholas-fedor in [#663](https://github.com/nicholas-fedor/go-remove/pull/663)
 - Update module charm.land/bubbletea/v2 to v2.1.0 by @renovate[bot] in [#662](https://github.com/nicholas-fedor/go-remove/pull/662)
