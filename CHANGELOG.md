@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Chores
 
+- Remove codacy integration by @nicholas-fedor in [#663](https://github.com/nicholas-fedor/go-remove/pull/663)
 - Update module charm.land/bubbletea/v2 to v2.1.0 by @renovate[bot] in [#662](https://github.com/nicholas-fedor/go-remove/pull/662)
 - Update github.com/charmbracelet/ultraviolet digest to 6b8d4ba by @renovate[bot] in [#658](https://github.com/nicholas-fedor/go-remove/pull/658)
 - Update go module directive to v1.27.2 by @renovate[bot] in [#659](https://github.com/nicholas-fedor/go-remove/pull/659)
