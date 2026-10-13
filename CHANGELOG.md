@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Chores
 
+- Update goreleaser/goreleaser-action action to v7.3.0 by @renovate[bot] in [#678](https://github.com/nicholas-fedor/go-remove/pull/678)
+- Update nicholas-fedor/govulncheck-action action to v1.1.1 by @renovate[bot] in [#677](https://github.com/nicholas-fedor/go-remove/pull/677)
 - Update module github.com/klauspost/compress to v1.20.3 by @renovate[bot] in [#675](https://github.com/nicholas-fedor/go-remove/pull/675)
 - Update module golang.org/x/term to v0.47.0 by @renovate[bot] in [#673](https://github.com/nicholas-fedor/go-remove/pull/673)
 - Update module golang.org/x/sys to v0.49.0 by @renovate[bot] in [#671](https://github.com/nicholas-fedor/go-remove/pull/671)
