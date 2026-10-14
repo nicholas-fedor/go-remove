@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Chores
 
+- Update module github.com/stretchr/objx to v0.8.0 by @renovate[bot] in [#682](https://github.com/nicholas-fedor/go-remove/pull/682)
 - Update module github.com/stretchr/objx to v0.7.0 by @renovate[bot] in [#680](https://github.com/nicholas-fedor/go-remove/pull/680)
 - Update goreleaser/goreleaser-action action to v7.3.0 by @renovate[bot] in [#678](https://github.com/nicholas-fedor/go-remove/pull/678)
 - Update nicholas-fedor/govulncheck-action action to v1.1.1 by @renovate[bot] in [#677](https://github.com/nicholas-fedor/go-remove/pull/677)
