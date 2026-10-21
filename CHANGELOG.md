@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Chores
 
+- Update github/codeql-action digest to 9b32540 by @renovate[bot] in [#689](https://github.com/nicholas-fedor/go-remove/pull/689)
+- Update nicholas-fedor/govulncheck-action action to v1.1.2 by @renovate[bot] in [#690](https://github.com/nicholas-fedor/go-remove/pull/690)
 - Update step-security/harden-runner action to v2.22.2 by @renovate[bot] in [#687](https://github.com/nicholas-fedor/go-remove/pull/687)
 - Update go module directive to v1.27.3 by @renovate[bot] in [#686](https://github.com/nicholas-fedor/go-remove/pull/686)
 - Update github/codeql-action digest to 6f2ac81 by @renovate[bot] in [#684](https://github.com/nicholas-fedor/go-remove/pull/684)
