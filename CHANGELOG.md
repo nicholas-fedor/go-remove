@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Chores
 
+- Update step-security/harden-runner action to v2.22.3 by @renovate[bot] in [#695](https://github.com/nicholas-fedor/go-remove/pull/695)
+
+## [0.4.1] - 2026-10-23
+
+### Chores
+
 - Update securego/gosec action to v2.30.0 by @renovate[bot] in [#693](https://github.com/nicholas-fedor/go-remove/pull/693)
 - Update github.com/charmbracelet/ultraviolet digest to a45b7c8 by @renovate[bot] in [#692](https://github.com/nicholas-fedor/go-remove/pull/692)
 - Update github/codeql-action digest to 9b32540 by @renovate[bot] in [#689](https://github.com/nicholas-fedor/go-remove/pull/689)
@@ -856,7 +862,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Compare Releases
 
-- [unreleased](https://github.com/nicholas-fedor/go-remove/compare/v0.4.0...HEAD)
+- [unreleased](https://github.com/nicholas-fedor/go-remove/compare/v0.4.1...HEAD)
+- [0.4.1](https://github.com/nicholas-fedor/go-remove/compare/v0.4.0...v0.4.1)
 - [0.4.0](https://github.com/nicholas-fedor/go-remove/compare/v0.3.4...v0.4.0)
 - [0.3.4](https://github.com/nicholas-fedor/go-remove/compare/v0.3.3...v0.3.4)
 - [0.3.3](https://github.com/nicholas-fedor/go-remove/compare/v0.3.2...v0.3.3)
