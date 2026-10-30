@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Chores
 
+- Update module github.com/xo/terminfo to v1.3.0 by @renovate[bot] in [#699](https://github.com/nicholas-fedor/go-remove/pull/699)
 - Update module charm.land/bubbletea/v2 to v2.1.1 by @renovate[bot] in [#697](https://github.com/nicholas-fedor/go-remove/pull/697)
 - Update step-security/harden-runner action to v2.22.3 by @renovate[bot] in [#695](https://github.com/nicholas-fedor/go-remove/pull/695)
 
