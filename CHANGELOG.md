@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Chores
 
+- Update sigstore/cosign-installer action to v4.1.3 by @renovate[bot] in [#706](https://github.com/nicholas-fedor/go-remove/pull/706)
+- Update github/codeql-action digest to 33d7b85 by @renovate[bot] in [#705](https://github.com/nicholas-fedor/go-remove/pull/705)
 - Update github/codeql-action digest to 1fc58d0 by @renovate[bot] in [#703](https://github.com/nicholas-fedor/go-remove/pull/703)
 - Update module go.yaml.in/yaml/v3 to v3.0.6 by @renovate[bot] in [#701](https://github.com/nicholas-fedor/go-remove/pull/701)
 - Update module github.com/xo/terminfo to v1.3.0 by @renovate[bot] in [#699](https://github.com/nicholas-fedor/go-remove/pull/699)
