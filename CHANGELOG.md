@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Chores
 
+- Update peter-evans/create-pull-request action to v8.1.2 by @renovate[bot] in [#720](https://github.com/nicholas-fedor/go-remove/pull/720)
+- Update module github.com/klauspost/compress to v1.20.4 by @renovate[bot] in [#719](https://github.com/nicholas-fedor/go-remove/pull/719)
 - Update step-security/harden-runner action to v2.22.4 by @renovate[bot] in [#717](https://github.com/nicholas-fedor/go-remove/pull/717)
 - Update module github.com/spf13/pflag to v1.1.0 by @renovate[bot] in [#715](https://github.com/nicholas-fedor/go-remove/pull/715)
 - Update module go.yaml.in/yaml/v3 to v3.0.6 by @renovate[bot] in [#712](https://github.com/nicholas-fedor/go-remove/pull/712)
