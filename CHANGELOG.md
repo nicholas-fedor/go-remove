@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Chores
 
+- Update module golang.org/x/sys to v0.50.0 by @renovate[bot] in [#725](https://github.com/nicholas-fedor/go-remove/pull/725)
 - Update module golang.org/x/sync to v0.25.0 by @renovate[bot] in [#722](https://github.com/nicholas-fedor/go-remove/pull/722)
 - Update module charm.land/lipgloss/v2 to v2.1.0 by @renovate[bot] in [#723](https://github.com/nicholas-fedor/go-remove/pull/723)
 - Update peter-evans/create-pull-request action to v8.1.2 by @renovate[bot] in [#720](https://github.com/nicholas-fedor/go-remove/pull/720)
