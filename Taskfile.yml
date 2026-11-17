@@ -1,0 +1,239 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+
+version: "3"
+
+silent: true
+
+# LDFLAGS is shared by the build and install tasks so both stamp the same
+# version metadata as the GoReleaser build. VERSION, COMMIT_SHA, and BUILD_TIME
+# are dynamic, so every invocation reads fresh values.
+vars:
+  MODULE: github.com/nicholas-fedor/go-remove
+  VERSION:
+    sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+  COMMIT_SHA:
+    sh: git rev-parse HEAD 2>/dev/null || echo unknown
+  BUILD_TIME:
+    sh: date -u +%Y-%m-%dT%H:%M:%SZ
+  LDFLAGS: >-
+    -s -w
+    -X '{{.MODULE}}/internal/version.Version={{.VERSION}}'
+    -X '{{.MODULE}}/internal/version.CommitSHA={{.COMMIT_SHA}}'
+    -X '{{.MODULE}}/internal/version.BuildTime={{.BUILD_TIME}}'
+  PKGS:
+    sh: go list ./... | grep -v /mocks$ | tr '\n' ' '
+
+tasks:
+  default:
+    desc: "Show available tasks"
+    cmds:
+      - task --list-all
+
+  build:
+    desc: "Build a static binary to ./bin/go-remove with version info injected"
+    env:
+      CGO_ENABLED: "0"
+    cmds:
+      - go build -trimpath -ldflags "{{.LDFLAGS}}" -o bin/go-remove .
+
+  install:
+    desc: "Install a static binary to $GOBIN (or $GOPATH/bin) with version info injected"
+    env:
+      CGO_ENABLED: "0"
+    cmds:
+      - go install -trimpath -ldflags "{{.LDFLAGS}}" .
+
+  run:
+    desc: "Build and run go-remove, passing arguments after --"
+    interactive: true
+    cmds:
+      - task: build
+      - ./bin/go-remove {{.CLI_ARGS}}
+
+  fmt:
+    desc: "Format code with golangci-lint fmt"
+    cmds:
+      - golangci-lint fmt --config build/golangci-lint/golangci.yaml ./...
+
+  vet:
+    desc: "Run go vet"
+    cmds:
+      - go vet ./...
+
+  modernize:
+    desc: "Fail when go fix modernizers would change the code. FIX=true applies them"
+    # Run after every Go toolchain upgrade to adopt the new version's idioms.
+    cmds:
+      - |
+        if [ "{{.FIX | default "false"}}" = "true" ]; then
+          go fix ./...
+        else
+          diff=$(go fix -diff ./...)
+          if [ -n "$diff" ]; then
+            printf '%s\n' "$diff"
+            echo "modernize: run 'task modernize FIX=true' to apply" >&2
+            exit 1
+          fi
+        fi
+
+  test:
+    desc: "Run tests with race detection and a coverage gate"
+    vars:
+      COVERAGE_MIN: "80"
+    env:
+      CGO_ENABLED: "1"
+    cmds:
+      - go test -race -count=1 -timeout 2m -coverprofile=coverage.out {{.PKGS}}
+      - go tool cover -func=coverage.out | tail -1
+      - |
+        go tool cover -func=coverage.out \
+          | awk -v min={{.COVERAGE_MIN}} '/^total:/ { gsub(/%/, "", $3);
+              if ($3 + 0 < min + 0) {
+                printf "coverage %.1f%% is below the %s%% gate\n", $3, min
+                exit 1
+              }
+              printf "coverage %.1f%% meets the %s%% gate\n", $3, min }'
+
+  coverage:html:
+    desc: "Render the coverage profile from the last test run to coverage.html"
+    preconditions:
+      - sh: test -f coverage.out
+        msg: Run task test first to write coverage.out
+    cmds:
+      - go tool cover -html=coverage.out -o coverage.html
+      - echo "Coverage report written to coverage.html"
+
+  lint:
+    desc: "Run golangci-lint"
+    cmds:
+      - golangci-lint run --config build/golangci-lint/golangci.yaml ./...
+
+  bench:
+    desc: "Run benchmarks"
+    cmds:
+      - go test -bench=. -benchmem -run='^$' {{.PKGS}}
+
+  fuzz:
+    desc: "Run fuzz targets for 30s each, or FUZZTIME=<duration> to override"
+    # go test fuzzes one target in one package per run, so the loop lists each
+    # package's fuzz targets and runs them one at a time, anchored so that one
+    # name cannot match another. set -eu aborts on the first failure.
+    # FUZZTIME has no vars entry: a declared var would shadow the command line.
+    cmds:
+      - |
+        set -eu
+        for pkg in {{.PKGS}}; do
+          for target in $(go test -list '^Fuzz' "$pkg" | grep '^Fuzz' || true); do
+            echo "fuzzing $pkg $target"
+            go test -run='^$' -fuzz="^${target}\$" -fuzztime={{.FUZZTIME | default "30s"}} "$pkg"
+          done
+        done
+
+  mocks:
+    desc: "Generate mocks with mockery"
+    cmds:
+      - mockery --config=build/mockery/mockery.yaml
+
+  vuln:
+    desc: "Report known vulnerabilities in the dependency graph"
+    cmds:
+      - govulncheck ./...
+
+  deps:
+    desc: "Download and verify Go modules"
+    cmds:
+      - go mod download
+      - go mod verify
+
+  tidy:
+    desc: "Tidy Go modules"
+    cmds:
+      - go mod tidy
+
+  changelog:
+    desc: "Regenerate CHANGELOG.md from the commit history with git-cliff"
+    cmds:
+      - git cliff --output CHANGELOG.md
+
+  check:
+    desc: "Run fmt, vet, modernize, test, lint, then vuln"
+    cmds:
+      - task: fmt
+      - task: vet
+      - task: modernize
+      - task: test
+      - task: lint
+      - task: vuln
+
+  release:
+    desc: "Publish a release from the current tag with GoReleaser"
+    cmds:
+      - goreleaser release --clean --config build/goreleaser/goreleaser.yaml
+
+  release:snapshot:
+    desc: "Build every target and package locally without signing or publishing"
+    cmds:
+      - goreleaser release --snapshot --clean --skip=sign --config build/goreleaser/goreleaser.yaml
+
+  tag:bump-major:
+    desc: "Tag the next major release on main, vX.0.0, and push it to origin"
+    cmds:
+      - task: tag:release
+        vars: { PART: major }
+
+  tag:bump-minor:
+    desc: "Tag the next minor release on main, vX.Y.0, and push it to origin"
+    cmds:
+      - task: tag:release
+        vars: { PART: minor }
+
+  tag:bump-patch:
+    desc: "Tag the next patch release on main, vX.Y.Z, and push it to origin"
+    cmds:
+      - task: tag:release
+        vars: { PART: patch }
+
+  tag:release:
+    internal: true
+    requires:
+      vars:
+        - name: PART
+          enum: [major, minor, patch]
+    vars:
+      RELEASE_TAG: '^v[0-9]+\.[0-9]+\.[0-9]+$'
+      # The latest release comes from the tags on origin, so a local tag that
+      # was never pushed cannot shift the next version. The fetch updates
+      # origin/main and the local tags for the preconditions below.
+      LATEST:
+        sh: |
+          git fetch --quiet --tags origin main
+          tags=$(git ls-remote --tags --refs origin 'refs/tags/v*')
+          printf '%s\n' "$tags" | sed 's|^.*refs/tags/||' | grep -E '{{.RELEASE_TAG}}' | sort -V | tail -n 1
+      NEXT:
+        sh: |
+          echo "{{.LATEST | default "v0.0.0"}}" | awk -F. -v part={{.PART}} '{
+            major = substr($1, 2); minor = $2; patch = $3
+            if (part == "major") { major++; minor = 0; patch = 0 }
+            if (part == "minor") { minor++; patch = 0 }
+            if (part == "patch") { patch++ }
+            printf "v%d.%d.%d\n", major, minor, patch }'
+    preconditions:
+      - sh: '[ "$(git branch --show-current)" = main ]'
+        msg: Releases are tagged on main
+      - sh: '[ -z "$(git status --porcelain)" ]'
+        msg: Commit or stash the changes in the working tree first
+      - sh: '[ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ]'
+        msg: main must match origin/main, so pull or push first
+      - sh: '[ -z "$(git tag --points-at HEAD | grep -E "{{.RELEASE_TAG}}")" ]'
+        msg: HEAD already has a release tag
+    prompt: Tag {{.NEXT}} after {{.LATEST | default "no release"}} and push it to origin?
+    # -s signs the annotated tag, so every release tag is signed whatever the
+    # local tag.gpgSign setting is.
+    cmds:
+      - git tag -s {{.NEXT}} -m "Release {{.NEXT}}"
+      - git push origin {{.NEXT}}
+
+  clean:
+    desc: "Remove build artifacts and coverage files"
+    cmds:
+      - rm -rf bin/ dist/ coverage.out coverage.html

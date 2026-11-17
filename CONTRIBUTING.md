@@ -48,7 +48,8 @@ Before you begin, ensure you have the following tools installed:
 | GPG           | Latest          | Commit signing (required)   |
 | golangci-lint | Latest          | Linting and static analysis |
 | mockery       | Latest          | Mock generation             |
-| make          | Latest          | Build automation            |
+| govulncheck   | Latest          | Vulnerability scanning      |
+| Task          | Latest          | Build automation            |
 
 ### Setup Steps
 
@@ -72,13 +73,13 @@ Before you begin, ensure you have the following tools installed:
 4. **Install dependencies**
 
    ```bash
-   make deps
+   task deps
    ```
 
 5. **Verify your setup**
 
    ```bash
-   make verify
+   task check
    ```
 
 ---
@@ -235,25 +236,27 @@ Comprehensive testing is **MANDATORY**. All tests must pass before submission.
 
 ### Coverage Requirements
 
-| Scope        | Minimum Coverage |
-|--------------|------------------|
-| Project      | 50%              |
-| PR Changes   | 70%              |
-| New Features | 80%              |
+| Scope                 | Minimum Coverage | Enforced By          |
+|-----------------------|------------------|----------------------|
+| Project               | 80%              | `task test`          |
+| Changed lines in a PR | 80%              | Codecov patch status |
 
 **Note**: Mock files are excluded from coverage calculations.
 
 ### Test Commands
 
 ```bash
-# Run all tests with race detection
-make test
+# Run all tests with race detection and the coverage gate
+task test
 
-# Generate coverage report
-make coverage
+# Render the last coverage profile to coverage.html
+task coverage:html
 
 # Run benchmarks
-make benchmark
+task bench
+
+# Run each fuzz target for 30s (override with FUZZTIME=<duration>)
+task fuzz
 ```
 
 ---
@@ -266,32 +269,33 @@ Code must pass all linting checks before submission.
 
 Run these commands before submitting a PR:
 
-1. **Lint check** (MUST pass without `--fix` flag):
+1. **Lint check** (MUST report 0 issues):
 
    ```bash
-   make lint
+   task lint
    ```
 
 2. **Vet check** (additional static analysis):
 
    ```bash
-   make vet
+   task vet
    ```
 
-3. **Run all tests** (with race detection):
+3. **Run all tests** (with race detection and the coverage gate):
 
    ```bash
-   make test
+   task test
    ```
 
-4. **Verify coverage**:
+4. **Check for vulnerabilities**:
 
    ```bash
-   make coverage
+   task vuln
    ```
 
 ### Important Notes
 
+- `task lint` applies auto-fixes because the config sets `issues.fix: true`. Review and commit what it changes.
 - Any use of the `nolint` directive should include a corresponding comment.
 - Updates to the Golangci-lint configuration file (`build/golangci-lint/golangci.yaml`) are permitted on an as-needed basis to address issues, such as reducing false positives or increasing compliance with modern Go best practices.
 
@@ -365,14 +369,13 @@ Description of the solution implemented
 4. **Generate mocks** (if interfaces changed):
 
    ```bash
-   make mocks
+   task mocks
    ```
 
 5. **Run validation:**
 
    ```bash
-   make check
-   make test
+   task check
    ```
 
 6. **Commit with signing:**
@@ -458,7 +461,7 @@ When you modify interfaces, you must regenerate mocks.
 ### Regenerating Mocks
 
 ```bash
-make mocks
+task mocks
 ```
 
 ### Important Notes
@@ -472,6 +475,10 @@ make mocks
 ## Release Process
 
 Releases are handled by project maintainers using GoReleaser.
+
+### Tagging a Release
+
+Tag a release with `task tag:bump-patch`, `task tag:bump-minor`, or `task tag:bump-major`. The task fetches origin first and computes the next version from the release tags on origin. It refuses unless HEAD is a clean `main` that matches `origin/main` and has no release tag. It asks for confirmation and then pushes a signed annotated `vX.Y.Z` tag, which starts the production release workflow.
 
 ### Supported Platforms
 
