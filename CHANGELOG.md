@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Chores
 
+- Port the Makefile to a Taskfile by @nicholas-fedor in [#736](https://github.com/nicholas-fedor/go-remove/pull/736)
 - Update actions/setup-go action to v7.1.0 by @renovate[bot] in [#734](https://github.com/nicholas-fedor/go-remove/pull/734)
 - Update module charm.land/lipgloss/v2 to v2.1.1 by @renovate[bot] in [#732](https://github.com/nicholas-fedor/go-remove/pull/732)
 - Update go module directive to v1.27.4 by @renovate[bot] in [#729](https://github.com/nicholas-fedor/go-remove/pull/729)
