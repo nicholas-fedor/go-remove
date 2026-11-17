@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Tests
+
+- Match pflag v1.1.0 boolean flag help format by @nicholas-fedor in [#738](https://github.com/nicholas-fedor/go-remove/pull/738)
+
 ### Chores
 
 - Port the Makefile to a Taskfile by @nicholas-fedor in [#736](https://github.com/nicholas-fedor/go-remove/pull/736)
