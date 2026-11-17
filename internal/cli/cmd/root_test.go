@@ -111,9 +111,9 @@ func TestNewRoot_Help(t *testing.T) {
 		"undo        Restore the most recently removed binary",
 		"restore     Pick a removed binary to restore from history",
 		"version     Print version information",
-		"--goroot             Target GOROOT/bin instead of GOBIN or GOPATH/bin",
-		"-l, --log-level string   Set log level (debug, info, warn, error) (default \"info\")",
-		"-v, --verbose            Enable verbose output",
+		"--goroot[=true|false]    Target GOROOT/bin instead of GOBIN or GOPATH/bin",
+		"-l, --log-level string       Set log level (debug, info, warn, error) (default \"info\")",
+		"-v, --verbose[=true|false]   Enable verbose output",
 	} {
 		assert.Contains(t, help, want)
 	}
