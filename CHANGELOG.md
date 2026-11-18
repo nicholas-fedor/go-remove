@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Chores
 
+- Update module charm.land/bubbletea/v2 to v2.1.2 by @renovate[bot] in [#742](https://github.com/nicholas-fedor/go-remove/pull/742)
 - Update step-security/harden-runner action to v2.23.0 by @renovate[bot] in [#740](https://github.com/nicholas-fedor/go-remove/pull/740)
 
 ## [0.4.2] - 2026-11-17
