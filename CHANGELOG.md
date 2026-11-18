@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Chores
+
+- Update step-security/harden-runner action to v2.23.0 by @renovate[bot] in [#740](https://github.com/nicholas-fedor/go-remove/pull/740)
+
+## [0.4.2] - 2026-11-17
+
 ### Tests
 
 - Match pflag v1.1.0 boolean flag help format by @nicholas-fedor in [#738](https://github.com/nicholas-fedor/go-remove/pull/738)
@@ -888,7 +894,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Compare Releases
 
-- [unreleased](https://github.com/nicholas-fedor/go-remove/compare/v0.4.1...HEAD)
+- [unreleased](https://github.com/nicholas-fedor/go-remove/compare/v0.4.2...HEAD)
+- [0.4.2](https://github.com/nicholas-fedor/go-remove/compare/v0.4.1...v0.4.2)
 - [0.4.1](https://github.com/nicholas-fedor/go-remove/compare/v0.4.0...v0.4.1)
 - [0.4.0](https://github.com/nicholas-fedor/go-remove/compare/v0.3.4...v0.4.0)
 - [0.3.4](https://github.com/nicholas-fedor/go-remove/compare/v0.3.3...v0.3.4)
