@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Chores
 
+- Update module go.opentelemetry.io/auto/sdk to v1.2.2 by @renovate[bot] in [#753](https://github.com/nicholas-fedor/go-remove/pull/753)
+- Update module github.com/klauspost/compress to v1.20.5 by @renovate[bot] in [#752](https://github.com/nicholas-fedor/go-remove/pull/752)
 - Update github/codeql-action digest to 1bd86f2 by @renovate[bot] in [#750](https://github.com/nicholas-fedor/go-remove/pull/750)
 - Update github.com/charmbracelet/ultraviolet digest to 8ecbcf0 by @renovate[bot] in [#748](https://github.com/nicholas-fedor/go-remove/pull/748)
 - Update github.com/charmbracelet/ultraviolet digest to f0c8309 by @renovate[bot] in [#746](https://github.com/nicholas-fedor/go-remove/pull/746)
