@@ -3,7 +3,7 @@ module github.com/nicholas-fedor/go-remove
 go 1.27.4
 
 require (
-	charm.land/bubbletea/v2 v2.1.2
+	charm.land/bubbletea/v2 v2.1.3
 	charm.land/lipgloss/v2 v2.1.1
 	github.com/dgraph-io/badger/v4 v4.9.6
 	github.com/rivo/uniseg v0.4.7
