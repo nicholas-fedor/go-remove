@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Chores
 
+- Update module charm.land/bubbletea/v2 to v2.1.3 by @renovate[bot] in [#761](https://github.com/nicholas-fedor/go-remove/pull/761)
+- Update github.com/charmbracelet/ultraviolet digest to 8ed4998 by @renovate[bot] in [#760](https://github.com/nicholas-fedor/go-remove/pull/760)
 - Update sigstore/cosign-installer action to v4.1.4 by @renovate[bot] in [#758](https://github.com/nicholas-fedor/go-remove/pull/758)
 - Update github/codeql-action digest to 915412f by @renovate[bot] in [#757](https://github.com/nicholas-fedor/go-remove/pull/757)
 - Update anchore/sbom-action action to v0.24.4 by @renovate[bot] in [#755](https://github.com/nicholas-fedor/go-remove/pull/755)
