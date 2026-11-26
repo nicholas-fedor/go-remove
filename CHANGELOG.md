@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Chores
 
+- Update module charm.land/bubbletea/v2 to v2.2.0 by @renovate[bot] in [#765](https://github.com/nicholas-fedor/go-remove/pull/765)
 - Update module github.com/charmbracelet/x/ansi to v0.12.0 by @renovate[bot] in [#763](https://github.com/nicholas-fedor/go-remove/pull/763)
 - Update module charm.land/bubbletea/v2 to v2.1.3 by @renovate[bot] in [#761](https://github.com/nicholas-fedor/go-remove/pull/761)
 - Update github.com/charmbracelet/ultraviolet digest to 8ed4998 by @renovate[bot] in [#760](https://github.com/nicholas-fedor/go-remove/pull/760)
